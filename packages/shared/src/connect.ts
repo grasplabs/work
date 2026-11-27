@@ -3184,9 +3184,9 @@ export const connectErrors = defineErrorFamily({
   "connect.agent_app_off":
     "This agent doesn't have this app. Whoever manages it can add the app on its page.",
   "connect.class_off":
-    "Your company hasn't turned this kind of action on for you, so it wasn't done. An admin turns it on in Grasp, on the company's first agent's page, under What he may do: a change in one of the company's apps (a CRM, a register, a shared mailbox) is Change the company's; a message to other people is Reach others; reading the company's mailboxes, calendars and files is Read the company's. A turn nobody was there for never reaches other people.",
+    "Your company hasn't turned this kind of action on for you, so it wasn't done. An admin turns it on in Grasp, on the company's first agent's page under What he may do (for another agent, on that agent's page): a change in a shared mailbox, a register or an app added by its URL is Change the company's; a message to other people is Reach others; reading the company's mailboxes, calendars and files is Read the company's. A turn nobody was there for never reaches other people.",
   "connect.class_unknown":
-    "It isn't known what kind of action this is, so it wasn't done.",
+    "It isn't known what kind of action this is, so it wasn't done: a tool of an app its admin didn't allow, or set to Never (each tool's Never, Read or Write, on the app's page in Grasp under Connectors), or one Grasp doesn't know.",
   "connect.class_changed":
     "The app now describes this action as another kind than when it was checked, so it wasn't done. Try again.",
   "connect.tool_blocked":
@@ -3194,7 +3194,7 @@ export const connectErrors = defineErrorFamily({
   "connect.never":
     "Grasp never deletes, shares, forwards, sets rules or settings, or pays, whatever is allowed, so it wasn't done.",
   "connect.app_not_pointed":
-    "Your company hasn't pointed Grasp at this app for you, so it wasn't read. An admin chooses whose chats read in it in Grasp, on the app's page under Connectors, in its Access card: Whose chats read in it.",
+    "Your company hasn't pointed Grasp at this app for you, so it wasn't read. An admin chooses whose chats read in it in Grasp, on the app's page under Connectors, in its Access card.",
   "connect.resource_not_pointed":
     "Your company pointed Grasp at other parts of this app for you, not this one, so it wasn't read.",
   "connect.http_refused":

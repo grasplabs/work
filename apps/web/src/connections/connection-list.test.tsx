@@ -203,13 +203,6 @@ const admin: Identity = { ...person, role: "admin" };
 /** A shared connection to Notes, connected by an admin. */
 const shared = connection({ scope: "shared", ownerUserId: null });
 
-/**
- * A shared connection no chat is pointed at (`ChatReads`): its card
- * reads the audiences and the teams alone.
- */
-const sharedSuite = (id = "c1") =>
-  connection({ id, source: "native", scope: "shared", ownerUserId: null });
-
 /** What the page asked of core, by method, and its arguments. */
 type Asked = [string, ...unknown[]][];
 
@@ -222,8 +215,6 @@ type Asked = [string, ...unknown[]][];
 interface Held {
   audience: { kind: string; teamId?: string };
   erasing: boolean;
-  /** Stephen's pointer at it, as a company app: for whom, within what. */
-  pointer?: { audience: unknown; resources: string[] };
   /** Core refuses to list the audiences, as when it is out of reach. */
   refusingReads?: boolean;
 }
@@ -321,27 +312,6 @@ const asAdmin = async (
       },
       // Notes syncs no picked places, as core answers for it.
       syncPlaces: async () => await Promise.resolve(null),
-      appPointers: async () =>
-        await Promise.resolve(
-          held.pointer === undefined
-            ? []
-            : [
-                {
-                  connectionId: shown.id,
-                  ...held.pointer,
-                  changedBy: "u2",
-                  changedAt: "2026-11-17T08:00:00.000Z",
-                },
-              ]
-        ),
-      pointApp: async (request: { audience: unknown; resources: string[] }) => {
-        asked.push(["pointApp", request]);
-        held.pointer = {
-          audience: request.audience,
-          resources: request.resources,
-        };
-        await Promise.resolve();
-      },
       // An erase takes the audience away and is under way until the
       // clock ends it.
       eraseBrainReads: async (...given: unknown[]) => {
@@ -637,8 +607,11 @@ describe("a shared connection's audience, for an admin", () => {
 
   it("reads the audiences and the teams once for all the shared connections shown, and once again after a change", async () => {
     const reads: Reads = { audiences: 0, teams: 0 };
-    await asAdmin(sharedSuite(), { kind: "everyone" }, undefined, {
-      others: [sharedSuite("c2"), sharedSuite("c3")],
+    await asAdmin(shared, { kind: "everyone" }, undefined, {
+      others: [
+        connection({ id: "c2", scope: "shared", ownerUserId: null }),
+        connection({ id: "c3", scope: "shared", ownerUserId: null }),
+      ],
       reads,
     });
     const opened = { ...reads };
@@ -740,7 +713,7 @@ describe("a shared connection's audience, for an admin", () => {
   it("keeps the card through a refused re-read, saying why, and is whole again on the next one, also when the first read was refused", async () => {
     const held: Held = { audience: { kind: "everyone" }, erasing: false };
     const reads: Reads = { audiences: 0, teams: 0 };
-    await asAdmin(sharedSuite(), undefined, held, { reads });
+    await asAdmin(shared, undefined, held, { reads });
     held.refusingReads = true;
     await returnToWindow();
     const refused = {
@@ -765,7 +738,7 @@ describe("a shared connection's audience, for an admin", () => {
       erasing: false,
       refusingReads: true,
     };
-    await asAdmin(sharedSuite(), undefined, firstRefused);
+    await asAdmin(shared, undefined, firstRefused);
     const opened = audienceSelect();
     firstRefused.refusingReads = false;
     await returnToWindow();
@@ -811,83 +784,5 @@ describe("a shared connection's audience, for an admin", () => {
     const member = audienceSelect();
 
     expect({ own, member }).toStrictEqual({ own: null, member: null });
-  });
-});
-
-/** The card's choice of whose chats read in it, beside who may use it. */
-const readsSelect = () =>
-  document.querySelectorAll<HTMLElement>('[role="combobox"]')[1];
-
-describe("whose chats read in a shared Composio connection, for an admin", () => {
-  afterEach(() => {
-    act(() => {
-      root?.unmount();
-    });
-    root = undefined;
-    document.body.replaceChildren();
-  });
-
-  const chooseReads = async (name: string): Promise<void> => {
-    await act(async () => {
-      readsSelect()?.click();
-      await Promise.resolve();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    const option = [
-      ...document.querySelectorAll<HTMLElement>('[role="option"]'),
-    ].find((each) => each.textContent.trim() === name);
-    await act(async () => {
-      option?.click();
-      await Promise.resolve();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-  };
-
-  it("is offered beside who may use it, nobody until chosen, and points the chats of whom the admin chooses at all of it", async () => {
-    const asked = await asAdmin(shared);
-    const offered = document.body.textContent.includes(
-      "Whose chats read in it"
-    );
-    await chooseReads("Everyone in the company");
-
-    expect({ offered, asked }).toStrictEqual({
-      offered: true,
-      asked: [
-        [
-          "pointApp",
-          { connectionId: "c1", resources: [], audience: { who: "everyone" } },
-        ],
-      ],
-    });
-  });
-
-  it("keeps the parts a pointer is held to when the admin changes whose chats read there", async () => {
-    const asked = await asAdmin(shared, undefined, {
-      audience: { kind: "everyone" },
-      erasing: false,
-      pointer: { audience: { who: "nobody" }, resources: ["list-1"] },
-    });
-    const said = document.body.textContent.includes(
-      "within the parts it was pointed at"
-    );
-    await chooseReads("Team Sales");
-
-    expect({ said, asked }).toStrictEqual({
-      said: true,
-      asked: [
-        [
-          "pointApp",
-          {
-            connectionId: "c1",
-            resources: ["list-1"],
-            audience: { who: "teams", teams: ["t1"] },
-          },
-        ],
-      ],
-    });
   });
 });

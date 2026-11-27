@@ -600,7 +600,7 @@ describe("a chat's tool search", setUpTime, () => {
     });
   });
 
-  it("shows and counts only the tools whose class is on for the person", async () => {
+  it("shows and counts only the tools whose class is on for the person, and a toolkit's as its admin allowed them", async () => {
     const [person, admin] = await Promise.all([
       signedInApi(idp, "user"),
       signedInApi(idp, "admin"),
@@ -616,22 +616,20 @@ describe("a chat's tool search", setUpTime, () => {
         `export default async (self, env) => {
           const listed = (await env.connections.list()).filter(({ name }) => name === ${JSON.stringify(mail.id)});
           const [found] = await env.connections.search({ queries: ["send mail", "search mail"] });
-          const declared = await env.connections.describe(${JSON.stringify(mail.id)}, ["mail.send", "mail.search"]);
           const native = await env.connections.describe(${JSON.stringify(outlook.id)}, ["mail.send"]);
           return {
             native,
             listed,
-            found: (await env.connections.search({ queries: ["send mail"], connection: ${JSON.stringify(mail.id)} }))[0].matches.map(({ action }) => action),
             sends: [...found.matches, ...found.related].filter(({ action }) => action === "mail.send").length,
-            declared: declared.split("\\n\\n").map((part) => part.split("\\n")[0]),
           };
         };`
       ),
       says("I can only search.")
     );
     // Reaching others is off for everyone, and so is changing the
-    // company's things: sending mail, through the native suite or a
-    // toolkit's tool allowed as a change, is off too.
+    // company's things: sending mail through the native suite is off. A
+    // toolkit's tool allowed as a change follows its admin's list, not
+    // the switches (composio-reach.test.ts): there, and held when called.
     await admin.api.connections.setToolClass("reach-others", { who: "nobody" });
     await admin.api.connections.setToolClass("change-company", {
       who: "nobody",
@@ -647,15 +645,10 @@ describe("a chat's tool search", setUpTime, () => {
           name: mail.id,
           account: null,
           resource: null,
-          tools: { "read-company": 1 },
+          tools: { "read-company": 1, "change-company": 1 },
         },
       ],
-      found: ["mail.search"],
-      sends: 0,
-      declared: [
-        `// ${JSON.stringify(mail.id)} has no action "mail.send" this chat may call or ask for.`,
-        "/**",
-      ],
+      sends: 1,
     });
   });
 });

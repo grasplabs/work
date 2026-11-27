@@ -398,6 +398,14 @@ export interface ClassedCall {
   toolClass?: ToolClass;
 }
 
+/** The admin's pointer at the company app `connectionId`, if there is one. */
+const appPointerRow = async (env: Env, connectionId: string) =>
+  await drizzle(env.DB)
+    .select()
+    .from(appPointers)
+    .where(eq(appPointers.connectionId, connectionId))
+    .get();
+
 /**
  * The pointer at the company app `connectionId` that takes in the person
  * `userId` (app-pointers.ts), if there is one: the resources it names.
@@ -405,16 +413,13 @@ export interface ClassedCall {
 export const appPointerFor = async (
   env: Env,
   connectionId: string,
-  userId: string
+  userId: string,
+  row?: typeof appPointers.$inferSelect
 ): Promise<{ resources: string[] } | undefined> => {
-  const row = await drizzle(env.DB)
-    .select()
-    .from(appPointers)
-    .where(eq(appPointers.connectionId, connectionId))
-    .get();
-  const audience = row === undefined ? undefined : audienceOf(row);
+  const pointer = row ?? (await appPointerRow(env, connectionId));
+  const audience = pointer === undefined ? undefined : audienceOf(pointer);
   if (
-    row === undefined ||
+    pointer === undefined ||
     audience === undefined ||
     !(await takesIn(env, audience, userId))
   ) {
@@ -422,7 +427,7 @@ export const appPointerFor = async (
   }
   let resources: unknown;
   try {
-    resources = JSON.parse(row.resources);
+    resources = JSON.parse(pointer.resources);
   } catch {
     // Unreadable: no pointer, never more than the admin chose.
     return undefined;
@@ -447,13 +452,71 @@ const requireOfferedUnattended = (
 };
 
 /**
- * Refuses the chat's agent's call of a company app's tool (a Composio
- * one) whose class is off for its person: by the class connect takes the
- * tool to be (`ConnectionOwner.toolClasses`), `connect.class_unknown` for
- * one it doesn't offer. Reading there is Read company, which an admin
- * turns on app by app, by pointing the agent at it (`appPointerFor`):
- * `connect.app_not_pointed` without a pointer for its person. The rest
- * follow the company's classes.
+ * The class connect takes a company app's tool `action` to be
+ * (`ConnectionOwner.toolClasses`): `connect.class_unknown` for one it
+ * doesn't offer (not allowed, or set to Never).
+ */
+const offeredClassOf = (
+  owner: ConnectionOwner,
+  action: string
+): CompanyToolClass => {
+  const toolClass =
+    owner.toolClasses !== undefined && Object.hasOwn(owner.toolClasses, action)
+      ? owner.toolClasses[action]
+      : undefined;
+  if (toolClass === undefined) {
+    throw connectErrors.create("connect.class_unknown");
+  }
+  return toolClass;
+};
+
+/**
+ * Lets the chat's agent call a Composio app's tool for anyone the
+ * connection is open to (its audience, checked where the connection is
+ * reached: ungranted-reads.ts, `connectionGrants`), as the admin allowed
+ * the tool: a read as Read, a change as Write, which connect holds for its
+ * person to confirm. The admin's connection and tool list are the gate:
+ * neither the company's class switches nor a pointer is asked, so a
+ * connection made and allowed works for those it is open to. Bounded
+ * still by what connect offers (`offeredClassOf`), by a turn nobody was
+ * there for never reaching others, and by an agent of the company's own
+ * narrowing its classes (`requireAgentHasClass`). A pointer an admin set
+ * at the app before (app-pointers.ts) still narrows its reads, to whom
+ * and to what it names: never widened by this.
+ */
+const requireComposioToolOn = async (
+  env: Env,
+  authority: Authority,
+  owner: ConnectionOwner,
+  action: string,
+  unattended: boolean
+): Promise<ClassedCall> => {
+  const toolClass = offeredClassOf(owner, action);
+  requireOfferedUnattended(toolClass, unattended);
+  await requireAgentHasClass(env, authority, toolClass);
+  if (toolClass !== "read-company") {
+    return { toolClass };
+  }
+  const row = await appPointerRow(env, owner.id);
+  if (row === undefined) {
+    return { toolClass };
+  }
+  const pointer = await appPointerFor(env, owner.id, authority.onBehalfOf, row);
+  if (pointer === undefined) {
+    throw connectErrors.create("connect.app_not_pointed");
+  }
+  return pointer.resources.length === 0
+    ? { toolClass }
+    : { toolClass, resources: pointer.resources };
+};
+
+/**
+ * Refuses the chat's agent's call of a connector's tool (one made from a
+ * URL) whose class is off for its person: by the class connect takes the
+ * tool to be (`offeredClassOf`). Reading there is Read company, which an
+ * admin turns on app by app, by pointing the agent at it
+ * (`appPointerFor`): `connect.app_not_pointed` without a pointer for its
+ * person. The rest follow the company's classes.
  */
 const requireAppClassOn = async (
   env: Env,
@@ -462,13 +525,7 @@ const requireAppClassOn = async (
   action: string,
   unattended: boolean
 ): Promise<ClassedCall> => {
-  const toolClass =
-    owner.toolClasses !== undefined && Object.hasOwn(owner.toolClasses, action)
-      ? owner.toolClasses[action]
-      : undefined;
-  if (toolClass === undefined) {
-    throw connectErrors.create("connect.class_unknown");
-  }
+  const toolClass = offeredClassOf(owner, action);
   requireOfferedUnattended(toolClass, unattended);
   if (toolClass === "read-company") {
     await requireAgentHasClass(env, authority, toolClass);
@@ -560,7 +617,16 @@ const requireToolClassOf = async (
     authority,
     agentAppOf(owner.source, owner.provider)
   );
-  if (owner.source === "composio" || owner.source === "connector") {
+  if (owner.source === "composio") {
+    return await requireComposioToolOn(
+      env,
+      authority,
+      owner,
+      action,
+      unattended
+    );
+  }
+  if (owner.source === "connector") {
     return await requireAppClassOn(env, authority, owner, action, unattended);
   }
   const toolClass = nativeClasses.get(owner.provider)?.get(action);

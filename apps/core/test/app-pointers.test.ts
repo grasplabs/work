@@ -23,10 +23,11 @@ import {
 } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 
-// Company apps through Composio, by class (GRA-725): the chat's agent
-// reads in an app only where an admin pointed it, for its person, within
-// the resources the pointer names; its changes there follow the company's
-// classes and wait for its person's press. These start from the ways it
+// Pointers at company apps (GRA-725): an admin may point the chat's agent
+// at a company app, for some people, within the resources the pointer
+// names. A Composio app needs none (composio-reach.test.ts), but one an
+// admin set still narrows its reads; a connector made from a URL is read
+// only where one points. Its changes wait for its person's press. These start from the ways it
 // can fail: a read in an app nobody pointed it at, or by someone the
 // pointer doesn't take in; a read of another resource; a change that runs
 // without its press, or while its class is off; a pointer at a native or
@@ -197,11 +198,12 @@ describe("a company app", setUpTime, () => {
     await expect(mail.searched()).resolves.toStrictEqual(["invoice"]);
   });
 
-  it("refuses a change while its class is off for the company", async () => {
+  it("holds a change for its person's press whatever the company's class switch for changes", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "user");
     const mail = await mailApp(admin);
-    // A Composio tool allowed by name alone changes the company's things.
+    // A Composio app's tools follow what its admin allowed, not the
+    // company's switches (composio-reach.test.ts).
     await admin.api.connections.setToolClass("change-company", {
       who: "nobody",
     });
@@ -211,7 +213,7 @@ describe("a company app", setUpTime, () => {
       answer({
         invoice: message("connect.app_not_pointed"),
         salary: message("connect.app_not_pointed"),
-        send: message("connect.class_off"),
+        send: "held",
       })
     );
   });
