@@ -1,28 +1,17 @@
 /**
  * What every client should run, and which moves of a channel are allowed:
- * pure functions over the stored desired state, so the reconciler
- * (src/rollout/reconciler.ts), the actions (src/rollout/channels.ts) and
- * the pages decide alike.
+ * pure functions over the stored desired state, so the rollout pass
+ * (src/rollout/scheduler.ts, src/rollout/plan.ts), the actions
+ * (src/rollout/channels.ts) and the pages decide alike.
  *
- * The stored state is small: each channel's release, and each client's
+ * The desired state is small: each channel's release, and each client's
  * channel and optional pin. A client's target is its pin, otherwise its
- * channel's release. Nothing records a rollout: what's still to deploy is
- * whatever runs something other than its target.
+ * channel's release. What's still to deploy is whatever runs something
+ * other than its target; a channel's rollout (`rollouts`) only orders and
+ * halts it.
  */
 import "@tanstack/react-start/server-only";
 import type { Channel } from "./channel-ids.ts";
-
-/**
- * How many clients deploy at once, every channel together: they share one
- * deployer token. Cloudflare's API allows 1,200 requests per 5 minutes per
- * user, and going over blocks every call for 5 minutes. A release's deploy
- * makes about 30 calls (its script, secrets, static files, migrations and
- * reads back, src/hosting/operation.ts) over a minute or two, and a slot
- * it frees waits for the next tick (every minute), so 8 at once make at
- * most about 8 × 30 calls a minute and a half: 160 a minute, 800 in 5,
- * with room for retries and reads that wait out Cloudflare's lag.
- */
-export const parallelDeploys = 8;
 
 /** The release each channel points at; null before one was promoted to it. */
 export type ChannelReleases = Readonly<Record<Channel, string | null>>;
@@ -44,7 +33,7 @@ export interface Promotion {
  * Edge before Beta, Beta before Stable. Edge takes each new release by
  * itself, so it has none.
  */
-const before: Readonly<Record<Channel, Channel | null>> = {
+export const previousChannel: Readonly<Record<Channel, Channel | null>> = {
   edge: null,
   beta: "edge",
   stable: "beta",
@@ -74,7 +63,7 @@ export const promotionRefusal = (
       (promotion) =>
         promotion.channel === on && promotion.releaseId === releaseId
     );
-  const previous = before[channel];
+  const previous = previousChannel[channel];
   if (had(channel) || (previous !== null && had(previous))) {
     return null;
   }
@@ -96,14 +85,16 @@ export const promotableReleases = (
       promotionRefusal(channel, releaseId, current, history) === null
   );
 
-/** A client's last deploy, as the reconciler recorded it. */
+/** A client's last deploy, as the rollout pass recorded it. */
 export interface LastDeploy {
   releaseId: string;
   status: "deploying" | "done" | "failed";
   error: string | null;
+  /** The rollout it deployed for; null for one outside any rollout. */
+  rolloutId: string | null;
 }
 
-/** What the reconciler knows of one active client. */
+/** What the rollout pass knows of one active client. */
 export interface ClientFacts {
   id: string;
   channel: Channel;
@@ -127,7 +118,7 @@ export type ClientState =
  * Where `client` stands: deploying while a deploy is out; failed when its
  * last deploy of its target failed (until staff retry); up to date when it
  * runs its target with Secrets Store's shared secrets; otherwise waiting
- * for the reconciler. With no target yet, `no_release`.
+ * for the rollout pass. With no target yet, `no_release`.
  */
 export const stateOf = (
   client: ClientFacts,
@@ -151,51 +142,6 @@ export const stateOf = (
   }
   return "waiting";
 };
-
-/** What the reconciler does on one channel at one tick. */
-export interface ChannelPlan {
-  /**
-   * Whether a client following the channel (not pinned) failed its
-   * deploy of the channel's release: no new deploy starts on it until
-   * staff retry, or promote another release.
-   */
-  failed: boolean;
-  /** The clients to start deploying now, at most `parallelDeploys` with all those out. */
-  start: string[];
-}
-
-/**
- * The plan for one channel's `clients` (a page of them, or all): none
- * while it failed; otherwise the clients waiting, in the order given, as
- * many as fit beside the `deploying` ones already out (a count over every
- * channel).
- */
-export const planChannel = (
-  clients: readonly ClientFacts[],
-  releases: ChannelReleases,
-  deploying: number,
-  failed: boolean
-): ChannelPlan => {
-  if (failed) {
-    return { failed, start: [] };
-  }
-  const room = Math.max(0, parallelDeploys - deploying);
-  const start = clients
-    .filter((client) => stateOf(client, releases) === "waiting")
-    .slice(0, room)
-    .map(({ id }) => id);
-  return { failed, start };
-};
-
-/**
- * Whether `client`'s failure stops its channel: its last deploy failed on
- * the channel's release, and it follows the channel (no pin).
- */
-export const failsChannel = (
-  client: ClientFacts,
-  releases: ChannelReleases
-): boolean =>
-  client.pinnedReleaseId === null && stateOf(client, releases) === "failed";
 
 /** Shared-secret fingerprints, by Worker, then name. */
 export type SharedByWorker = Readonly<

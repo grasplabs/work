@@ -4,11 +4,11 @@ import { log } from "@grasp-os/shared/log";
  * Shared secrets as desired state, and which old ones can be revoked.
  *
  * What clients should run is what Secrets Store holds now: Deploy
- * platform copies a rotated shared secret in, and the reconciler
- * (src/rollout/reconciler.ts) deploys again every active client whose
+ * platform copies a rotated shared secret in, and the rollout pass
+ * (src/rollout/scheduler.ts) deploys again every active client whose
  * Workers were given anything else (`desiredShared`, src/rollout/desired.ts),
- * as it deploys a release, 25 at a time per channel and stopping a
- * channel at its first failure. Nothing is saved of the store: a deploy
+ * in the slots the channels' rollouts leave; a failure there never halts
+ * a rollout. Nothing is saved of the store: a deploy
  * delivers its values as they are, so one that succeeds settles the
  * client, whatever the store held before.
  *

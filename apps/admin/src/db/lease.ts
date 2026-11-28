@@ -4,7 +4,11 @@
  * invocation whether or not the last one has ended. Each lease is a row of
  * `leases`, taken with one compare-and-set statement, so of runs at once
  * one gets it, and only from no one or a holder whose lease expired: a run
- * that died without giving it back holds the work up until then.
+ * that died without giving it back holds the work up until then. Each
+ * holder says how long it holds: no longer than the longest its work runs
+ * (a cron or queue invocation's wall-clock limit is 15 minutes,
+ * developers.cloudflare.com/workers/platform/limits/), and as short as
+ * that allows, so work cut off mid-way holds the next run back little.
  */
 import "@tanstack/react-start/server-only";
 import { and, eq, lte } from "drizzle-orm";
@@ -12,21 +16,21 @@ import { and, eq, lte } from "drizzle-orm";
 import type { AdminDatabase } from "./act.ts";
 import { leases } from "./schema.ts";
 
-/**
- * How long a lease lasts: the longest a cron or queue invocation runs (its
- * wall-clock limit, developers.cloudflare.com/workers/platform/limits/),
- * so no holder outlives it.
- */
-const leaseMs = 15 * 60 * 1000;
+/** The longest any work runs: a cron or queue invocation's wall-clock limit. */
+export const invocationLeaseMs = 15 * 60 * 1000;
 
 /**
- * Runs `work` while holding lease `id`, gives it back after, and returns
- * what `work` did; undefined, at once, when another run holds it.
+ * Runs `work` while holding lease `id` for up to `leaseMs`, gives it back
+ * after, and returns what `work` did; undefined, at once, when another
+ * run holds it. `work` may call `renew` to hold it `leaseMs` longer from
+ * now: false, and nothing renewed, once it expired and another run took
+ * it, so `work` stops acting.
  */
 export const withLease = async <T>(
   db: AdminDatabase,
   id: string,
-  work: () => Promise<T>
+  leaseMs: number,
+  work: (renew: () => Promise<boolean>) => Promise<T>
 ): Promise<T | undefined> => {
   const holder = crypto.randomUUID();
   const now = new Date();
@@ -42,8 +46,16 @@ export const withLease = async <T>(
   if (taken.length === 0) {
     return undefined;
   }
+  const renew = async (): Promise<boolean> => {
+    const renewed = await db
+      .update(leases)
+      .set({ expiresAt: new Date(Date.now() + leaseMs) })
+      .where(and(eq(leases.id, id), eq(leases.holder, holder)))
+      .returning({ holder: leases.holder });
+    return renewed.length > 0;
+  };
   try {
-    return await work();
+    return await work(renew);
   } finally {
     // Only while it's still this run's.
     await db

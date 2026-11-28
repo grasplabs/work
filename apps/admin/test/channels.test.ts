@@ -1,32 +1,36 @@
 import { env } from "cloudflare:workers";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, like, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { rolloutNeedLine, rolloutNeeds } from "../src/admin/views.ts";
-import { clientGrid } from "../src/clients/grid.ts";
 import { adminDatabase } from "../src/db/act.ts";
 import {
+  alerts,
+  apiBudget,
   auditEvents,
   channels,
   clientDeploys,
   clientRuns,
   clients,
+  clientWatch,
   clientWorkers,
+  leases,
+  rollouts,
 } from "../src/db/schema.ts";
 import { PlacementError, placeAndProvision } from "../src/hosting/placement.ts";
 import type { Channel } from "../src/rollout/channel-ids.ts";
 import {
   pinClient,
   promoteRelease,
-  retryChannel,
+  resumeRollout,
   retryClient,
   setClientChannel,
+  toEdge,
 } from "../src/rollout/channels.ts";
-import { parallelDeploys } from "../src/rollout/desired.ts";
 import { RolloutError } from "../src/rollout/errors.ts";
-import { reconcile } from "../src/rollout/reconciler.ts";
+import { rolloutLimits } from "../src/rollout/plan.ts";
+import { rolloutPass } from "../src/rollout/scheduler.ts";
 import { channelReleases } from "../src/rollout/targets.ts";
-import { adminWorkflows } from "../src/workflow-runs.ts";
+import { adminWorkflow, adminWorkflows } from "../src/workflow-runs.ts";
 import type { ApiCall } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { releaseToEdge } from "./edge.ts";
@@ -42,25 +46,35 @@ import { onPi } from "./releases.ts";
 import { ended, followAdminRuns } from "./runs.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
-// Release channels and the one reconciler (src/rollout/channels.ts,
-// src/rollout/reconciler.ts): actions set the desired state, and each
-// tick deploys every client whose Workers run something else than its
-// target. How it can fail, each tried below:
+// Release channels, their rollouts and the rollout pass
+// (src/rollout/channels.ts, src/rollout/scheduler.ts): actions set the
+// desired state and start a channel's rollout, and each pass deploys
+// every client whose Workers run something else than its target, in the
+// rollout's order. How it can fail, each tried below:
 // - a new release never reaching Edge, or reaching clients beyond it;
+// - a move of a channel without its rollout, or leaving the one before
+//   live; a channel an older admin moved left without one;
 // - a promotion deploying a pinned client;
-// - a release skipping a channel;
+// - a release skipping a channel, or promoted past one where it halted;
 // - a channel set back to a release that can't read the chats its
 //   clients store;
-// - deploys going on in a channel after one failed, or never again once
-//   staff retry;
+// - a rollout going on after 3 failed, or more than one first;
+//   stopping at fewer, or on a platform fault; never going again once
+//   staff resume it, or halting again on what it was resumed past;
+// - a halt told twice, or never;
 // - a release that reaches Edge while Edge deploys, dropped;
 // - a client moved to another channel left on its old channel's release;
 // - a new client started on a release its channel doesn't have, or on
 //   none while its channel has none;
-// - two ticks at once deploying one client twice, or more than
-//   `parallelDeploys` clients between them, or across channels;
-// - a failure that lands mid-tick, missed by the rest of the tick;
-// - clients another runner has taking the channel's slots for good.
+// - two passes at once deploying one client twice, or more than slow
+//   start allows between them, or more than the fleet's slots across
+//   channels, an older admin's runs among them;
+// - a pass cut off mid-way losing what it didn't start, or starting a
+//   client twice once run again;
+// - a rollout halted or superseded mid-pass, still claimed for;
+// - an older admin's reconciler and run beside the pass: both acting at
+//   once, or its run taken over;
+// - clients another runner has taking the rollout's slots for good.
 
 const token = "test-deployer-token-channels-3b7f2c";
 const cloudflare = mockCloudflareApi(token);
@@ -133,7 +147,7 @@ const startedOf = async (clientIds: readonly string[]): Promise<number> =>
     )
   );
 
-/** Why the reconciler couldn't act on `channel` at its last tick; null when it could. */
+/** Why nothing new deploys on `channel`; null while something may. */
 const stoppedByOf = async (channel: Channel): Promise<string | null> => {
   const row = await db
     .select({ stoppedBy: channels.stoppedBy })
@@ -155,8 +169,9 @@ const deploysStarted = async (clientId: string): Promise<number> =>
 
 /**
  * The admin's runs as the test starts them, retries and sleeps going at
- * once: `tick` is the cron's reconciler, `settle` waits for every deploy
- * started so far to end, and `converge` ticks until nothing is left to do.
+ * once: `tick` is the cron's rollout pass, `settle` waits for every
+ * deploy started so far to end, and `converge` runs passes until nothing
+ * is left to do.
  */
 const followRuns = () => {
   const runs = followAdminRuns();
@@ -169,15 +184,15 @@ const followRuns = () => {
   };
   return {
     tick: async (): Promise<void> => {
-      await reconcile(env);
+      await rolloutPass(env);
     },
     settle,
     converge: async (): Promise<void> => {
-      for (let round = 0; round < 4; round += 1) {
+      for (let round = 0; round < 6; round += 1) {
         const before = runs.of(adminWorkflows.deploy).length;
-        // oxlint-disable-next-line no-await-in-loop -- one tick at a time
-        await reconcile(env);
-        // oxlint-disable-next-line no-await-in-loop -- one tick at a time
+        // oxlint-disable-next-line no-await-in-loop -- one pass at a time
+        await rolloutPass(env);
+        // oxlint-disable-next-line no-await-in-loop -- one pass at a time
         await settle();
         if (runs.of(adminWorkflows.deploy).length === before) {
           return;
@@ -201,6 +216,93 @@ const promoteTo = async (channel: Channel, releaseId: string) => {
     await promoteRelease(env, staff, { channel: "stable", releaseId });
   }
 };
+
+/** `channel`'s rollout started last: its status, why it halted, its counts and approver. */
+const rolloutOf = async (channel: Channel) =>
+  (await db
+    .select({
+      id: rollouts.id,
+      releaseId: rollouts.releaseId,
+      status: rollouts.status,
+      haltedReason: rollouts.haltedReason,
+      startedBy: rollouts.startedBy,
+      done: rollouts.done,
+      failed: rollouts.failed,
+    })
+    .from(rollouts)
+    .where(eq(rollouts.channel, channel))
+    .orderBy(desc(rollouts.startedAt), desc(sql`rowid`))
+    .get()) ?? null;
+
+/** `channel`'s rollouts of `releaseIds`, oldest first: each one's release, status and approver. */
+const rolloutsOf = async (channel: Channel, releaseIds: readonly string[]) =>
+  await db
+    .select({
+      releaseId: rollouts.releaseId,
+      status: rollouts.status,
+      startedBy: rollouts.startedBy,
+    })
+    .from(rollouts)
+    .where(
+      and(
+        eq(rollouts.channel, channel),
+        inArray(rollouts.releaseId, [...releaseIds])
+      )
+    )
+    .orderBy(asc(rollouts.startedAt), asc(sql`rowid`));
+
+/** Clients `clientIds` run `releaseId` on both Workers, as a deploy leaves them. */
+const runOn = async (
+  clientIds: readonly string[],
+  releaseId: string
+): Promise<void> => {
+  await db.insert(clientWorkers).values(
+    clientIds.flatMap((clientId) =>
+      (["core", "connect"] as const).map((worker) => ({
+        clientId,
+        worker,
+        scriptName: `${clientId}-${worker}`,
+        releaseId,
+      }))
+    )
+  );
+};
+
+/** Clients `clientIds`' deploys of rollout `rolloutId`'s release, recorded failed with `error`, as a run's end records them. */
+const failedOn = async (
+  clientIds: readonly string[],
+  rollout: { id: string; releaseId: string },
+  error = "smoke_check_failed"
+): Promise<void> => {
+  const now = new Date();
+  await db.insert(clientDeploys).values(
+    clientIds.map((clientId) => ({
+      clientId,
+      releaseId: rollout.releaseId,
+      runId: `deploy-${crypto.randomUUID().slice(0, 8)}`,
+      status: "failed" as const,
+      error,
+      startedAt: now,
+      endedAt: now,
+      rolloutId: rollout.id,
+    }))
+  );
+};
+
+/** How many audit events `action` names `target`. */
+const eventsOf = async (action: string, target: string): Promise<number> =>
+  await db.$count(
+    auditEvents,
+    and(eq(auditEvents.action, action), eq(auditEvents.target, target))
+  );
+
+/** How many alerts the halts of rollout `rolloutId` recorded. */
+const haltAlertsOf = async (rolloutId: string): Promise<number> =>
+  await db.$count(alerts, like(alerts.key, `halt:${rolloutId}:%`));
+
+/** The rollout a channel has, or a refusal, as an error's code. */
+const codeOf = (error: unknown) =>
+  error instanceof RolloutError ? error.code : error;
 
 /**
  * What picks out a call to upload client `clientId`'s core. By its script:
@@ -249,10 +351,59 @@ describe("release channels", () => {
       edge: await releasesOf(edge.clientId),
       stable: await releasesOf(stable.clientId),
       deploy: await deployOf(edge.clientId),
+      rollouts: await rolloutsOf("edge", [before, older, release]),
     }).toStrictEqual({
       edge: on(release),
       stable: on(before),
       deploy: { releaseId: release, status: "done", error: null },
+      // One rollout a move, by the admin itself, and none for the
+      // releases that never moved Edge.
+      rollouts: [{ releaseId: release, status: "done", startedBy: "system" }],
+    });
+  });
+
+  it("starts a rollout with each move of a channel, approved by who moved it, and gives one to a channel an older admin moved", async () => {
+    const first = await placedRelease("feat(core): first");
+    const second = await placedRelease("feat(core): second");
+    await releaseToEdge(env, [first]);
+    await releaseToEdge(env, [second]);
+    await promoteRelease(env, staff, { channel: "beta", releaseId: first });
+    await promoteRelease(env, staff, { channel: "beta", releaseId: second });
+    // Set back by staff: a rollout of its own, approved by them.
+    await promoteRelease(env, staff, { channel: "edge", releaseId: first });
+    const moved = {
+      edge: await rolloutsOf("edge", [first, second]),
+      beta: await rolloutsOf("beta", [first, second]),
+    };
+    // An older admin moves Beta back with no rollout row.
+    await db
+      .update(channels)
+      .set({ releaseId: first })
+      .where(eq(channels.id, "beta"));
+
+    await rolloutPass(env);
+
+    expect({
+      moved,
+      healed: await rolloutsOf("beta", [first, second]),
+    }).toStrictEqual({
+      moved: {
+        edge: [
+          { releaseId: first, status: "superseded", startedBy: "system" },
+          { releaseId: second, status: "superseded", startedBy: "system" },
+          { releaseId: first, status: "running", startedBy: staff.email },
+        ],
+        beta: [
+          { releaseId: first, status: "superseded", startedBy: staff.email },
+          { releaseId: second, status: "running", startedBy: staff.email },
+        ],
+      },
+      healed: [
+        { releaseId: first, status: "superseded", startedBy: staff.email },
+        { releaseId: second, status: "superseded", startedBy: staff.email },
+        // No client on Beta: done in the pass that started it.
+        { releaseId: first, status: "done", startedBy: "system" },
+      ],
     });
   });
 
@@ -349,50 +500,266 @@ describe("release channels", () => {
     });
   });
 
-  it("starts no new deploy on a channel once one failed, until staff retry", async () => {
+  it("deploys the smallest first, alone, halts at the third failure before the rest deploy, tells it once, and goes on once staff resume it", async () => {
     const before = await placedRelease("feat(core): before");
-    const failing = await live("stable", before);
-    const other = await live("stable", before);
-    const late = await live("stable", before);
-    await pinClient(env, staff, { clientId: late.clientId, releaseId: before });
-    const release = await placedRelease("feat(core): fails on one");
+    const failing = await Promise.all(
+      [1, 2, 3].map(async () => await live("stable", before))
+    );
+    const largest = await live("stable", before);
+    // Their sizes, as the hourly watch reads them: the failing ones first.
+    const sized = [...failing, largest].map(({ clientId }, index) => ({
+      clientId,
+      readAt: new Date(),
+      signals: JSON.stringify({ people: index === 3 ? 50 : index + 1 }),
+    }));
+    await db.insert(clientWatch).values(sized);
+    const release = await placedRelease("feat(core): fails on three");
     await using runs = followRuns();
     await promoteTo("beta", release);
-    // The failing client's core upload is refused.
-    cloudflare.failNext(await coreUpload(failing.clientId), 400);
+    // Each failing client's core upload is refused once.
+    for (const { clientId } of failing) {
+      // oxlint-disable-next-line no-await-in-loop -- three matchers
+      cloudflare.failNext(await coreUpload(clientId), 400);
+    }
 
     await promoteRelease(env, staff, { channel: "stable", releaseId: release });
     await runs.converge();
-    // Unpinned after the failure: it waits with the rest of the channel.
-    await pinClient(env, staff, { clientId: late.clientId, releaseId: null });
-    await runs.converge();
-    const failed = await deployOf(failing.clientId);
-    const whileFailed = {
-      failing: {
-        releaseId: failed?.releaseId,
-        status: failed?.status,
-        why: typeof failed?.error === "string",
-      },
-      other: await releasesOf(other.clientId),
-      late: await releasesOf(late.clientId),
+    const rollout = await rolloutOf("stable");
+    const id = rollout?.id ?? "";
+    const halted = {
+      rollout,
+      failed: await Promise.all(
+        failing.map(async ({ clientId }) => {
+          const deploy = await deployOf(clientId);
+          return deploy?.status;
+        })
+      ),
+      largest: await releasesOf(largest.clientId),
+      stoppedBy: await stoppedByOf("stable"),
+      halts: await eventsOf("rollout.halt", id),
+      told: await haltAlertsOf(id),
     };
-
-    await retryChannel(env, staff, { channel: "stable" });
+    await resumeRollout(env, staff, { channel: "stable" });
     await runs.converge();
+    const after = await rolloutOf("stable");
 
     expect({
-      whileFailed,
-      failing: await releasesOf(failing.clientId),
-      late: await releasesOf(late.clientId),
+      halted,
+      after,
+      everyone: await Promise.all(
+        [...failing, largest].map(
+          async ({ clientId }) => await releasesOf(clientId)
+        )
+      ),
+      stoppedBy: await stoppedByOf("stable"),
+      resumed: await db
+        .select({ actor: auditEvents.actor, detail: auditEvents.detail })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.action, "rollout.resume"),
+            eq(auditEvents.target, id)
+          )
+        ),
+      told: await haltAlertsOf(id),
     }).toStrictEqual({
-      whileFailed: {
-        failing: { releaseId: release, status: "failed", why: true },
-        // Out already when the first failed: it finished.
-        other: on(release),
-        late: on(before),
+      halted: {
+        rollout: {
+          id,
+          releaseId: release,
+          status: "halted",
+          haltedReason: "failed",
+          startedBy: staff.email,
+          done: 0,
+          failed: 3,
+        },
+        failed: ["failed", "failed", "failed"],
+        // One at a time while none was done, then halted: the largest
+        // never started.
+        largest: on(before),
+        stoppedBy: "failed",
+        halts: 1,
+        told: 1,
       },
-      failing: on(release),
-      late: on(release),
+      after: {
+        id,
+        releaseId: release,
+        status: "done",
+        haltedReason: "failed",
+        startedBy: staff.email,
+        done: 4,
+        failed: 0,
+      },
+      everyone: [on(release), on(release), on(release), on(release)],
+      stoppedBy: null,
+      resumed: [
+        {
+          actor: staff.email,
+          detail: JSON.stringify({ channel: "stable", release, cleared: 3 }),
+        },
+      ],
+      told: 1,
+    });
+  });
+
+  it("goes on past two failures, halts at the third, never counts a platform fault, and counts from 0 once resumed", async () => {
+    const release = await placedRelease("feat(core): fails on three");
+    const [a = "", b = "", c = "", d = "", ...rest] = await waitingClients(
+      "edge",
+      "k-fails",
+      6
+    );
+    await releaseToEdge(env, [release]);
+    const rollout = await rolloutOf("edge");
+    if (rollout === null) {
+      throw new Error("Edge has no rollout");
+    }
+    // The rest run the release.
+    await runOn(rest, release);
+    await failedOn([a, b], rollout);
+    await failedOn([c], rollout, "cloudflare_429_10000");
+    // C, tried again for its platform fault, and D are held by another
+    // runner, so nothing starts here.
+    const now = new Date();
+    await db.insert(clientRuns).values(
+      [c, d].map((clientId) => ({
+        clientId,
+        runId: `${clientId}-pbusy`,
+        kind: "provision_placed" as const,
+        claimedAt: now,
+      }))
+    );
+
+    await rolloutPass(env);
+    const atTwo = await rolloutOf("edge");
+    await failedOn([d], rollout);
+    await rolloutPass(env);
+    await rolloutPass(env);
+    const atThree = await rolloutOf("edge");
+    const told = await haltAlertsOf(rollout.id);
+    const halts = await eventsOf("rollout.halt", rollout.id);
+    await resumeRollout(env, staff, { channel: "edge" });
+    const resumed = await rolloutOf("edge");
+
+    expect({
+      atTwo: [atTwo?.status, atTwo?.failed, atTwo?.done],
+      started: await startedOf([a, b, c, d]),
+      atThree: [atThree?.status, atThree?.haltedReason, atThree?.failed],
+      told,
+      halts,
+      resumed: [resumed?.status, resumed?.failed],
+      cleared: await db.$count(
+        clientDeploys,
+        inArray(clientDeploys.clientId, [a, b, c, d])
+      ),
+      again: await resumeRollout(env, staff, { channel: "edge" }).then(
+        () => null,
+        codeOf
+      ),
+    }).toStrictEqual({
+      atTwo: ["running", 2, 2],
+      started: 0,
+      atThree: ["halted", "failed", 3],
+      told: 1,
+      halts: 1,
+      resumed: ["running", 0],
+      cleared: 0,
+      again: "not_halted",
+    });
+  });
+
+  it("counts no failure of an organization offboarded since toward a halt", async () => {
+    const release = await placedRelease("feat(core): one failed and left");
+    const [a = "", b = "", gone = "", next = ""] = await waitingClients(
+      "edge",
+      "r-left",
+      4
+    );
+    await releaseToEdge(env, [release]);
+    const rollout = await rolloutOf("edge");
+    if (rollout === null) {
+      throw new Error("Edge has no rollout");
+    }
+    await runOn([a, b], release);
+    await failedOn([gone], rollout);
+    await db
+      .update(clients)
+      .set({ status: "offboarded" })
+      .where(eq(clients.id, gone));
+    // Two more fail: the third counted would be the offboarded one's.
+    const failing = await waitingClients("edge", "r-left-fails", 2);
+    await failedOn(failing, rollout);
+
+    await rolloutPass(env);
+    const after = await rolloutOf("edge");
+
+    expect({
+      status: after?.status,
+      started: await startedOf([next]),
+    }).toStrictEqual({ status: "running", started: 1 });
+  });
+
+  it("sets aside an organization whose deploys ended in 3 platform faults in a row, tells it once, and starts the next", async () => {
+    const release = await placedRelease("feat(core): kept rate limited");
+    const [stuck = "", next = ""] = await waitingClients("edge", "s-aside", 2);
+    await releaseToEdge(env, [release]);
+    const rollout = await rolloutOf("edge");
+    if (rollout === null) {
+      throw new Error("Edge has no rollout");
+    }
+    // Its third 429 in a row, as the claims before counted them.
+    const now = new Date();
+    await db.insert(clientDeploys).values({
+      clientId: stuck,
+      releaseId: release,
+      runId: `deploy-${crypto.randomUUID().slice(0, 8)}`,
+      status: "failed",
+      error: "cloudflare_429_10000",
+      startedAt: now,
+      endedAt: now,
+      rolloutId: rollout.id,
+      platformFaults: 2,
+    });
+
+    await rolloutPass(env);
+    await rolloutPass(env);
+    const after = await rolloutOf("edge");
+
+    expect({
+      stuck: await startedOf([stuck]),
+      next: await startedOf([next]),
+      status: after?.status,
+      told: await db.$count(alerts, like(alerts.key, `aside:${stuck}:%`)),
+    }).toStrictEqual({ stuck: 0, next: 1, status: "running", told: 1 });
+  });
+
+  it("refuses to promote a release past a channel where its rollout halted, until staff resume it there", async () => {
+    const release = await placedRelease("feat(core): halted on edge");
+    await releaseToEdge(env, [release]);
+    await db
+      .update(rollouts)
+      .set({ status: "halted", haltedReason: "failed" })
+      .where(and(eq(rollouts.channel, "edge"), eq(rollouts.status, "running")));
+
+    const refused = await promoteRelease(env, staff, {
+      channel: "beta",
+      releaseId: release,
+    }).then(() => null, codeOf);
+    await resumeRollout(env, staff, { channel: "edge" });
+    await promoteRelease(env, staff, { channel: "beta", releaseId: release });
+
+    const pointing = await channelReleases(db);
+
+    expect({
+      refused,
+      beta: pointing.beta,
+      rollout: await rolloutsOf("beta", [release]),
+    }).toStrictEqual({
+      refused: "previous_channel_halted",
+      beta: release,
+      rollout: [
+        { releaseId: release, status: "running", startedBy: staff.email },
+      ],
     });
   });
 
@@ -543,11 +910,11 @@ describe("release channels", () => {
     }).toStrictEqual({ started: 1, edge: on(release) });
   });
 
-  it("starts at most parallelDeploys on a channel when two ticks overlap, the second acting not at all", async () => {
-    const release = await placedRelease("feat(core): two ticks, many clients");
-    const waiting = await waitingClients("edge", "a-many", parallelDeploys + 5);
+  it("starts only what slow start allows when two passes overlap, the second acting not at all", async () => {
+    const release = await placedRelease("feat(core): two passes, many clients");
+    const waiting = await waitingClients("edge", "a-many", 13);
     await releaseToEdge(env, [release]);
-    // The first tick is held right before its first claim lands.
+    // The first pass is held right before its first write lands.
     let held = false;
     const released = Promise.withResolvers<unknown>();
     const holding = racingDb(async () => {
@@ -555,14 +922,14 @@ describe("release channels", () => {
       await released.promise;
     });
 
-    const first = reconcile({ ...env, DB: holding });
+    const first = rolloutPass({ ...env, DB: holding });
     try {
       await vi.waitFor(() => {
         if (!held) {
-          throw new Error("The first tick hasn't reached a claim yet");
+          throw new Error("The first pass hasn't reached a write yet");
         }
       });
-      await reconcile(env);
+      await rolloutPass(env);
     } finally {
       released.resolve(true);
     }
@@ -571,127 +938,370 @@ describe("release channels", () => {
 
     expect({ whileHeld, started: await startedOf(waiting) }).toStrictEqual({
       whileHeld: 0,
-      started: parallelDeploys,
+      // A rollout with none done yet has 1 out.
+      started: 1,
     });
   });
 
-  it("starts at most parallelDeploys across every channel, as they share one rate limit", async () => {
+  it(`takes turns across channels, and starts no more than ${rolloutLimits.maxInFlight} out across the fleet, an older admin's runs counted`, async () => {
     const release = await placedRelease("feat(core): two channels at once");
-    const edge = await waitingClients("edge", "e-edge", parallelDeploys);
-    const beta = await waitingClients("beta", "f-beta", parallelDeploys);
+    const edge = await waitingClients("edge", "e-edge", 10);
+    const beta = await waitingClients("beta", "f-beta", 10);
+    // Each has 10 on the release, so slow start leaves room for 11.
+    await runOn(await waitingClients("edge", "e-on", 10), release);
+    await runOn(await waitingClients("beta", "f-on", 10), release);
+    // 4 deploys out already, as an older admin started them: no rollout's.
+    const busy = await waitingClients("stable", "g-busy", 4);
+    const now = new Date();
+    await db.insert(clientDeploys).values(
+      busy.map((clientId) => ({
+        clientId,
+        releaseId: release,
+        runId: `deploy-older-${clientId}`,
+        status: "deploying" as const,
+        startedAt: now,
+      }))
+    );
     await promoteTo("beta", release);
 
-    await reconcile(env);
-
-    await expect(startedOf([...edge, ...beta])).resolves.toBe(parallelDeploys);
-  });
-
-  it("stops only a channel it can't read, deploying the others, says so at each of its organizations, and goes on once it reads it again", async () => {
-    const release = await placedRelease("feat(core): one channel unread");
-    const edge = await waitingClients("edge", "g-edge", 2);
-    const beta = await waitingClients("beta", "h-beta", 2);
-    await promoteTo("beta", release);
-    // Every read of Beta's clients fails, as a query D1 refuses would.
-    const unreadable = new Proxy(env.DB, {
-      get: (target, property) => {
-        const value: unknown = Reflect.get(target, property);
-        if (property !== "prepare" || typeof value !== "function") {
-          return typeof value === "function"
-            ? (...args: unknown[]): unknown =>
-                Reflect.apply(value, target, args)
-            : value;
-        }
-        return (query: string) => {
-          const statement = target.prepare(query);
-          return new Proxy(statement, {
-            get: (prepared, member) => {
-              const method: unknown = Reflect.get(prepared, member);
-              if (member !== "bind" || typeof method !== "function") {
-                return typeof method === "function"
-                  ? (...args: unknown[]): unknown =>
-                      Reflect.apply(method, prepared, args)
-                  : method;
-              }
-              return (...params: unknown[]): unknown => {
-                if (
-                  query.includes("client_placements") &&
-                  params.includes("beta")
-                ) {
-                  throw new Error("D1 refused the read");
-                }
-                return Reflect.apply(method, prepared, params);
-              };
-            },
-          });
-        };
-      },
-    });
-    const betaNeeds = async () => {
-      const grid = await clientGrid(env);
-      return grid
-        .filter(({ id }) => beta.includes(id))
-        .map((row) => rolloutNeeds(row).map(rolloutNeedLine));
-    };
-
-    await reconcile({ ...env, DB: unreadable });
-    const whileUnread = {
-      edge: await startedOf(edge),
-      beta: await startedOf(beta),
-      stoppedBy: await stoppedByOf("beta"),
-      needs: await betaNeeds(),
-    };
-    await reconcile(env);
+    await rolloutPass(env);
 
     expect({
-      whileUnread,
+      edge: await startedOf(edge),
       beta: await startedOf(beta),
-      stoppedBy: await stoppedByOf("beta"),
-    }).toStrictEqual({
-      whileUnread: {
-        edge: edge.length,
-        beta: 0,
-        stoppedBy: "unexpected",
-        needs: beta.map(() => [
-          "Nothing deploys on its channel, Beta: the reconciler can't act on it (unexpected).",
-        ]),
-      },
-      beta: beta.length,
-      stoppedBy: null,
-    });
+    }).toStrictEqual({ edge: 2, beta: 2 });
   });
 
-  it("starts nothing more once a deploy fails mid-tick", async () => {
-    const release = await placedRelease("feat(core): fails mid-tick");
-    const [failing = "", ...rest] = await waitingClients("edge", "b-fails", 4);
+  it("loses nothing when a pass is cut off mid-way: once its lease runs out, the next starts what it didn't, and no client twice", async () => {
+    const release = await placedRelease("feat(core): a pass cut off");
+    const waiting = await waitingClients("edge", "m-cut", 4);
+    await runOn(await waitingClients("edge", "m-on", 3), release);
     await releaseToEdge(env, [release]);
-    // A deploy of the channel's release fails right before the tick's
-    // first claim lands.
-    let failure: Promise<void> | undefined;
-    const fail = async (database: D1Database): Promise<void> => {
-      await adminDatabase(database).insert(clientDeploys).values({
-        clientId: failing,
-        releaseId: release,
-        runId: "deploy-failed-elsewhere",
-        status: "failed",
-        error: "release_rolled_back",
-        startedAt: new Date(),
-        endedAt: new Date(),
-      });
-    };
-    const failingDb = racingDb(async (database) => {
-      failure ??= fail(database);
-      await failure;
+    // The pass stops dead at its second claim, never landing it, as one
+    // whose isolate was killed there: the claims before it stand.
+    let claiming = false;
+    let claims = 0;
+    const killed = Promise.withResolvers<unknown>();
+    const dying = new Proxy(env.DB, {
+      get: (target, property) => {
+        if (property === "prepare") {
+          return (query: string) => {
+            claiming ||= query.startsWith('insert into "client_runs"');
+            return target.prepare(query);
+          };
+        }
+        if (property === "batch") {
+          return async (statements: D1PreparedStatement[]) => {
+            if (claiming) {
+              claiming = false;
+              claims += 1;
+              if (claims === 2) {
+                await killed.promise;
+                throw new Error("The pass was cut off");
+              }
+            }
+            return await target.batch(statements);
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
     });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const cut = rolloutPass({ ...env, DB: dying });
+      await vi.waitFor(() => {
+        if (claims < 2) {
+          throw new Error("The pass hasn't reached its second claim yet");
+        }
+      });
+      // A pass while it holds the lease does nothing; once the lease has
+      // run out, the next goes on.
+      await rolloutPass(env);
+      const whileLeased = await startedOf(waiting);
+      await db
+        .update(leases)
+        .set({ expiresAt: new Date(0) })
+        .where(eq(leases.id, "reconciler"));
+      await rolloutPass(env);
+      killed.resolve(true);
+      await cut;
+      const each = await Promise.all(
+        waiting.map(async (clientId) => await deploysStarted(clientId))
+      );
 
-    await reconcile({ ...env, DB: failingDb });
-    await reconcile(env);
-
-    await expect(startedOf(rest)).resolves.toBe(0);
+      expect({ cutShort: whileLeased < waiting.length, each }).toStrictEqual({
+        cutShort: true,
+        each: waiting.map(() => 1),
+      });
+    } finally {
+      killed.resolve(true);
+      errors.mockRestore();
+    }
   });
 
-  it("starts later clients when the first ones are held by another runner", async () => {
+  it("settles claims whose runs were never created as the platform's fault, never halting, and starts them again", async () => {
+    const release = await placedRelease("feat(core): runs never created");
+    const orphans = await waitingClients("edge", "q-orphan", 3);
+    await runOn(await waitingClients("edge", "q-on", 2), release);
+    await releaseToEdge(env, [release]);
+    const rollout = await rolloutOf("edge");
+    // Claimed by a pass cut off before it created their runs, past the
+    // time a run counts as starting.
+    const claimedAt = new Date(Date.now() - 5 * 60_000);
+    await db.batch([
+      db.insert(clientRuns).values(
+        orphans.map((clientId) => ({
+          clientId,
+          runId: `deploy-never-${clientId}`,
+          kind: "deploy" as const,
+          claimedAt,
+        }))
+      ),
+      db.insert(clientDeploys).values(
+        orphans.map((clientId) => ({
+          clientId,
+          releaseId: release,
+          runId: `deploy-never-${clientId}`,
+          status: "deploying" as const,
+          startedAt: claimedAt,
+          rolloutId: rollout?.id,
+        }))
+      ),
+    ]);
+
+    await rolloutPass(env);
+    const after = await rolloutOf("edge");
+    const failures = await db
+      .select({ detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.action, "deploy.fail"),
+          inArray(auditEvents.clientId, orphans)
+        )
+      );
+
+    expect({
+      status: after?.status,
+      failed: after?.failed,
+      notCreated: failures.map(({ detail }) =>
+        detail?.includes('"error":"run_not_created"')
+      ),
+      // Tried again: 2 done, so room for 3.
+      started: await startedOf(orphans),
+    }).toStrictEqual({
+      status: "running",
+      failed: 0,
+      notCreated: [true, true, true],
+      started: 3,
+    });
+  });
+
+  it.each(["halted", "superseded", "failed on thrice"] as const)(
+    "claims nothing for a rollout %s between the pass's read and its claim",
+    async (what) => {
+      const release = await placedRelease(`feat(core): ${what} mid-pass`);
+      const waiting = await waitingClients("edge", `n-${what}`, 3);
+      await runOn(await waitingClients("edge", `n-${what}-on`, 3), release);
+      await releaseToEdge(env, [release]);
+      const rollout = await rolloutOf("edge");
+      // On the rollout's channel, so their failures count toward its halt.
+      const failing = await waitingClients("edge", `n-${what}-fails`, 3);
+      const newer = await placedRelease(`feat(core): after ${what}`);
+      // Right before each write after the pass's first (its self-heal):
+      // the rollout halts, Edge moves on, or a third deploy of it fails.
+      let writes = 0;
+      const racing = racingDb(async (database) => {
+        writes += 1;
+        if (writes < 2) {
+          return;
+        }
+        const raced = adminDatabase(database);
+        if (what === "halted") {
+          await raced
+            .update(rollouts)
+            .set({ status: "halted", haltedReason: "failed" })
+            .where(eq(rollouts.releaseId, release));
+          return;
+        }
+        if (what === "superseded") {
+          await raced.batch(toEdge(raced, newer));
+          return;
+        }
+        const now = new Date();
+        await raced
+          .insert(clientDeploys)
+          .values(
+            failing.map((clientId) => ({
+              clientId,
+              releaseId: release,
+              runId: `deploy-failed-${clientId}`,
+              status: "failed" as const,
+              error: "smoke_check_failed",
+              startedAt: now,
+              endedAt: now,
+              rolloutId: rollout?.id,
+            }))
+          )
+          .onConflictDoNothing();
+      });
+
+      await rolloutPass({ ...env, DB: racing });
+
+      await expect(startedOf([...waiting, ...failing])).resolves.toBe(0);
+    }
+  );
+
+  it("waits for an older admin's reconciler to give the lease back, and leaves the deploy run it started to finish, counted done for the rollout", async () => {
+    const before = await placedRelease("feat(core): before");
+    const older = await live("edge", before);
+    const fresh = await live("edge", before);
+    const release = await placedRelease("feat(core): deployed across versions");
+    await releaseToEdge(env, [release]);
+    // An older admin's reconciler holds the lease as it claims `older`:
+    // with no rollout, for a `deploy` run of its own.
+    await db.insert(leases).values({
+      id: "reconciler",
+      holder: "older-admin",
+      expiresAt: new Date(Date.now() + 15 * 60_000),
+    });
+    await using runs = followRuns();
+    const runId = `deploy-older-${crypto.randomUUID().slice(0, 8)}`;
+    const now = new Date();
+    await db.batch([
+      db
+        .insert(clientRuns)
+        .values({
+          clientId: older.clientId,
+          runId,
+          kind: "deploy",
+          claimedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: clientRuns.clientId,
+          set: {
+            runId,
+            kind: "deploy",
+            claimedAt: now,
+            attempt: 0,
+            attemptKey: null,
+          },
+        }),
+      db.insert(clientDeploys).values({
+        clientId: older.clientId,
+        releaseId: release,
+        runId,
+        status: "deploying",
+        startedAt: now,
+      }),
+    ]);
+    // Its core upload held until released.
+    let held = false;
+    const released = Promise.withResolvers<unknown>();
+    cloudflare.afterAnswering(await coreUpload(older.clientId), async () => {
+      held = true;
+      await released.promise;
+    });
+    await adminWorkflow(env, adminWorkflows.deploy).create({
+      id: runId,
+      params: { clientId: older.clientId, releaseId: release },
+    });
+    await vi.waitFor(() => {
+      if (!held) {
+        throw new Error("The older run hasn't reached core yet");
+      }
+    });
+
+    await rolloutPass(env);
+    const whileLeased = await deploysStarted(fresh.clientId);
+    // The older reconciler's tick ends: it gives the lease back.
+    await db.delete(leases).where(eq(leases.holder, "older-admin"));
+    await rolloutPass(env);
+    const beside = await deploysStarted(fresh.clientId);
+    released.resolve(true);
+    await ended(adminWorkflows.deploy, runId);
+    await runs.settle();
+    await runs.converge();
+    const edgeRollout = await rolloutOf("edge");
+
+    expect({
+      whileLeased,
+      beside,
+      older: await releasesOf(older.clientId),
+      olderStarted: await deploysStarted(older.clientId),
+      fresh: await releasesOf(fresh.clientId),
+      olderDeploy: await db
+        .select({
+          runId: clientDeploys.runId,
+          status: clientDeploys.status,
+          rolloutId: clientDeploys.rolloutId,
+        })
+        .from(clientDeploys)
+        .where(eq(clientDeploys.clientId, older.clientId))
+        .get(),
+      rollout: edgeRollout?.status,
+    }).toStrictEqual({
+      whileLeased: 0,
+      // Slow start: the older admin's run is no rollout's, so 1 out.
+      beside: 1,
+      older: on(release),
+      // Its own run's, never the pass's.
+      olderStarted: 0,
+      fresh: on(release),
+      olderDeploy: { runId, status: "done", rolloutId: null },
+      rollout: "done",
+    });
+  });
+
+  it("starts nothing while a 429 blocks the deployer token, telling it once a block, nor past the budget's reserve", async () => {
+    const release = await placedRelease("feat(core): over the budget");
+    const waiting = await waitingClients("edge", "p-budget", 2);
+    await releaseToEdge(env, [release]);
+    const now = Date.now();
+    const until = new Date(now + 5 * 60_000);
+    const budget = {
+      token: "DEPLOYER_API_TOKEN",
+      remaining: 1000,
+      resetAt: until,
+      blockedUntil: until,
+      updatedAt: new Date(now),
+    };
+    await db
+      .insert(apiBudget)
+      .values(budget)
+      .onConflictDoUpdate({ target: apiBudget.token, set: budget });
+
+    await rolloutPass(env);
+    await rolloutPass(env);
+    const whileBlocked = {
+      started: await startedOf(waiting),
+      audited: await eventsOf("rollout.blocked", until.toISOString()),
+      told: await db.$count(
+        alerts,
+        eq(alerts.key, `blocked:${until.getTime()}`)
+      ),
+    };
+    // The block is over, but the window has under the reserve left.
+    await db
+      .update(apiBudget)
+      .set({ blockedUntil: null, remaining: 199 })
+      .where(eq(apiBudget.token, "DEPLOYER_API_TOKEN"));
+    await rolloutPass(env);
+    const underReserve = await startedOf(waiting);
+    await db.delete(apiBudget);
+
+    expect({ whileBlocked, underReserve }).toStrictEqual({
+      whileBlocked: { started: 0, audited: 1, told: 1 },
+      underReserve: 0,
+    });
+  });
+
+  it("gives the slot of a client another runner holds to the next in order", async () => {
     const release = await placedRelease("feat(core): past busy clients");
-    const busy = await waitingClients("edge", "c-busy", parallelDeploys);
+    const busy = await waitingClients("edge", "c-busy", 8);
     const free = await waitingClients("edge", "d-free", 5);
     // Each busy client has a provisioning attempt starting a moment ago.
     await Promise.all(
@@ -707,11 +1317,11 @@ describe("release channels", () => {
     );
     await releaseToEdge(env, [release]);
 
-    await reconcile(env);
+    await rolloutPass(env);
 
     expect({
       busy: await startedOf(busy),
       free: await startedOf(free),
-    }).toStrictEqual({ busy: 0, free: free.length });
+    }).toStrictEqual({ busy: 0, free: 1 });
   });
 });

@@ -10,7 +10,7 @@ import {
   startClientRelease,
 } from "../src/hosting/operation.ts";
 import { pinClient } from "../src/rollout/channels.ts";
-import { reconcile } from "../src/rollout/reconciler.ts";
+import { rolloutPass } from "../src/rollout/scheduler.ts";
 import { currentRun } from "../src/runners.ts";
 import { adminWorkflows } from "../src/workflow-runs.ts";
 import {
@@ -182,12 +182,12 @@ describe("a release's runner crashing, and another action on the client after", 
       notes: "feat(core): later",
     });
     const hostname = `${clientId}.${domain}`;
-    // Pinned to a later release: the reconciler's next tick deploys it.
+    // Pinned to a later release: the rollout pass's next run deploys it.
     await pinClient(env, staff, { clientId, releaseId: later.releaseId });
     using deploys = startsOf(adminWorkflows.deploy);
     const [offboarded] = await Promise.all([
       codeOf(offboardPlacedClient(env, staff, clientId)),
-      reconcile(env),
+      rolloutPass(env),
     ]);
     const { started } = deploys;
     await Promise.all(
@@ -215,7 +215,7 @@ describe("a release's runner crashing, and another action on the client after", 
     });
   });
 
-  it("holds the client while it offboards: a reconciler tick as its hostname is deleted can't claim it, and deploys nothing", async () => {
+  it("holds the client while it offboards: a rollout pass as its hostname is deleted can't claim it, and deploys nothing", async () => {
     const first = await importRelease();
     const { clientId } = await liveClient(first);
     const later = await importRelease({
@@ -229,7 +229,7 @@ describe("a release's runner crashing, and another action on the client after", 
       .spyOn(env.ROUTER_HOSTS, "delete")
       .mockImplementationOnce(async (key: string) => {
         // The cron's tick while offboarding deletes the route.
-        await reconcile(env);
+        await rolloutPass(env);
         ticked = true;
         await remove(key);
       });

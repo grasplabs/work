@@ -2,7 +2,7 @@
  * The release channels on Platform, derived live (src/rollout/progress.ts),
  * set on the page as Grasp Work sets its parts: each channel a part of its
  * own, its release under its name and what staff may do with it at the
- * end of that line (Retry once a deploy failed, Promote with only the moves
+ * end of that line (Resume once its rollout halted, Promote with only the moves
  * the channel may make), then how many of its organizations run it, each
  * one a row to its Setup. Then the latest changes of a channel's release,
  * from the audit log.
@@ -55,7 +55,7 @@ import { formatTime } from "../releases/format.ts";
 import { releaseTitle } from "../releases/version.ts";
 import { channelWords } from "../rollout/channel-words.ts";
 import type { PromotionEvent } from "../rollout/channels.ts";
-import { promoteReleaseFn, retryChannelFn } from "../rollout/functions.ts";
+import { promoteReleaseFn, resumeRolloutFn } from "../rollout/functions.ts";
 import type { ChannelProgress, ClientProgress } from "../rollout/progress.ts";
 import { useRolloutAction } from "../rollout/use-action.ts";
 import { thenRefresh } from "../use-action.ts";
@@ -254,10 +254,10 @@ const Promote = ({ channel }: { channel: ChannelProgress }) => {
 };
 
 /**
- * Clears a channel's failed deploys, so the reconciler tries them again:
- * it asks first, as its companies take the release again.
+ * Resumes a channel's halted rollout, its failed deploys tried again: it
+ * asks first, as its companies take the release again.
  */
-const Retry = ({ channel }: { channel: ChannelProgress }) => {
+const Resume = ({ channel }: { channel: ChannelProgress }) => {
   const router = useRouter();
   const { busy, failure, run } = useRolloutAction();
   const name = channelWords[channel.channel];
@@ -269,18 +269,18 @@ const Retry = ({ channel }: { channel: ChannelProgress }) => {
       <AlertDialog>
         <AlertDialogTrigger asChild>
           <Button disabled={busy} size="sm">
-            Retry
+            Resume
           </Button>
         </AlertDialogTrigger>
         <ConfirmMove
-          action="Retry"
+          action="Resume"
           description={`${companies(failed)} on ${name} whose deploy failed ${failed === 1 ? "tries" : "try"} again, each with the release it was being given, and new deploys start again.`}
           onConfirm={() => {
             void run(
               async () =>
                 await thenRefresh(
                   async () =>
-                    await retryChannelFn({
+                    await resumeRolloutFn({
                       data: { channel: channel.channel },
                     }),
                   async () => {
@@ -289,7 +289,7 @@ const Retry = ({ channel }: { channel: ChannelProgress }) => {
                 )
             );
           }}
-          title={`Retry ${name}’s failed deploys?`}
+          title={`Resume ${name}’s rollout?`}
         />
       </AlertDialog>
       <Failure failure={failure} />
@@ -340,7 +340,7 @@ const ChannelClients = ({ channel }: { channel: ChannelProgress }) => {
           <span
             {...stylex.props(
               styles.standsWords,
-              channel.failed && styles.stateFailed
+              channel.halted && styles.stateFailed
             )}
           >
             {openWords(clients) ?? "All up to date"}
@@ -388,9 +388,9 @@ const ChannelPart = ({ channel }: { channel: ChannelProgress }) => {
   const name = channelWords[channel.channel];
   const heading = `channel-${channel.channel}`;
   const actions =
-    channel.failed || channel.promotable.length > 0 ? (
+    channel.halted || channel.promotable.length > 0 ? (
       <>
-        {channel.failed ? <Retry channel={channel} /> : null}
+        {channel.halted ? <Resume channel={channel} /> : null}
         <Promote channel={channel} />
       </>
     ) : undefined;
@@ -399,9 +399,9 @@ const ChannelPart = ({ channel }: { channel: ChannelProgress }) => {
       <SectionHeader
         actions={actions}
         badge={
-          channel.failed ? (
+          channel.halted ? (
             <Badge variant="destructive">
-              Failed: nothing new starts until Retry
+              Halted: nothing new starts until Resume
             </Badge>
           ) : undefined
         }
@@ -425,7 +425,7 @@ const ChannelPart = ({ channel }: { channel: ChannelProgress }) => {
               }
               max={channel.following}
               value={channel.upToDate}
-              variant={channel.failed ? "destructive" : "default"}
+              variant={channel.halted ? "destructive" : "default"}
             >
               <MeterLabel>Companies up to date</MeterLabel>
               <MeterValue>
@@ -453,12 +453,12 @@ interface Followed {
 
 /**
  * Reads each channel's progress again every few seconds while a company
- * of a channel is deploying or waiting to, so its state, Retry and the
- * counts follow the reconciler. Only the channels: the rest of the
+ * of a channel is deploying or waiting to, so its state, Resume and the
+ * counts follow the rollout pass. Only the channels: the rest of the
  * Platform page, every company's AI spend above all (a read of each
- * core), isn't read again. A failed channel starts nothing until Retry,
+ * core), isn't read again. A halted channel starts nothing until Resume,
  * so its waiting companies don't count. Once the page itself is read
- * again (after Promote or Retry), its own channels show.
+ * again (after Promote or Resume), its own channels show.
  */
 export const useFollowDeploys = (
   channels: readonly ChannelProgress[]
@@ -468,9 +468,9 @@ export const useFollowDeploys = (
     followed !== null && followed.after === channels
       ? followed.channels
       : channels;
-  const moving = shown.some(({ failed, clients }) =>
+  const moving = shown.some(({ halted, clients }) =>
     clients.some(
-      ({ state }) => state === "deploying" || (state === "waiting" && !failed)
+      ({ state }) => state === "deploying" || (state === "waiting" && !halted)
     )
   );
   useEffect(() => {

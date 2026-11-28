@@ -1,13 +1,13 @@
 /**
  * One client's deploy to its target release, as a run on Workerflow
- * (src/workflow-runs.ts): the only thing the reconciler starts
- * (src/rollout/reconciler.ts). It runs the client's one operation for the
+ * (src/workflow-runs.ts): the only thing the rollout pass starts
+ * (src/rollout/scheduler.ts). It runs the client's one operation for the
  * release (src/hosting/operation.ts): resources and migrations, each
  * Worker in turn, the probe and the router's map. On the release the
  * client runs already, it runs it again with the shared secrets in
  * Secrets Store now (src/rollout/shared-secrets.ts).
  *
- * The reconciler claimed the client for this run before creating it (in
+ * The pass claimed the client for this run before creating it (in
  * `client_runs` and `client_deploys`, one batch), so nothing else changes
  * what the client runs while it goes. Each attempt of the deploy step
  * takes the client for itself (`takeAttempt`): one that timed out acts no
@@ -16,7 +16,7 @@
  *
  * However it ends, its last step records the result on `client_deploys`
  * and gives the claim back, audited. A run that never gets there
- * (terminated) is settled by the reconciler's next tick.
+ * (terminated) is settled by the pass's next run.
  */
 import "@tanstack/react-start/server-only";
 import type { WorkflowDefinition } from "@grasp-os/workerflow/contracts";

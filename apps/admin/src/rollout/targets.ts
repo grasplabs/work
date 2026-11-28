@@ -2,7 +2,7 @@
  * Reading a client against its target (src/rollout/desired.ts): the
  * release each channel points at, the one a client should run, and what
  * it runs now, as a deploy, an apply and provisioning read them. Apart
- * from the reconciler, so the hosting code imports it without it.
+ * from the rollout pass, so the hosting code imports it without it.
  */
 import "@tanstack/react-start/server-only";
 import { eq, sql } from "drizzle-orm";

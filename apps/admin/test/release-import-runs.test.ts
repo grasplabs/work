@@ -53,8 +53,8 @@ const recording = () => {
 const jobsIn = (statements: readonly string[]) => ({
   // Records the blobs of kept releases not yet on record, first.
   retention: statements.some((query) => query.includes('"release_blobs"')),
-  // Reads the channels' releases once it holds its lease.
-  reconciler: statements.filter(
+  // The rollout pass: reads the channels' releases once it holds its lease.
+  pass: statements.filter(
     (query) => query === 'select "id", "release_id" from "channels"'
   ).length,
   // Reads the clients still being provisioned.
@@ -134,7 +134,7 @@ const quietly = async <T>(run: () => Promise<T>): Promise<T> => {
 };
 
 describe("what starts an import", () => {
-  it("runs retention, the reconciler and provisioning on the fifth minute only", async () => {
+  it("runs the rollout pass every minute, and retention and provisioning on the fifth minute only", async () => {
     const between = recording();
     await quietly(async () => {
       await worker.scheduled(cronAt(1), between.env);
@@ -148,8 +148,8 @@ describe("what starts an import", () => {
       between: jobsIn(between.statements),
       onTick: jobsIn(onTick.statements),
     }).toStrictEqual({
-      between: { retention: false, reconciler: 0, provisioning: false },
-      onTick: { retention: true, reconciler: 1, provisioning: true },
+      between: { retention: false, pass: 1, provisioning: false },
+      onTick: { retention: true, pass: 1, provisioning: true },
     });
   });
 
@@ -183,7 +183,7 @@ describe("what starts an import", () => {
     }).toStrictEqual({
       whileHeld: 0,
       // The rest of the tick runs all the same.
-      jobs: { retention: false, reconciler: 1, provisioning: true },
+      jobs: { retention: false, pass: 1, provisioning: true },
       afterExpiry: 1,
     });
   });
@@ -202,7 +202,8 @@ describe("what starts an import", () => {
 
     expect({
       ...(await traceOf(release.id)),
-      reconcilerKicks: jobsIn(statements).reconciler,
+      // However many of them got the pass's lease, one at a time.
+      passed: jobsIn(statements).pass > 0,
     }).toStrictEqual({
       saved: 1,
       imports: 1,
@@ -210,7 +211,7 @@ describe("what starts an import", () => {
       failedEvents: 0,
       failureRows: 0,
       progressRows: 0,
-      reconcilerKicks: 1,
+      passed: true,
     });
   });
 

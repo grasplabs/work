@@ -1,23 +1,23 @@
 /**
  * Each channel as the Platform pages show it, derived live from the desired
  * state and each client's last deploy (src/rollout/desired.ts): its
- * release, how many of its clients run it, each client's state, and the
- * moves it may make. Nothing here is stored.
+ * release, whether its rollout halted, how many of its clients run it,
+ * each client's state, and the moves it may make.
  */
 import "@tanstack/react-start/server-only";
 import { eq } from "drizzle-orm";
 
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
-import { clients } from "../db/schema.ts";
+import { clients, rollouts } from "../db/schema.ts";
 import { listDeployableReleases } from "../releases/queries.ts";
 import { channelIds } from "./channel-ids.ts";
 import type { Channel } from "./channel-ids.ts";
 import { channelsOfReleases, promotionHistory } from "./channels.ts";
 import type { PromotionEvent } from "./channels.ts";
-import { failsChannel, promotableReleases, stateOf } from "./desired.ts";
+import { promotableReleases, stateOf } from "./desired.ts";
 import type { ClientState, Promotion, SharedByWorker } from "./desired.ts";
-import { eachPage } from "./reconciler.ts";
+import { eachPage } from "./scheduler.ts";
 import { desiredShared } from "./shared-secrets.ts";
 import { channelReleases } from "./targets.ts";
 
@@ -48,8 +48,8 @@ export interface ChannelProgress {
   upToDate: number;
   /** Of those, the ones that follow it (not pinned). */
   following: number;
-  /** Whether a deploy of its release failed: nothing new starts until Retry. */
-  failed: boolean;
+  /** Whether its rollout halted: nothing new starts until staff resume it. */
+  halted: boolean;
   clients: ClientProgress[];
   /** The releases it may be set to, newest first; `back` for one it had before. */
   promotable: { releaseId: string; back: boolean }[];
@@ -66,6 +66,7 @@ const progressOf = async (
     history,
     imported,
     notes,
+    halted,
   }: {
     releases: Awaited<ReturnType<typeof channelReleases>>;
     desired: SharedByWorker | null;
@@ -73,13 +74,12 @@ const progressOf = async (
     history: readonly Promotion[];
     imported: readonly string[];
     notes: ReadonlyMap<string, string>;
+    halted: ReadonlySet<Channel>;
   }
 ): Promise<ChannelProgress> => {
   const rows: ClientProgress[] = [];
-  let failed = false;
   await eachPage(db, channel, desired, (page) => {
     for (const row of page) {
-      failed ||= failsChannel(row, releases);
       const state = stateOf(row, releases);
       rows.push({
         id: row.id,
@@ -105,7 +105,7 @@ const progressOf = async (
     total: rows.length,
     following: following.length,
     upToDate: following.filter(({ state }) => state === "up_to_date").length,
-    failed,
+    halted: halted.has(channel),
     clients: rows,
     promotable: promotableReleases(
       channel,
@@ -135,6 +135,10 @@ export const channelsProgress = async (
   // A release whose bundle is gone can't be deployed, so isn't offered.
   const deployable = await listDeployableReleases(db);
   const imported = deployable.map(({ id }) => id);
+  const haltedRows = await db
+    .select({ channel: rollouts.channel })
+    .from(rollouts)
+    .where(eq(rollouts.status, "halted"));
   const named = await db
     .select({ id: clients.id, name: clients.name })
     .from(clients)
@@ -146,6 +150,7 @@ export const channelsProgress = async (
     history: await channelsOfReleases(db, imported),
     notes: new Map(deployable.map(({ id, notes }) => [id, notes])),
     imported,
+    halted: new Set(haltedRows.map(({ channel }) => channel)),
   };
   const channels = await Promise.all(
     channelIds.map(async (channel) => await progressOf(db, channel, context))

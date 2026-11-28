@@ -94,7 +94,7 @@ export const releaseImportProgress = sqliteTable("release_import_progress", {
 
 /**
  * The release each channel points at (src/rollout/channels.ts): the
- * desired state the reconciler deploys (src/rollout/reconciler.ts). No
+ * desired state the rollout pass deploys (src/rollout/scheduler.ts). No
  * row yet: no release promoted to it. How it got there is in the audit
  * log (`channel.promote`).
  */
@@ -105,10 +105,11 @@ export const channels = sqliteTable("channels", {
     .references(() => releases.id),
   updatedAt: timestamp("updated_at").notNull(),
   /**
-   * Why the reconciler couldn't act on the channel at its last tick (an
-   * error code), so no deploy starts on it; null once a tick acts on it
-   * again (src/rollout/reconciler.ts). Shown in "Needs Grasp today" at
-   * each of its organizations.
+   * Why nothing new deploys on the channel: its rollout's halt reason
+   * (src/rollout/scheduler.ts), or, from an older admin, an error code;
+   * null once it's resumed or the channel moves. Shown in "Needs Grasp
+   * today" at each of its organizations. Kept while an older admin may
+   * read it.
    */
   stoppedBy: text("stopped_by"),
 });
@@ -121,7 +122,7 @@ export const channels = sqliteTable("channels", {
  * the reconciler's.
  */
 export const leases = sqliteTable("reconciler_lease", {
-  /** The lease: `reconciler` (src/rollout/reconciler.ts), `releases` (src/releases/import.ts) or `alerts` (src/alerts/alert.ts). */
+  /** The lease: `reconciler` (src/rollout/scheduler.ts), `releases` (src/releases/import.ts) or `alerts` (src/alerts/alert.ts). */
   id: text().primaryKey(),
   /** The run holding it: a random id of its own. */
   holder: text().notNull(),
@@ -131,9 +132,9 @@ export const leases = sqliteTable("reconciler_lease", {
 /**
  * One channel's rollout of one release: started by a promotion, a
  * rollback or an import, it takes the channel's organizations to the
- * release, our own first, then smallest to largest. It halts by itself
- * when one of our own fails, or when 3 have failed since it started or
- * was last resumed; only staff resume it. Done once every organization
+ * release, smallest to largest, the late ones last (src/rollout/plan.ts).
+ * It halts by itself when 3 have failed since it started or was last
+ * resumed; only staff resume it. Done once every organization
  * on the channel runs the release; superseded once the channel points at
  * another. At most one per channel is running or halted.
  */
@@ -158,8 +159,8 @@ export const rollouts = sqliteTable(
     /** When it was done or superseded; null while it runs or is halted. */
     endedAt: timestamp("ended_at"),
     /**
-     * Why it halted: `own_failed`, one of our own organizations failed;
-     * `failed`, 3 failed. Null while it never halted.
+     * Why it halted: `failed`, 3 failed. Null while it never halted.
+     * `own_failed` is no longer written: a later contract can drop it.
      */
     haltedReason: text("halted_reason", { enum: ["own_failed", "failed"] }),
     /** When staff last resumed it; null while they never did. */
@@ -316,9 +317,9 @@ export const clients = sqliteTable(
      */
     closedFrom: timestamp("closed_from"),
     /**
-     * When a rollout reaches it: `own`, one of Grasp's own organizations,
-     * first, and nothing else until every one of them is done; `normal`,
-     * after them, smallest first; `late`, last.
+     * When a rollout reaches it: `normal`, smallest first; `late`, last
+     * (src/rollout/plan.ts). `own` reads as `normal` and is no longer
+     * offered: a later contract can drop it.
      */
     rolloutGroup: text("rollout_group", { enum: ["own", "normal", "late"] })
       .notNull()
@@ -408,7 +409,7 @@ export const clientWorkers = sqliteTable(
 );
 
 /**
- * Each client's last deploy by the reconciler (src/rollout/reconciler.ts),
+ * Each client's last deploy by the rollout pass (src/rollout/scheduler.ts),
  * and its claim while it runs: a deploy starts only by replacing the row
  * as it was read (its `runId`), in the same batch as the client's runner
  * claim (src/runners.ts), so two ticks never deploy one client twice.
@@ -437,6 +438,13 @@ export const clientDeploys = sqliteTable("client_deploys", {
    * pin), which never counts toward a rollout.
    */
   rolloutId: text("rollout_id").references(() => rollouts.id),
+  /**
+   * How many of the client's deploys for this rollout, right before this
+   * one, ended in a platform fault (a 429, a run never created): after a
+   * few in a row the rollout sets the client aside, alerted, and moves on
+   * (src/rollout/plan.ts). 0 outside a rollout.
+   */
+  platformFaults: integer("platform_faults").notNull().default(0),
 });
 
 /**

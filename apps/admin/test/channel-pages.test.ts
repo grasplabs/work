@@ -7,11 +7,12 @@ import {
   channels,
   clientDeploys,
   clients,
+  rollouts,
 } from "../src/db/schema.ts";
 import { RELEASE_LIST_LIMIT } from "../src/releases/queries.ts";
 import type { Channel } from "../src/rollout/channel-ids.ts";
 import { promoteRelease } from "../src/rollout/channels.ts";
-import { promoteReleaseFn, retryChannelFn } from "../src/rollout/functions.ts";
+import { promoteReleaseFn, resumeRolloutFn } from "../src/rollout/functions.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { releaseToEdge } from "./edge.ts";
@@ -178,14 +179,21 @@ describe("the release channels on the Platform page", () => {
     });
   });
 
-  it("shows a channel whose deploy failed, with the company and why, and Retry, gone once staff retry", async () => {
+  it("shows a channel whose rollout halted, with the company that failed and why, and Resume, gone once staff resume", async () => {
     const before = await placedRelease("feat(core): before");
     const release = await placedRelease("feat(core): fails on one");
     const failing = await live("stable", before);
     await live("stable", before);
     await toStable(release);
     const now = new Date();
-    // As the reconciler records a deploy whose upload was refused.
+    const halted = await db
+      .update(rollouts)
+      .set({ status: "halted", haltedReason: "failed" })
+      .where(
+        and(eq(rollouts.channel, "stable"), eq(rollouts.status, "running"))
+      )
+      .returning({ id: rollouts.id });
+    // As the pass records a deploy of the rollout whose upload was refused.
     await db.insert(clientDeploys).values({
       clientId: failing,
       releaseId: release,
@@ -194,26 +202,30 @@ describe("the release channels on the Platform page", () => {
       error: "cloudflare_400_10000",
       startedAt: now,
       endedAt: now,
+      rolloutId: halted[0]?.id,
     });
 
     const failed = await platformPage();
-    const retried = await callServerFn(retryChannelFn, { channel: "stable" });
+    const resumed = await callServerFn(resumeRolloutFn, { channel: "stable" });
+    const again = await callServerFn(resumeRolloutFn, { channel: "stable" });
     const after = await platformPage();
 
     expect({
-      badge: failed.includes("Failed: nothing new starts until Retry"),
+      badge: failed.includes("Halted: nothing new starts until Resume"),
       why: textOf(failed).includes("Failed cloudflare_400_10000"),
-      retry: count(failed, ">Retry<"),
-      retried,
-      afterBadge: after.includes("Failed: nothing new starts until Retry"),
-      afterRetry: count(after, ">Retry<"),
+      resume: count(failed, ">Resume<"),
+      resumed,
+      again,
+      afterBadge: after.includes("Halted: nothing new starts until Resume"),
+      afterResume: count(after, ">Resume<"),
     }).toStrictEqual({
       badge: true,
       why: true,
-      retry: 1,
-      retried: { done: true, refused: null },
+      resume: 1,
+      resumed: { done: true, refused: null },
+      again: { done: false, refused: "not_halted" },
       afterBadge: false,
-      afterRetry: 0,
+      afterResume: 0,
     });
   });
 });

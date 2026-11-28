@@ -133,8 +133,8 @@ export const releasesBehindAllowed = 2;
 
 /**
  * What a live client's own platform needs of Grasp, from what the admin
- * recorded, its core answering or not: the reconciler can't act on its
- * channel, its deploy failed and nobody retried it, or it fell behind its
+ * recorded, its core answering or not: its channel's rollout halted,
+ * its deploy failed and nobody retried it, or it fell behind its
  * release. Each is acted on from its Setup, where its deploy is retried.
  * They come before anything its core says: Grasp fixes nothing there
  * while it can't deploy.
@@ -173,7 +173,7 @@ export const rolloutNeedLine = (need: RolloutNeed): string => {
     return `It runs ${need.releases} releases behind the one it should. Look at its Setup.`;
   }
   if (need.kind === "channel_stopped") {
-    return `Nothing deploys on its channel, ${channelWords[need.channel]}: the reconciler can't act on it (${need.error}).`;
+    return `Nothing new deploys on its channel, ${channelWords[need.channel]}: its rollout stopped (${need.error}). Look at it on Platform.`;
   }
   const why = need.error === null ? "" : ` (${need.error})`;
   return `Its deploy of ${need.releaseId} failed${why}. Retry it on its Setup once what stopped it is fixed.`;

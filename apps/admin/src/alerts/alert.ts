@@ -2,9 +2,10 @@
  * Telling staff when a release or a rollout needs a person: a release
  * that didn't import, an organization whose deploy failed, and each one's
  * recovery. Whatever writes the audit event of such a failure, or of its
- * end, calls `alert` beside it, today the import (src/releases/import.ts)
- * and a deploy's end (src/rollout/deploy.ts), later the rollout's pass
- * for a halt or a blocked rollout. `alert` only records the change, for
+ * end, calls `alert` beside it: the import (src/releases/import.ts), a
+ * deploy's end (src/rollout/deploy.ts), and the rollout pass for a halt
+ * or a 429 that blocks every rollout (src/rollout/scheduler.ts). `alert`
+ * only records the change, for
  * the channels switched on then; `deliverAlerts`, at the end of each cron
  * run (src/server.ts), tells those still on (src/alerts/channels.ts):
  * mail and Discord (src/alerts/senders.ts).
@@ -25,8 +26,9 @@ import { z } from "zod";
 
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
-import { withLease } from "../db/lease.ts";
+import { invocationLeaseMs, withLease } from "../db/lease.ts";
 import { alerts, clients } from "../db/schema.ts";
+import { channelIds } from "../rollout/channel-ids.ts";
 import { alertChannelIds } from "./alert-channels.ts";
 import type { AlertChannel } from "./alert-channels.ts";
 import { onChannels, switchedOn } from "./channels.ts";
@@ -43,7 +45,11 @@ const failedAtSchema = z.number().int().optional();
 /**
  * What changed: a release that failed to import, or imported after that;
  * an organization whose deploy of a release failed, or that deployed one
- * after that. Identifiers and a code only, as the audit event has them.
+ * after that; a channel's rollout that halted (`since` it started or was
+ * last resumed: each halt its own); a 429 that blocks the deployer token
+ * `until` then; an organization set aside after platform faults in a
+ * row (`since` its last deploy started: each time its own). Identifiers,
+ * codes and counts only, as the audit event has them.
  */
 export const alertEventSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -69,6 +75,23 @@ export const alertEventSchema = z.discriminatedUnion("kind", [
     releaseId: z.string(),
     failedAt: failedAtSchema,
   }),
+  z.object({
+    kind: z.literal("rollout_halted"),
+    rolloutId: z.string(),
+    channel: z.enum(channelIds),
+    releaseId: z.string(),
+    done: z.number().int(),
+    failed: z.number().int(),
+    since: z.number().int(),
+  }),
+  z.object({ kind: z.literal("rollout_blocked"), until: z.number().int() }),
+  z.object({
+    kind: z.literal("deploy_set_aside"),
+    clientId: z.string(),
+    releaseId: z.string(),
+    code: z.string(),
+    since: z.number().int(),
+  }),
 ]);
 export type AlertEvent = z.infer<typeof alertEventSchema>;
 
@@ -92,9 +115,22 @@ const bounded = (event: AlertEvent): AlertEvent =>
 /** How many cron runs try a channel that refuses a message before giving up on it. */
 export const MAX_ATTEMPTS = 5;
 
-/** What `event` is about, one row a thing, and whether it says that thing fails. */
-const subjectOf = (event: AlertEvent): { key: string; failing: boolean } =>
-  "clientId" in event
+/**
+ * What `event` is about, one row a thing, and whether it says that thing
+ * fails. A halt and a block are each a thing of their own, told once and
+ * never recovered: a rollout halted again after a resume is a new halt.
+ */
+const subjectOf = (event: AlertEvent): { key: string; failing: boolean } => {
+  if (event.kind === "rollout_halted") {
+    return { key: `halt:${event.rolloutId}:${event.since}`, failing: true };
+  }
+  if (event.kind === "rollout_blocked") {
+    return { key: `blocked:${event.until}`, failing: true };
+  }
+  if (event.kind === "deploy_set_aside") {
+    return { key: `aside:${event.clientId}:${event.since}`, failing: true };
+  }
+  return "clientId" in event
     ? {
         key: `deploy:${event.clientId}`,
         failing: event.kind === "deploy_failed",
@@ -103,6 +139,7 @@ const subjectOf = (event: AlertEvent): { key: string; failing: boolean } =>
         key: `import:${event.releaseId}`,
         failing: event.kind === "import_failed",
       };
+};
 
 /**
  * Records `event` at `now` when it changes the state of what it's about,
@@ -319,7 +356,7 @@ const deliverOne = async (
 export const deliverAlerts = async (env: Env): Promise<void> => {
   const db = adminDatabase(env.DB);
   try {
-    await withLease(db, "alerts", async () => {
+    await withLease(db, "alerts", invocationLeaseMs, async () => {
       const rows = await db
         .select()
         .from(alerts)
