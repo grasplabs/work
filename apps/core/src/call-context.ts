@@ -12,7 +12,10 @@ import type { CallHook, TargetCall } from "@grasp-os/shared/rpc-target";
 // checks it again before its answer goes back, so a call that ran longer
 // than a reading holds never answers someone whose session ended
 // meanwhile, whichever namespace or method it is. Free while the reading
-// is fresh: every check of a connection shares it.
+// is fresh: every check of a connection shares it. It withholds the answer
+// only: whatever the call wrote on its way, its session still good when it
+// began, has committed and stays, as a write the moment before the session
+// ended would.
 
 /** A call running, and what checks its answer before it goes back. */
 interface RunningCall {

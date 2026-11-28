@@ -25,7 +25,11 @@ import {
   isolateRpcHeld,
   signedOutRpcAccounting,
 } from "./rpc-target.ts";
-import { recheckedEvery, sessionRecheckMs } from "./session-check.ts";
+import {
+  coalesced,
+  recheckedEvery,
+  sessionRecheckMs,
+} from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { SessionRpc } from "./session-rpc.ts";
 import { followObject } from "./upstream.ts";
@@ -247,8 +251,13 @@ const sessionApi = (
       return identity;
     }
   );
-  /** Reads the session now: told to, or closes the connection if it ended. */
-  const readNow = async (): Promise<void> => {
+  /**
+   * Reads the session again, told to (person-connections.ts): closes the
+   * connection if it ended. Tellings that come together share readings
+   * (`coalesced`), so a person whose many sessions end at once costs each
+   * of their connections two readings at most, not one per session ended.
+   */
+  const readNow = coalesced(async (): Promise<void> => {
     check.forget();
     try {
       await check();
@@ -256,11 +265,12 @@ const sessionApi = (
       // An ended session has closed the connection; a reading that failed
       // is made again at the next call or push.
     }
-  };
+  });
   /**
    * Checks the session again as a call answers (call-context.ts): a call
    * that ran past its reading's window never answers someone whose session
-   * ended meanwhile. A reading that can't be made then (the database away
+   * ended meanwhile. Only its answer is withheld: what it wrote has
+   * committed. A reading that can't be made then (the database away
    * a moment) closes the connection as unverified, and the answer goes
    * nowhere: the page never makes a call twice that was on its way when
    * the connection dropped (core-connection.ts), so a write the call made
@@ -321,7 +331,10 @@ const sessionApi = (
               }
             ),
           parse: (frame) => recheckFrameSchema.parse(frame),
-          deliver: readNow,
+          deliver: async () => {
+            readNow();
+            await Promise.resolve();
+          },
           maxQueued: maxQueuedRechecks,
           // A telling may have come before the socket was there: whatever
           // was read until now is read again when it is next needed.

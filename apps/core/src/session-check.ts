@@ -113,3 +113,34 @@ export const recheckedEvery = <T>(
     }
   );
 };
+
+/**
+ * `run`, made when asked, with asks that come together sharing runs: an
+ * ask while a run is under way gets one more run after it (the run under
+ * way may have begun before what the ask tells of), which every other ask
+ * meanwhile shares. So however many asks come at once, at most two runs.
+ * Never waited for: `run` handles its own failures.
+ */
+export const coalesced = (run: () => Promise<void>): (() => void) => {
+  let running = false;
+  let askedMeanwhile = false;
+  const runs = async (): Promise<void> => {
+    running = true;
+    try {
+      do {
+        askedMeanwhile = false;
+        // oxlint-disable-next-line no-await-in-loop -- one run at a time, again only if asked meanwhile
+        await run();
+      } while (askedMeanwhile);
+    } finally {
+      running = false;
+    }
+  };
+  return (): void => {
+    if (running) {
+      askedMeanwhile = true;
+      return;
+    }
+    void runs();
+  };
+};
