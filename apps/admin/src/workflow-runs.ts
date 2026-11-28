@@ -21,8 +21,6 @@ export const adminWorkflows = {
   applyClient: "apply-client",
   /** An attempt at provisioning a placed client (src/hosting/workflow.ts). */
   provisionPlacedClient: "provision-placed-client",
-  /** One client's deploy to its target release, in one step (src/rollout/deploy.ts). */
-  deploy: "deploy",
   /** One organization's rollout of a release, a step a phase (src/rollout/org-rollout.ts). */
   orgRollout: "org-rollout",
 } as const;

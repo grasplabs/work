@@ -30,7 +30,7 @@ import { RolloutError } from "../src/rollout/errors.ts";
 import { rolloutLimits } from "../src/rollout/plan.ts";
 import { rolloutPass } from "../src/rollout/scheduler.ts";
 import { channelReleases } from "../src/rollout/targets.ts";
-import { adminWorkflow, adminWorkflows } from "../src/workflow-runs.ts";
+import { adminWorkflows } from "../src/workflow-runs.ts";
 import type { ApiCall } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { releaseToEdge } from "./edge.ts";
@@ -1106,7 +1106,7 @@ describe("release channels", () => {
         orphans.map((clientId) => ({
           clientId,
           runId: `deploy-never-${clientId}`,
-          kind: "deploy" as const,
+          kind: "rollout" as const,
           claimedAt,
         }))
       ),
@@ -1204,107 +1204,6 @@ describe("release channels", () => {
       await expect(startedOf([...waiting, ...failing])).resolves.toBe(0);
     }
   );
-
-  it("waits for an older admin's reconciler to give the lease back, and leaves the deploy run it started to finish, counted done for the rollout", async () => {
-    const before = await placedRelease("feat(core): before");
-    const older = await live("edge", before);
-    const fresh = await live("edge", before);
-    const release = await placedRelease("feat(core): deployed across versions");
-    await releaseToEdge(env, [release]);
-    // An older admin's reconciler holds the lease as it claims `older`:
-    // with no rollout, for a `deploy` run of its own.
-    await db.insert(leases).values({
-      id: "reconciler",
-      holder: "older-admin",
-      expiresAt: new Date(Date.now() + 15 * 60_000),
-    });
-    await using runs = followRuns();
-    const runId = `deploy-older-${crypto.randomUUID().slice(0, 8)}`;
-    const now = new Date();
-    await db.batch([
-      db
-        .insert(clientRuns)
-        .values({
-          clientId: older.clientId,
-          runId,
-          kind: "deploy",
-          claimedAt: now,
-        })
-        .onConflictDoUpdate({
-          target: clientRuns.clientId,
-          set: {
-            runId,
-            kind: "deploy",
-            claimedAt: now,
-            attempt: 0,
-            attemptKey: null,
-          },
-        }),
-      db.insert(clientDeploys).values({
-        clientId: older.clientId,
-        releaseId: release,
-        runId,
-        status: "deploying",
-        startedAt: now,
-      }),
-    ]);
-    // Its core upload held until released.
-    let held = false;
-    const released = Promise.withResolvers<unknown>();
-    cloudflare.afterAnswering(await coreUpload(older.clientId), async () => {
-      held = true;
-      await released.promise;
-    });
-    await adminWorkflow(env, adminWorkflows.deploy).create({
-      id: runId,
-      params: { clientId: older.clientId, releaseId: release },
-    });
-    await vi.waitFor(() => {
-      if (!held) {
-        throw new Error("The older run hasn't reached core yet");
-      }
-    });
-
-    await rolloutPass(env);
-    const whileLeased = await deploysStarted(fresh.clientId);
-    // The older reconciler's tick ends: it gives the lease back.
-    await db.delete(leases).where(eq(leases.holder, "older-admin"));
-    await rolloutPass(env);
-    const beside = await deploysStarted(fresh.clientId);
-    released.resolve(true);
-    await ended(adminWorkflows.deploy, runId);
-    await runs.settle();
-    await runs.converge();
-    const edgeRollout = await rolloutOf("edge");
-
-    expect({
-      whileLeased,
-      beside,
-      older: await releasesOf(older.clientId),
-      olderStarted: await deploysStarted(older.clientId),
-      fresh: await releasesOf(fresh.clientId),
-      olderDeploy: await db
-        .select({
-          runId: clientDeploys.runId,
-          status: clientDeploys.status,
-          rolloutId: clientDeploys.rolloutId,
-        })
-        .from(clientDeploys)
-        .where(eq(clientDeploys.clientId, older.clientId))
-        .get(),
-      rollout: edgeRollout?.status,
-    }).toStrictEqual({
-      whileLeased: 0,
-      // Slow start: the older admin's run is no rollout's, so 1 out.
-      beside: 1,
-      older: on(release),
-      // Its own run's, never the pass's.
-      olderStarted: 0,
-      fresh: on(release),
-      olderDeploy: { runId, status: "done", rolloutId: null },
-      rollout: "done",
-    });
-  });
 
   it("starts nothing while a 429 blocks the deployer token, telling it once a block, nor past the budget's reserve", async () => {
     const release = await placedRelease("feat(core): over the budget");
