@@ -55,13 +55,17 @@ export const runRecordingWrites = (db: DatabaseSync, sql: string): Write[] => {
       continue;
     }
     const own: Write[] = [];
-    const dropped = new Set<string>();
     db.setAuthorizer((action, first, second, _database, trigger) => {
       if (trigger === null && first !== null && !first.startsWith("sqlite_")) {
+        const last = own.at(-1);
         if (action === constants.SQLITE_DROP_TABLE) {
-          dropped.add(first);
           own.push({ kind: "drop", table: first, statement });
-        } else if (action === constants.SQLITE_DELETE) {
+        } else if (
+          action === constants.SQLITE_DELETE &&
+          // SQLite reports a DROP TABLE's own delete right after it: the
+          // drop is judged as a drop, not as this delete.
+          !(last?.kind === "drop" && last.table === first)
+        ) {
           own.push({ kind: "delete", table: first, statement });
         } else if (action === constants.SQLITE_UPDATE && second !== null) {
           own.push({ kind: "update", table: first, column: second, statement });
@@ -74,12 +78,7 @@ export const runRecordingWrites = (db: DatabaseSync, sql: string): Write[] => {
     } finally {
       db.setAuthorizer(null);
     }
-    // A DROP TABLE deletes its rows too: it is judged as a drop.
-    writes.push(
-      ...own.filter(
-        ({ kind, table }) => !(kind === "delete" && dropped.has(table))
-      )
-    );
+    writes.push(...own);
   }
   return writes;
 };

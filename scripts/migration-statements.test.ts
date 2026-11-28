@@ -30,6 +30,16 @@ INSERT INTO \`p\` VALUES ('a', 'c') ON CONFLICT(\`id\`) DO UPDATE SET \`kind\` =
 DROP TABLE \`log\`;`)
     ).toStrictEqual(["delete p", "update p.kind", "drop log"]);
   });
+
+  it("keeps an explicit delete of a table the same statement group drops", () => {
+    expect(
+      recorded(`DELETE FROM \`p\` WHERE \`kind\` LIKE 'tmp%';
+CREATE TABLE \`__new_p\` (\`id\` text PRIMARY KEY, \`kind\` text);
+INSERT INTO \`__new_p\` SELECT * FROM \`p\`;
+DROP TABLE \`p\`;
+ALTER TABLE \`__new_p\` RENAME TO \`p\`;`)
+    ).toStrictEqual(["delete p", "drop p"]);
+  });
 });
 
 describe(statementChanges, () => {
