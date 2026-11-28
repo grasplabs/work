@@ -158,7 +158,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#pendingActions = new PendingActionsRpc(env, full);
     this.#unknownOutcomes = new UnknownOutcomesRpc(env, full);
     this.#signals = new SignalsRpc(env, full);
-    this.#chats = new ChatsRpc(env, full);
+    this.#chats = new ChatsRpc(env, full, closed);
     this.#sessions = new SessionsRpc(env, full, sessionId);
     this.#channelAccounts = new ChannelAccountsRpc(env, full);
     this.#notifications = new NotificationsRpc(env, full);
