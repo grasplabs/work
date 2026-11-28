@@ -10,8 +10,10 @@
  * Threat model, and how each is closed:
  *
  * - Customer data reaching a channel. A message is built from identifiers,
- *   a code and the organization's name as the admin keeps it
- *   (`messageOf`, src/alerts/alert.ts): nothing anyone wrote in Grasp.
+ *   a code, and the organization's name and channel as the admin keeps
+ *   them (src/alerts/message.ts): nothing anyone wrote in Grasp.
+ * - Text from outside formatting or linking in Discord: see
+ *   src/alerts/discord.ts.
  * - Mail going anywhere else. The binding may send from one address to
  *   one mailbox, as the deploy restricts it; Cloudflare refuses any other.
  * - The webhook leaking. It's a credential: read from Secrets Store at
@@ -30,26 +32,21 @@
 import "@tanstack/react-start/server-only";
 import { ifStored, storeSecret } from "../deploy/context.ts";
 import type { AlertChannel } from "./alert-channels.ts";
+import { discordPostOf } from "./discord.ts";
+import type { AlertFacts } from "./message.ts";
 
-/** One alert as a channel sends it: a subject line and its text. */
+/**
+ * One alert as a channel sends it: a subject line, its text and the
+ * admin's page for it, as mail has them, and the alerts it tells, for
+ * Discord's cards (src/alerts/discord.ts): one, or a test's samples.
+ */
 export interface AlertMessage {
   subject: string;
   text: string;
+  /** The admin's page for it, in full; null while the admin has no hostname. */
+  link: string | null;
+  alerts: readonly AlertFacts[];
 }
-
-/**
- * A message of this stage's admin: staging's subjects say so, and a link
- * to place `path` in the admin follows the text on a line of its own, by
- * the admin's own hostname, while it has one.
- */
-export const messageFor = (
-  env: Env,
-  { subject, text, path }: AlertMessage & { path: string }
-): AlertMessage => ({
-  subject: env.STAGE === "production" ? subject : `[${env.STAGE}] ${subject}`,
-  text:
-    env.ADMIN_HOST === "" ? text : `${text}\nhttps://${env.ADMIN_HOST}${path}`,
-});
 
 /** Sends a message: null once the channel took it, else a code saying why not. Never throws. */
 export type AlertSender = (message: AlertMessage) => Promise<string | null>;
@@ -63,9 +60,6 @@ const discordHosts = new Set([
 ]);
 const webhookPath = "/api/webhooks/";
 
-/** The most characters Discord takes in a message. */
-const discordMessageMax = 2000;
-
 /** How long Discord may take to take a message. */
 const discordTimeoutMs = 10_000;
 
@@ -77,14 +71,6 @@ export const discordWebhookOf = (stored: string): URL | null => {
     discordHosts.has(url.hostname) &&
     url.pathname.startsWith(webhookPath);
   return isDiscord ? url : null;
-};
-
-/** `message` as one Discord message, cut short when it's longer than one takes. */
-const discordContent = ({ subject, text }: AlertMessage): string => {
-  const content = `**${subject}**\n${text}`;
-  return content.length <= discordMessageMax
-    ? content
-    : `${content.slice(0, discordMessageMax - 1)}…`;
 };
 
 /** The Discord channel's sender; null while its webhook isn't in Secrets Store, or isn't Discord's. */
@@ -102,7 +88,7 @@ const discordSender = async (env: Env): Promise<AlertSender | null> => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          content: discordContent(message),
+          ...discordPostOf(message),
           allowed_mentions: { parse: [] },
         }),
         signal: AbortSignal.timeout(discordTimeoutMs),
@@ -143,13 +129,13 @@ const mailSender = (env: Env): AlertSender | null => {
   if (binding === undefined || from === undefined || to === undefined) {
     return null;
   }
-  const mail: AlertSender = async ({ subject, text }) => {
+  const mail: AlertSender = async ({ subject, text, link }) => {
     try {
       await binding.send({
         from: { name: "Grasp admin", email: from },
         to,
         subject,
-        text,
+        text: link === null ? text : `${text}\n${link}`,
       });
       return null;
     } catch (error) {

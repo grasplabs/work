@@ -3,6 +3,8 @@ import { eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { alert, deliverAlerts, MAX_ATTEMPTS } from "../src/alerts/alert.ts";
+import { sendTestAlert } from "../src/alerts/channels.ts";
+import type { DiscordEmbed } from "../src/alerts/discord.ts";
 import {
   fetchAlertChannelsFn,
   sendTestAlertFn,
@@ -34,9 +36,14 @@ const webhook =
 
 /** A post to Discord's webhook, as the fake keeps it. */
 interface DiscordPost {
-  content: string;
+  content?: string;
+  embeds?: DiscordEmbed[];
   allowed_mentions: unknown;
 }
+
+/** Each card's title in `posts`, a post's cards together. */
+const titlesOf = (posts: readonly DiscordPost[]) =>
+  posts.map(({ embeds }) => embeds?.map(({ title }) => title));
 
 /**
  * What Discord was sent, how each request would follow a redirect, and
@@ -221,7 +228,7 @@ CREATE TABLE t (id TEXT);`,
     expect({
       whileFailing,
       mail: mail.sent.map(({ subject, to }) => ({ subject, to })),
-      discord: discord.posts.map(({ content }) => content.split("\n")[0]),
+      discord: titlesOf(discord.posts),
     }).toStrictEqual({
       whileFailing: {
         mail: [`Release ${release.id} didn't import`],
@@ -235,8 +242,8 @@ CREATE TABLE t (id TEXT);`,
         { subject: `Release ${release.id} imported`, to: "alerts@grasp.test" },
       ],
       discord: [
-        `**Release ${release.id} didn't import**`,
-        `**Release ${release.id} imported**`,
+        [`Release didn't import: ${release.id}`],
+        [`Release imported: ${release.id}`],
       ],
     });
     // Told and recovered: nothing of it is kept.
@@ -261,16 +268,68 @@ CREATE TABLE t (id TEXT);`,
     await deployEnded(clientId, "26.11.9", null);
     await deliver(hosted);
 
-    expect(discord.posts).toStrictEqual([
+    const setup = `https://admin.grasp.test/organizations/${clientId}/setup`;
+    // Its name (its id here) shown as typed: Discord's markdown escaped.
+    const shownName = clientId.replaceAll("-", "\\-");
+    expect(
+      discord.posts.map(({ embeds, allowed_mentions }) => ({
+        allowed_mentions,
+        cards: embeds?.map(({ title, url, color, fields, description }) => ({
+          title,
+          url,
+          color,
+          fields: fields.map(({ name }) => name),
+          link: description.endsWith(`[Open in admin](${setup})`),
+        })),
+      }))
+    ).toStrictEqual([
       {
-        content: `**${clientId} (${clientId}): deploy of 26.11.7 failed**\nThe deploy of release 26.11.7 to ${clientId} (${clientId}) failed (release_rolled_back). Retry it on its Setup once what stopped it is fixed.\nhttps://admin.grasp.test/organizations/${clientId}/setup`,
         allowed_mentions: { parse: [] },
+        cards: [
+          {
+            title: `Deploy failed: ${shownName}`,
+            url: setup,
+            color: 0xed_42_45,
+            fields: [
+              "Organization",
+              "Release",
+              "Channel",
+              "Failure code",
+              "Since",
+              "Stage",
+            ],
+            link: true,
+          },
+        ],
       },
       {
-        content: `**${clientId} (${clientId}) deployed 26.11.8**\n${clientId} (${clientId}) runs release 26.11.8 now, after a failed deploy.\nhttps://admin.grasp.test/organizations/${clientId}/setup`,
         allowed_mentions: { parse: [] },
+        cards: [
+          {
+            title: `Deploy recovered: ${shownName}`,
+            url: setup,
+            color: 0x57_f2_87,
+            fields: [
+              "Organization",
+              "Release",
+              "Channel",
+              "Failing for",
+              "Stage",
+            ],
+            link: true,
+          },
+        ],
       },
     ]);
+    const [failure] = discord.posts[0]?.embeds ?? [];
+    expect(failure?.fields.slice(0, 4).map(({ value }) => value)).toStrictEqual(
+      [
+        `${shownName}\n\`${clientId}\``,
+        "26.11.7",
+        "Stable",
+        "`release_rolled_back`",
+      ]
+    );
   });
 
   it("never tells a channel switched on after the change, nor one switched off since", async () => {
@@ -310,12 +369,9 @@ CREATE TABLE t (id TEXT);`,
     await withWebhook();
     await deliver();
 
-    expect({
-      before,
-      after: discord.posts.map(({ content }) => content.split("\n")[0]),
-    }).toStrictEqual({
+    expect({ before, after: titlesOf(discord.posts) }).toStrictEqual({
       before: 0,
-      after: ["**Release 26.11.4 didn't import**"],
+      after: [["Release didn't import: 26.11.4"]],
     });
   });
 
@@ -470,11 +526,10 @@ CREATE TABLE t (id TEXT);`,
 
     await deliver();
 
-    const [post] = discord.posts;
-    expect({
-      code: post?.content.includes(`(${"x".repeat(200)})`),
-      secondLine: post?.content.includes("upstream said more"),
-    }).toStrictEqual({ code: true, secondLine: false });
+    const [card] = discord.posts[0]?.embeds ?? [];
+    expect(
+      card?.fields.find(({ name }) => name === "Failure code")?.value
+    ).toBe(`\`${"x".repeat(200)}\``);
   });
 
   it("tries a channel that refuses again at the next run, up to its attempts, while the other channel is told once", async () => {
@@ -579,7 +634,7 @@ CREATE TABLE t (id TEXT);`,
       unset,
       sent,
       after: await states(),
-      posts: discord.posts.map(({ content }) => content.split("\n")[0]),
+      posts: titlesOf(discord.posts),
       events,
     }).toStrictEqual({
       before: [
@@ -592,7 +647,12 @@ CREATE TABLE t (id TEXT);`,
         { channel: "mail", on: false, ready: false },
         { channel: "discord", on: true, ready: true },
       ],
-      posts: ["**Test alert**"],
+      posts: [
+        [
+          "Test: Deploy failed: Sample organization",
+          "Test: Deploy recovered: Sample organization",
+        ],
+      ],
       events: [
         {
           action: "alerts.test",
@@ -614,6 +674,90 @@ CREATE TABLE t (id TEXT);`,
         },
       ],
     });
+  });
+
+  it("sends a test as a real alert looks, marked as a test, and records no alert or failure", async () => {
+    const tester = { email: "sample-tester@grasp.test", sub: "sub-tester" };
+    const mail = mailbox();
+    await withWebhook();
+    const hosted = { ...mail.env, ADMIN_HOST: "admin.grasp.test" };
+    const outcomes = [
+      await sendTestAlert(hosted, tester, "discord"),
+      await sendTestAlert(hosted, tester, "mail"),
+    ];
+    // A real failure, delivered, for the cards to match.
+    await switchChannel("discord", true);
+    const clientId = await client();
+    await alert(db, {
+      kind: "deploy_failed",
+      clientId,
+      releaseId: "26.11.7",
+      code: "release_rolled_back",
+    });
+    await deliver(hosted);
+    const [test, real] = discord.posts;
+    const [failure, recovery] = test?.embeds ?? [];
+    const [sent] = mail.sent;
+    const audited = await db
+      .select({ action: auditEvents.action })
+      .from(auditEvents)
+      .where(eq(auditEvents.actor, tester.email));
+
+    expect({
+      outcomes,
+      cards: test?.embeds?.map(({ title, color, url, description }) => ({
+        title,
+        color,
+        url,
+        first: description.split("\n")[0],
+      })),
+      fields: failure?.fields.map(({ name, inline }) => ({ name, inline })),
+      recoveryFields: recovery?.fields.map(({ name }) => name),
+      mentions: test?.allowed_mentions,
+      mail: { subject: sent?.subject, first: sent?.text?.split("\n")[0] },
+      audited,
+    }).toStrictEqual({
+      outcomes: ["sent", "sent"],
+      cards: [
+        {
+          title: "Test: Deploy failed: Sample organization",
+          color: 0x99_aa_b5,
+          url: "https://admin.grasp.test/platform/maintenance#alerts",
+          first:
+            "**A test, sent by hand from the admin: no organization is affected and nothing failed.**",
+        },
+        {
+          title: "Test: Deploy recovered: Sample organization",
+          color: 0x99_aa_b5,
+          url: "https://admin.grasp.test/platform/maintenance?sample=recovery#alerts",
+          first:
+            "**A test, sent by hand from the admin: no organization is affected and nothing failed.**",
+        },
+      ],
+      fields: real?.embeds?.[0]?.fields.map(({ name, inline }) => ({
+        name,
+        inline,
+      })),
+      recoveryFields: [
+        "Organization",
+        "Release",
+        "Channel",
+        "Failing for",
+        "Stage",
+      ],
+      mentions: { parse: [] },
+      mail: {
+        subject:
+          "Test: Sample organization (sample-organization): deploy of 26.11.7 failed",
+        first:
+          "A test from the admin, sent by hand: no organization is affected and nothing failed. A real alert reads like this:",
+      },
+      audited: [{ action: "alerts.test" }, { action: "alerts.test" }],
+    });
+    // Only the real failure is an alert.
+    await expect(
+      db.select({ key: alerts.key }).from(alerts)
+    ).resolves.toStrictEqual([{ key: `deploy:${clientId}` }]);
   });
 
   it("says on the Maintenance page which channel is on, and that one on but not set up sends nothing", async () => {

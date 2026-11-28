@@ -1,8 +1,9 @@
 /**
  * The alert channels as staff run them on Platform's Maintenance page:
  * each switched on or off (`alert_channels`, off until switched on), set
- * up or not (src/alerts/senders.ts), and tried with a test alert. Each is
- * audited (`alerts.on`, `alerts.off`, `alerts.test`).
+ * up or not (src/alerts/senders.ts), and tried with a test alert that
+ * looks like a real one (src/alerts/message.ts). Each is audited
+ * (`alerts.on`, `alerts.off`, `alerts.test`).
  */
 import "@tanstack/react-start/server-only";
 import { and, eq } from "drizzle-orm";
@@ -13,7 +14,8 @@ import type { AdminDatabase } from "../db/act.ts";
 import { alertChannels } from "../db/schema.ts";
 import { alertChannelIds } from "./alert-channels.ts";
 import type { AlertChannel } from "./alert-channels.ts";
-import { messageFor, senderOf } from "./senders.ts";
+import { testMessageOf } from "./message.ts";
+import { senderOf } from "./senders.ts";
 import type { AlertSender } from "./senders.ts";
 
 /** One channel as the Maintenance page shows it. */
@@ -109,7 +111,9 @@ export type TestOutcome = string;
 
 /**
  * Sends a test alert on channel `channel`, on or off, to see it works
- * before it's needed: audited with what became of it.
+ * before it's needed, and how a real one looks: a sample failure, and
+ * on Discord its recovery beside it, each saying it's a test. Audited
+ * with what became of it.
  */
 export const sendTestAlert = async (
   env: Env,
@@ -118,15 +122,7 @@ export const sendTestAlert = async (
 ): Promise<TestOutcome> => {
   const send = await senderOf(env, channel);
   const refused =
-    send === null
-      ? "not_ready"
-      : await send(
-          messageFor(env, {
-            subject: "Test alert",
-            text: "A test from the admin, sent by hand: alerts reach this channel.",
-            path: "/platform/maintenance",
-          })
-        );
+    send === null ? "not_ready" : await send(testMessageOf(env, new Date()));
   const outcome = refused ?? "sent";
   await audit(adminDatabase(env.DB), staff, {
     action: "alerts.test",
