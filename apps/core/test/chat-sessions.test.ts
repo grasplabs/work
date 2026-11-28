@@ -495,43 +495,6 @@ describe("a chat's ChatSession", () => {
     }
   );
 
-  it("retries a call whose object reset, or reset for holding its calls too long, and nothing else the platform marks overloaded", async () => {
-    const overrun =
-      "A call to blockConcurrencyWhile() in a Durable Object waited for too long. The call was canceled and the Durable Object was reset.";
-    expect({
-      reset: await attemptsAfter(
-        platformError("Durable Object reset because its code was updated.", {
-          durableObjectReset: true,
-        })
-      ),
-      overloaded: await attemptsAfter(
-        platformError(
-          "Durable Object is overloaded. Too many requests queued.",
-          {
-            overloaded: true,
-          }
-        )
-      ),
-      overrun: await attemptsAfter(
-        platformError(overrun, { durableObjectReset: true, overloaded: true })
-      ),
-      otherOverloadedReset: await attemptsAfter(
-        platformError(
-          "Durable Object's isolate exceeded its memory limit and was reset.",
-          {
-            durableObjectReset: true,
-            overloaded: true,
-          }
-        )
-      ),
-    }).toStrictEqual({
-      reset: 2,
-      overloaded: 1,
-      overrun: 2,
-      otherOverloadedReset: 1,
-    });
-  });
-
   it("tells the chat's agent a note once however often it is sent with its ID, and each note with an ID of its own", async () => {
     const { userId } = await signedInWithRole(idp, "user");
     const asking = await chatOf(userId, says("Noted."));
@@ -1633,6 +1596,49 @@ describe("what a question's entry keeps", () => {
         },
       },
       none: { files: [] },
+    });
+  });
+});
+
+describe("a call to an object (callObject)", () => {
+  it("retries a call whose object reset, or reset for holding its calls too long, and nothing else the platform marks overloaded", async () => {
+    const overrun =
+      "A call to blockConcurrencyWhile() in a Durable Object waited for too long. The call was canceled and the Durable Object was reset.";
+    expect({
+      reset: await attemptsAfter(
+        platformError("Durable Object reset because its code was updated.", {
+          durableObjectReset: true,
+        })
+      ),
+      overloaded: await attemptsAfter(
+        platformError(
+          "Durable Object is overloaded. Too many requests queued.",
+          {
+            overloaded: true,
+          }
+        )
+      ),
+      overrun: await attemptsAfter(
+        platformError(overrun, { durableObjectReset: true, overloaded: true })
+      ),
+      lostConnection: await attemptsAfter(
+        platformError("Network connection lost.", { retryable: true })
+      ),
+      otherOverloadedReset: await attemptsAfter(
+        platformError(
+          "Durable Object's isolate exceeded its memory limit and was reset.",
+          {
+            durableObjectReset: true,
+            overloaded: true,
+          }
+        )
+      ),
+    }).toStrictEqual({
+      reset: 2,
+      overloaded: 1,
+      overrun: 2,
+      lostConnection: 2,
+      otherOverloadedReset: 1,
     });
   });
 });

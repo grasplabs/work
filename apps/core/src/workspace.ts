@@ -7070,8 +7070,8 @@ export class Workspace extends DurableObject<Env> {
    * up its person's list: often decided elsewhere, it is where the agent
    * can now go on. Refused while the chat is deleted or its person
    * erased: what is told then would outlive the erasure. Its callers keep
-   * the decision all the same. Told once by `requestId`: a caller that may
-   * send the same notice again names it, else each call is its own.
+   * the decision all the same. Told once by `requestId`: a caller whose
+   * own call may be sent again names the notice, else each call is its own.
    */
   async #note(
     chatId: ChatId,
@@ -7083,8 +7083,8 @@ export class Workspace extends DurableObject<Env> {
     }
     // Again on a stub of its own should the chat's object reset under the
     // call, as one that opens cold under load can: a decision's notice is
-    // never dropped for a restart (`#toSession`), and never told twice for
-    // one that came after it was kept (`requestId`).
+    // never dropped for a restart (`#toSession`), and not told twice for one
+    // that came after it was kept: each retry sends the same `requestId`.
     await this.#toSession(chatId, async (session) => {
       await session.note(text, requestId);
     });

@@ -193,9 +193,9 @@ describe("a draft's preview", { timeout: 180_000 }, () => {
   it("seals a draft for the next to ask once a seal of it whose request was cancelled runs past a seal's time", async () => {
     const { app } = await setUp();
     const draft = await draftOf(env, appKind, app);
-    // A sandbox that never answers the seal's inspection: as the first
-    // seal's request was cancelled while it inspected, which workerd never
-    // settles. Its own code's loads go through as ever.
+    // A sandbox that never answers code it loads unnamed, as the seal's
+    // inspection is: as the first seal's request was cancelled while it
+    // inspected, which workerd never settles. Named loads go through.
     const hold = { reached: false };
     const stuck = new Proxy(env.LOADER, {
       get: (target, property) => {
@@ -229,7 +229,7 @@ describe("a draft's preview", { timeout: 180_000 }, () => {
       () => {
         expect(hold.reached).toBeTruthy();
       },
-      { timeout: 60_000 }
+      { timeout: 150_000 }
     );
     const sealed = await draftRelease(bounded, app, draft);
     expect(sealed?.manifest.resourceId).toBe(app);

@@ -152,13 +152,14 @@ const sealedDrafts = new Map<string, Release>();
 const sealing = new Map<string, SharedRun<Release>>();
 
 /**
- * The longest a seal takes: two builds of the draft's code and a type
- * check, each a call of the compiler or the type checker that runs at
- * most 75 s (`programWallMs`, platform-sandbox.ts), and an inspection in
- * the sandbox. Past it, a seal is taken for abandoned and the next to ask
- * seals anew.
+ * The longest a seal takes: a build of the draft's code, an inspection in
+ * the sandbox, then a build and a type check of it with the real modules,
+ * and its migrations' evidence. Each build and check is a platform call
+ * of at most some 140 s (`callMs`, platform-sandbox.ts: a code read and
+ * 60 s of CPU, tried twice), so some 7 minutes, with room for the rest.
+ * Past it, a seal is taken for abandoned and the next to ask seals anew.
  */
-const sealWaitMs = 5 * 60_000;
+const sealWaitMs = 10 * 60_000;
 
 /** {@link sealWaitMs}, or less where tests set `SEAL_WAIT_MS`. */
 const sealWaitOf = (env: Env): number => {
