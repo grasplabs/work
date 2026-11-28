@@ -1,5 +1,4 @@
 import { recallBudgetMax, recallLimit } from "@grasp-os/brain-next/contract";
-import type { WorkOverview } from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import {
@@ -35,12 +34,12 @@ import type {
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { says } from "./agent-chat.ts";
 import {
+  allEmbedded,
   markerWord,
   surfaces,
   meaningSurfaces,
   findingsOf,
   ownStoreOf,
-  settledOwnStores,
   answersOf,
   recalledByMeaning,
   join,
@@ -162,40 +161,6 @@ const embeddedOf = async (
         )
         .one()
   );
-
-/** The queue's clock for ticks of this file: only forward. */
-const clock = { at: Date.now() };
-
-/** Most ticks the shared store may take to embed. */
-const embedTicksMost = 50;
-
-/**
- * Each of `people`'s own stores settled (`settledOwnStores`), then the
- * shared store ticked, as core's clock does, until everything it holds is
- * embedded, nothing waits and no erasure is under way: the shared store's
- * embedding then.
- */
-const allEmbedded = async (
-  people: readonly string[]
-): Promise<WorkOverview["embedding"]> => {
-  await settledOwnStores(people);
-  for (let ticks = 0; ticks < embedTicksMost; ticks += 1) {
-    clock.at = Math.max(clock.at, Date.now()) + 60_000;
-    // oxlint-disable-next-line no-await-in-loop -- one tick at a time, as core's clock
-    await workBrain(env, new Date(clock.at), noProducers);
-    // oxlint-disable-next-line no-await-in-loop -- read after each tick
-    const { embedding, waiting, erasing } = await brainWorkOverview(env);
-    if (
-      embedding.rebuilt &&
-      embedding.embedded + embedding.unembeddable === embedding.chunks &&
-      waiting.length === 0 &&
-      erasing === 0
-    ) {
-      return embedding;
-    }
-  }
-  throw new Error(`Not everything was embedded in ${embedTicksMost} ticks`);
-};
 
 /**
  * A request of core's own page as the admin signed in on `cookie`: its

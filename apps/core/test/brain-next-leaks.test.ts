@@ -4,6 +4,7 @@ import {
   onlyInOwnStore,
   personalBrainOf,
   recallBudgetMax,
+  recallLimit,
 } from "@grasp-os/brain-next/contract";
 import type { Access } from "@grasp-os/brain-next/contract";
 import { brainUploadReadersSchema } from "@grasp-os/shared/brain-sources";
@@ -31,6 +32,7 @@ import {
   publishAs,
   readSourceVersionAs,
   recallAs,
+  recallOwnedAs,
   recordEvents,
   rememberAs,
   versionRefSchema,
@@ -52,6 +54,7 @@ import { codeStep, says, toolStep } from "./agent-chat.ts";
 import { published } from "./apps.ts";
 import { chooseAudience } from "./brain-audiences.ts";
 import {
+  allEmbedded,
   markerWord,
   surfaces,
   readingSurfaces,
@@ -59,6 +62,7 @@ import {
   recallSurfaces,
   findingsOf,
   ownStoreOf,
+  recalledByMeaning,
   settledOwnStores,
   join,
   leave,
@@ -72,7 +76,12 @@ import {
 } from "./brain-next-leaks-harness.ts";
 import type { Finding } from "./brain-next-leaks-harness.ts";
 import { brainModules } from "./brain-next-modules.ts";
-import { brainSurfaces, membersOf, textOf } from "./brain-next-surfaces.ts";
+import {
+  brainSurfaces,
+  membersOf,
+  textOf,
+  twinOf,
+} from "./brain-next-surfaces.ts";
 import type { Probing } from "./brain-next-surfaces.ts";
 import { chatIdsOf, codeStepTrace } from "./code-step-trace.ts";
 import { mockIdp } from "./idp.ts";
@@ -126,6 +135,13 @@ import {
 // nobody may read.
 
 const idp = mockIdp();
+
+/**
+ * `words`, each split in two: a passage of them holds none of the words,
+ * and meaning still finds their pieces in it.
+ */
+const split = (words: readonly string[]): string =>
+  words.map((word) => `${word.slice(0, 7)} ${word.slice(7)}`).join(" ");
 
 /** The account `claims` signed in with, as a reader list names it. */
 const accountOf = (claims: Claims): SourceReader => ({
@@ -341,6 +357,79 @@ describe(
         ]),
         unprobed: [],
         singledOut: [],
+      });
+    });
+
+    it("holds a recall's answers to their twins' apart from what meaning found, whether they drew on the reader's own store among it", async () => {
+      // A reader whose own passage meaning ranks past the shared store's
+      // nearest for the markers, and first for their twins: a recall of
+      // the markers hands over nothing of their own, one of the twins does,
+      // and neither gives anything away.
+      const { userId: reader } = await signedInWithRole(idp, "user");
+      const team = await newTeam(reader);
+      const markers = Array.from({ length: 6 }, () => markerWord());
+      const twins = markers.map(twinOf);
+      const sharedWord = `s${unique()}`;
+      const own = await add(`${sharedWord} ${split(twins)}`, {
+        kind: "owner",
+        personId: reader,
+      });
+      const shared = await Promise.all(
+        Array.from(
+          { length: recallLimit },
+          async () => await add(split(markers), { kind: "team", teamId: team })
+        )
+      );
+      await allEmbedded([reader]);
+      // By meaning, as a pass asks (`recalledByMeaning`).
+      const drawn = async (words: readonly string[]) => {
+        const {
+          value: { pack, fromOwn },
+        } = await recalledByMeaning(
+          "core recallOwnedAs",
+          async () =>
+            await recallOwnedAs(env, reader, {
+              personal: true,
+              question: words.join(" "),
+              budget: { tokens: recallBudgetMax },
+            })
+        );
+        const handed = new Set(
+          pack.items.map(({ source }) => `${source.producer}:${source.id}`)
+        );
+        const isHanded = ({ producer, id }: SourceRef) =>
+          handed.has(`${producer}:${id}`);
+        return {
+          fromOwn,
+          own: isHanded(own),
+          shared: shared.filter(isHanded).length,
+        };
+      };
+
+      expect({
+        markers: await drawn(markers),
+        twins: await drawn(twins),
+        findings: await findingsOf(
+          "a reader whose own passage ranks by meaning",
+          {
+            personId: reader,
+            reader: { person: reader, groups: [`team:${team}`] },
+            personal: true,
+            sharedWord,
+            markers,
+            hiddenVersions: [],
+            hiddenInstructionFiles: [],
+            instructionGroups: [],
+          },
+          Object.fromEntries(markers.map((marker) => [marker, marker])),
+          {
+            among: surfaces.filter(([name]) => name === "core recallOwnedAs"),
+          }
+        ),
+      }).toStrictEqual({
+        markers: { fromOwn: false, own: false, shared: recallLimit },
+        twins: { fromOwn: true, own: true, shared: recallLimit - 1 },
+        findings: [],
       });
     });
 
