@@ -93,8 +93,6 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
     "There's no release before the one it runs to go back to.",
   rollback_past_migration:
     "The release since added Durable Object migrations, which a script never goes back past: release a fix instead.",
-  release_rolled_back:
-    "It failed its probe once live, so it was rolled back to the release before on its own: look at the release before releasing it again.",
   release_behind_migration:
     "That release lacks a Durable Object migration the client's scripts ran, which they never go back past: pick a later release.",
   rollback_past_chat_storage:
@@ -202,7 +200,6 @@ const failureCauses = {
   release_behind_migration: "release",
   rollback_past_chat_storage: "staff",
   release_behind_chat_storage: "release",
-  release_rolled_back: "release",
   restore_refused: "staff",
   restore_failed: "staff",
   attempt_lost: "retry",

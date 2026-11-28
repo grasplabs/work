@@ -185,7 +185,7 @@ const samplesOf = (env: Env, now: Date): [AlertFacts, AlertFacts] => {
         kind: "deploy_failed",
         clientId,
         releaseId: "26.11.7",
-        code: "release_rolled_back",
+        code: "d1_migration_failed",
       },
       at: failedAt,
       path: "/platform/maintenance#alerts",

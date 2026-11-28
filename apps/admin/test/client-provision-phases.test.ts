@@ -543,7 +543,7 @@ describe("an operation's phases, its restore point and its probe", () => {
     }).toMatchObject({
       outcomes: {
         probe: { code: "probe_identity_mismatch" },
-        route: { code: "phase_out_of_order", unstarted: true },
+        route: { code: "phase_out_of_order" },
         probeAgain: undefined,
         routeAgain: undefined,
         record: undefined,
@@ -593,84 +593,6 @@ describe("an operation's phases, its restore point and its probe", () => {
         operation: { status: "failed", step: "core" },
         routed: false,
       },
-    });
-  });
-
-  it.each([
-    {
-      name: "the release before",
-      probe: (a: string) => ({ asRelease: a }),
-      code: "probe_release_mismatch",
-    },
-    {
-      name: "a database behind the release's last migration",
-      probe: () => ({ schemaAt: { DB: "0000_init.sql" } }),
-      code: "probe_schema_mismatch",
-    },
-  ])(
-    "rolls a live client back on its own when its release's core answers $name, the release before passing on the newer schema",
-    async ({ probe, code }) => {
-      const { clientId, a, b } = await liveOnA();
-      cloudflare.coreOf(clientId).coreProbe = probe(a.releaseId);
-      const held = await attempt(clientId);
-      await startClientRelease(db, staff, held, { releaseId: b.releaseId });
-      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-      try {
-        await runClientProvision(context, held);
-      } finally {
-        errors.mockRestore();
-      }
-      const [rolledBack] = await db
-        .select({ detail: auditEvents.detail })
-        .from(auditEvents)
-        .where(
-          and(
-            eq(auditEvents.clientId, clientId),
-            eq(auditEvents.action, "release.rollback")
-          )
-        );
-
-      expect({
-        operation: await operationOf(clientId),
-        runs: await runs(clientId),
-        cause: z
-          .object({ cause: z.string() })
-          .loose()
-          .parse(JSON.parse(rolledBack?.detail ?? "{}")).cause,
-      }).toMatchObject({
-        operation: { status: "done", releaseId: a.releaseId },
-        runs: { core: a.releaseId, connect: a.releaseId },
-        cause: code,
-      });
-    }
-  );
-
-  it("rolls a live client back on its own when its release's core serves Cloudflare's stub for its static files", async () => {
-    const { clientId, a, b } = await liveOnA();
-    const { connect } = await scriptsOf(clientId);
-    cloudflare.coreOf(clientId).assetsStub = 100;
-    // Once the rollback's connect goes, core serves its files again.
-    // oxlint-disable require-await -- the fake waits on these; nothing to wait for
-    cloudflare.beforeAnswering(isUpload(connect), async () => {
-      cloudflare.beforeAnswering(isUpload(connect), async () => {
-        cloudflare.coreOf(clientId).assetsStub = 0;
-      });
-    });
-    // oxlint-enable require-await
-    const held = await attempt(clientId);
-    await startClientRelease(db, staff, held, { releaseId: b.releaseId });
-    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      await runClientProvision(context, held);
-    } finally {
-      errors.mockRestore();
-    }
-    expect({
-      operation: await operationOf(clientId),
-      runs: await runs(clientId),
-    }).toMatchObject({
-      operation: { status: "done", releaseId: a.releaseId },
-      runs: { core: a.releaseId, connect: a.releaseId },
     });
   });
 });
