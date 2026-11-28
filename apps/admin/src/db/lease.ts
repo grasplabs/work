@@ -22,13 +22,15 @@ export const invocationLeaseMs = 15 * 60 * 1000;
 /**
  * Runs `work` while holding lease `id` for up to `leaseMs`, gives it back
  * after, and returns what `work` did; undefined, at once, when another
- * run holds it.
+ * run holds it. `work` may call `renew` to hold it `leaseMs` longer from
+ * now: false, and nothing renewed, once it expired and another run took
+ * it, so `work` stops acting.
  */
 export const withLease = async <T>(
   db: AdminDatabase,
   id: string,
   leaseMs: number,
-  work: () => Promise<T>
+  work: (renew: () => Promise<boolean>) => Promise<T>
 ): Promise<T | undefined> => {
   const holder = crypto.randomUUID();
   const now = new Date();
@@ -44,8 +46,16 @@ export const withLease = async <T>(
   if (taken.length === 0) {
     return undefined;
   }
+  const renew = async (): Promise<boolean> => {
+    const renewed = await db
+      .update(leases)
+      .set({ expiresAt: new Date(Date.now() + leaseMs) })
+      .where(and(eq(leases.id, id), eq(leases.holder, holder)))
+      .returning({ holder: leases.holder });
+    return renewed.length > 0;
+  };
   try {
-    return await work();
+    return await work(renew);
   } finally {
     // Only while it's still this run's.
     await db

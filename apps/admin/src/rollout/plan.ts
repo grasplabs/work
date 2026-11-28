@@ -6,7 +6,7 @@
  *
  * - **Order.** A rollout takes its organizations by size, smallest first,
  *   then by id, the `late` ones last. Running rollouts take turns, one
- *   admission each.
+ *   admission each, the one with fewest out first.
  * - **Slots.** At most `maxInFlight` runs are out across the fleet, every
  *   channel and every kind of deploy together, as they share one deployer
  *   token. A rollout has at most 1 + its done count out (slow start): its
@@ -130,6 +130,15 @@ export interface PassPlan {
   admit: Admission[];
 }
 
+/** The platform's failure codes (`isPlatformFault`), besides Cloudflare's rate limit. */
+export const platformFaultCodes = [
+  "run_not_created",
+  "runner_replaced",
+] as const;
+
+/** What a failure code by Cloudflare's rate limit starts with (src/deploy/errors.ts). */
+export const rateLimitedPrefix = "cloudflare_429";
+
 /**
  * Whether a deploy's failure code is the platform's, not the release's:
  * Cloudflare's rate limit, a run the engine couldn't create, or another
@@ -137,9 +146,8 @@ export interface PassPlan {
  */
 export const isPlatformFault = (code: string | null): boolean =>
   code !== null &&
-  (code === "run_not_created" ||
-    code === "runner_replaced" ||
-    code.startsWith("cloudflare_429"));
+  (platformFaultCodes.some((fault) => fault === code) ||
+    code.startsWith(rateLimitedPrefix));
 
 /**
  * Whether `organization` may start a run at `now`. Always, today: the
@@ -175,7 +183,10 @@ export const countsOf = (
     const { deploy } = organization;
     if (follows(organization, rollout.channel)) {
       following += 1;
-      if (organization.running === rollout.releaseId) {
+      // On the release, and not because a deploy of it failed part way.
+      const failedOnRelease =
+        deploy?.status === "failed" && deploy.releaseId === rollout.releaseId;
+      if (organization.running === rollout.releaseId && !failedOnRelease) {
         done += 1;
       }
     }
@@ -323,14 +334,19 @@ export const planPass = (facts: PassFacts): PassPlan => {
     budgetRoom(budget, facts.inFlight)
   );
   const admit: Admission[] = [];
-  const turns = running.map((rollout) => {
-    const { done: on = 0, inFlight = 0 } = counts.get(rollout.id) ?? {};
-    return {
-      rollout,
-      queue: queueOf(rollout, organizations, skip, now),
-      room: 1 + on - inFlight,
-    };
-  });
+  // The rollout with fewest out first (then Edge, Beta, Stable), so one
+  // slot freed at a time goes round them, not always to Edge.
+  const turns = running
+    .map((rollout) => {
+      const { done: on = 0, inFlight = 0 } = counts.get(rollout.id) ?? {};
+      return {
+        rollout,
+        out: inFlight,
+        queue: queueOf(rollout, organizations, skip, now),
+        room: 1 + on - inFlight,
+      };
+    })
+    .toSorted((a, b) => a.out - b.out);
   // One each in turn, while any has room and someone waiting.
   let took = true;
   while (room > 0 && took) {

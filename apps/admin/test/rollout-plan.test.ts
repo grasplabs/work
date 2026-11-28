@@ -295,6 +295,29 @@ describe("how many start at once", () => {
     ]);
   });
 
+  it("gives one slot freed to the rollout with fewest out, not always Edge", () => {
+    const organizations = (["edge", "beta"] as const).flatMap((channel) => [
+      ...Array.from({ length: 5 }, (_, index) =>
+        org(`${channel}-on-${String(index)}`, { channel, running: release })
+      ),
+      org(`${channel}-waiting`, { channel }),
+    ]);
+    const out = ["edge-out-1", "edge-out-2"].map((id) =>
+      deployed(org(id, { channel: "edge" }), "r-edge", "deploying")
+    );
+
+    const plan = planPass(
+      factsOf([...organizations, ...out], {
+        rollouts: [rolloutOn("edge"), rolloutOn("beta")],
+        inFlight: rolloutLimits.maxInFlight - 1,
+      })
+    );
+
+    expect(plan.admit).toStrictEqual([
+      { clientId: "beta-waiting", releaseId: release, rolloutId: "r-beta" },
+    ]);
+  });
+
   it("starts one more only while the budget's left covers its reserve and every run out, and none while a 429 blocks", () => {
     const onIt = Array.from({ length: 30 }, (_, index) =>
       org(`on-${String(index).padStart(2, "0")}`, { running: release })
@@ -450,17 +473,32 @@ describe("when a rollout is done", () => {
         deployed(org("failed"), "r-stable", "failed"),
       ])
     );
+    // Its Workers on the release, but its deploy of it failed part way.
+    const failedPartWay = planPass(
+      factsOf([
+        org("on", { running: release }),
+        {
+          ...deployed(org("part-way"), "r-stable", "failed"),
+          running: release,
+        },
+      ])
+    );
     const empty = planPass(factsOf([]));
 
     expect({
       out: out.done,
       done: done.done,
       failedOne: failedOne.done,
+      failedPartWay: [
+        failedPartWay.done,
+        failedPartWay.counts.get("r-stable")?.done,
+      ],
       empty: empty.done,
     }).toStrictEqual({
       out: [],
       done: ["r-stable"],
       failedOne: [],
+      failedPartWay: [[], 1],
       empty: ["r-stable"],
     });
   });

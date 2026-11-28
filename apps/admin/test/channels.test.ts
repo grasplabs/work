@@ -1035,16 +1035,18 @@ describe("release channels", () => {
     });
   });
 
-  it.each(["halted", "superseded"] as const)(
+  it.each(["halted", "superseded", "failed on thrice"] as const)(
     "claims nothing for a rollout %s between the pass's read and its claim",
     async (what) => {
       const release = await placedRelease(`feat(core): ${what} mid-pass`);
       const waiting = await waitingClients("edge", `n-${what}`, 3);
       await runOn(await waitingClients("edge", `n-${what}-on`, 3), release);
       await releaseToEdge(env, [release]);
+      const rollout = await rolloutOf("edge");
+      const failing = await waitingClients("stable", `n-${what}-fails`, 3);
       const newer = await placedRelease(`feat(core): after ${what}`);
       // Right before each write after the pass's first (its self-heal):
-      // the rollout halts, or Edge moves on.
+      // the rollout halts, Edge moves on, or a third deploy of it fails.
       let writes = 0;
       const racing = racingDb(async (database) => {
         writes += 1;
@@ -1052,12 +1054,33 @@ describe("release channels", () => {
           return;
         }
         const raced = adminDatabase(database);
-        await (what === "halted"
-          ? raced
-              .update(rollouts)
-              .set({ status: "halted", haltedReason: "failed" })
-              .where(eq(rollouts.releaseId, release))
-          : raced.batch(toEdge(raced, newer)));
+        if (what === "halted") {
+          await raced
+            .update(rollouts)
+            .set({ status: "halted", haltedReason: "failed" })
+            .where(eq(rollouts.releaseId, release));
+          return;
+        }
+        if (what === "superseded") {
+          await raced.batch(toEdge(raced, newer));
+          return;
+        }
+        const now = new Date();
+        await raced
+          .insert(clientDeploys)
+          .values(
+            failing.map((clientId) => ({
+              clientId,
+              releaseId: release,
+              runId: `deploy-failed-${clientId}`,
+              status: "failed" as const,
+              error: "smoke_check_failed",
+              startedAt: now,
+              endedAt: now,
+              rolloutId: rollout?.id,
+            }))
+          )
+          .onConflictDoNothing();
       });
 
       await rolloutPass({ ...env, DB: racing });

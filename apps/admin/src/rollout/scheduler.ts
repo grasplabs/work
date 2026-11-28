@@ -71,7 +71,13 @@ import { recordEnd } from "./deploy.ts";
 import type { DeployParams } from "./deploy.ts";
 import { isSecretsBehind } from "./desired.ts";
 import type { ChannelReleases, SharedByWorker } from "./desired.ts";
-import { liveRolloutStatuses, planPass } from "./plan.ts";
+import {
+  liveRolloutStatuses,
+  planPass,
+  platformFaultCodes,
+  rateLimitedPrefix,
+  rolloutLimits,
+} from "./plan.ts";
 import type {
   Admission,
   Budget,
@@ -259,6 +265,14 @@ const settled = async (
   };
 };
 
+/**
+ * How many organizations failed on rollout `rolloutId`, platform faults
+ * aside, as SQL: what the claim reads, so a failure that lands mid-pass
+ * stops the claims after the one that halts it (`isHalting`).
+ */
+const failedSql = (rolloutId: string) =>
+  sql`(SELECT COUNT(*) FROM ${clientDeploys} WHERE ${clientDeploys.rolloutId} = ${rolloutId} AND ${clientDeploys.status} = 'failed' AND COALESCE(${clientDeploys.error}, '') NOT IN (SELECT value FROM json_each(${JSON.stringify(platformFaultCodes)})) AND substr(COALESCE(${clientDeploys.error}, ''), 1, ${rateLimitedPrefix.length}) != ${rateLimitedPrefix})`;
+
 /** A new organization run's id. */
 const newRunId = (): string =>
   `deploy-${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
@@ -302,7 +316,7 @@ const claim = async (
   const rolloutRuns =
     rolloutId === null
       ? sql`COALESCE((SELECT ${clients.pinnedReleaseId} FROM ${clients} WHERE ${clients.id} = ${row.id}), (SELECT ${channels.releaseId} FROM ${channels} WHERE ${channels.id} = ${row.channel})) = ${releaseId}`
-      : sql`EXISTS (SELECT 1 FROM ${rollouts} WHERE ${rollouts.id} = ${rolloutId} AND ${rollouts.status} = 'running')`;
+      : sql`EXISTS (SELECT 1 FROM ${rollouts} WHERE ${rollouts.id} = ${rolloutId} AND ${rollouts.status} = 'running') AND ${failedSql(rolloutId)} < ${rolloutLimits.failuresToHalt}`;
   // The client as read: on its channel, pinned (or not) as it was.
   const asReadClient = sql`EXISTS (SELECT 1 FROM ${clients} WHERE ${clients.id} = ${row.id} AND ${clients.channel} = ${row.channel} AND ${clients.pinnedReleaseId} IS ${row.pinnedReleaseId})`;
   const claimable = sql`EXISTS (SELECT 1 FROM ${clientRuns} WHERE ${clientRuns.clientId} = ${row.id} AND ${clientRuns.runId} = ${runId}) AND ${rolloutRuns} AND ${asReadClient}`;
@@ -530,6 +544,27 @@ const budgetOf = async (db: AdminDatabase, now: Date): Promise<Budget> => {
 };
 
 /**
+ * Alerts that rollout `rollout` halted: once a halt, as `alert` records
+ * each halt once, so a pass may say it again (`recordRollouts`) for one
+ * whose alert a pass cut off never recorded.
+ */
+const alertHalt = async (
+  db: AdminDatabase,
+  rollout: RolloutRow,
+  { done, failed }: Pick<RolloutCounts, "done" | "failed">
+): Promise<void> => {
+  await alert(db, {
+    kind: "rollout_halted",
+    rolloutId: rollout.id,
+    channel: rollout.channel,
+    releaseId: rollout.releaseId,
+    done,
+    failed,
+    since: rollout.since.getTime(),
+  });
+};
+
+/**
  * Halts running rollout `rollout` (`failed`), audited (`rollout.halt`)
  * and alerted once, and says so on its channel (`channels.stopped_by`,
  * which an older admin reads). Nothing when it's no longer as read.
@@ -567,15 +602,7 @@ const recordHalt = async (
       ),
   ]);
   if (recorded.length > 0) {
-    await alert(db, {
-      kind: "rollout_halted",
-      rolloutId: rollout.id,
-      channel: rollout.channel,
-      releaseId: rollout.releaseId,
-      done,
-      failed,
-      since: rollout.since.getTime(),
-    });
+    await alertHalt(db, rollout, { done, failed });
   }
 };
 
@@ -635,6 +662,10 @@ const recordRollouts = async (
         .where(asRead(rollout, rollout.status));
     }
     if (rollout.status === "halted") {
+      // Told again each pass, which `alert` records once: a pass cut off
+      // between the halt and its alert never loses it.
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await alertHalt(db, rollout, counts);
       // Said again each pass: an older admin's reconciler clears it.
       // oxlint-disable-next-line no-await-in-loop -- as above
       await db
@@ -654,25 +685,24 @@ const recordRollouts = async (
 /**
  * Records that a 429 blocks the deployer token until `until`: audited
  * (`rollout.blocked`) and alerted once a block, however many passes see
- * it.
+ * it. Alerted by each, which `alert` records once: a pass cut off between
+ * the two never loses it.
  */
 const recordBlocked = async (db: AdminDatabase, until: Date): Promise<void> => {
   const target = until.toISOString();
-  const recorded = await db
+  await db
     .insert(auditEvents)
     .select(
       sql`SELECT ${crypto.randomUUID()}, ${Date.now()}, 'system', 'rollout.blocked', NULL, ${target}, ${JSON.stringify({ until: target })} WHERE NOT EXISTS (SELECT 1 FROM ${auditEvents} WHERE ${auditEvents.action} = 'rollout.blocked' AND ${auditEvents.target} = ${target})`
-    )
-    .returning({ id: auditEvents.id });
-  if (recorded.length > 0) {
-    await alert(db, { kind: "rollout_blocked", until: until.getTime() });
-  }
+    );
+  await alert(db, { kind: "rollout_blocked", until: until.getTime() });
 };
 
 /**
  * Starts what `facts`' plan admits (`first`), then plans again with what
- * changed, until it admits no one: a client that didn't start (another
- * runner has it, its claim lost) leaves its slot to the next.
+ * changed, until it admits no one or the pass lost its lease: a client
+ * that didn't start (another runner has it, its claim lost) leaves its
+ * slot to the next.
  */
 const admitAll = async (
   env: Env,
@@ -680,13 +710,17 @@ const admitAll = async (
   facts: Omit<PassFacts, "organizations"> & {
     organizations: readonly ClientRow[];
   },
-  first: readonly Admission[]
+  first: readonly Admission[],
+  renew: () => Promise<boolean>
 ): Promise<void> => {
   const rows = new Map(facts.organizations.map((row) => [row.id, row]));
   const skip = new Set<string>();
   let { inFlight } = facts;
   let admit = first;
-  while (admit.length > 0) {
+  // Each round only while the pass still holds its lease, held longer: one
+  // that outlived it starts nothing beside the pass that took it over.
+  // oxlint-disable-next-line no-await-in-loop -- one round at a time
+  while (admit.length > 0 && (await renew())) {
     // Each on its own: one that throws is logged and passed over, never
     // holding up the rest of the fleet.
     // oxlint-disable-next-line no-await-in-loop -- each round fills the slots the last left
@@ -734,7 +768,11 @@ const admitAll = async (
 };
 
 /** One pass over every channel: steps 1 to 4 of the file's comment. */
-const passOnce = async (env: Env, db: AdminDatabase): Promise<void> => {
+const passOnce = async (
+  env: Env,
+  db: AdminDatabase,
+  renew: () => Promise<boolean>
+): Promise<void> => {
   const now = new Date();
   await healRollouts(db, now);
   const releases = await channelReleases(db);
@@ -767,7 +805,7 @@ const passOnce = async (env: Env, db: AdminDatabase): Promise<void> => {
   if (plan.blocked && facts.budget.blockedUntil !== null) {
     await recordBlocked(db, facts.budget.blockedUntil);
   }
-  await admitAll(env, db, facts, plan.admit);
+  await admitAll(env, db, facts, plan.admit, renew);
 };
 
 /** Whether a deploy ended after `since`: a slot freed while the pass ran. */
@@ -790,11 +828,11 @@ export const rolloutPass = async (env: Env): Promise<void> => {
     return;
   }
   const db = adminDatabase(env.DB);
-  await withLease(db, "reconciler", passLeaseMs, async () => {
+  await withLease(db, "reconciler", passLeaseMs, async (renew) => {
     const since = new Date();
-    await passOnce(env, db);
+    await passOnce(env, db, renew);
     if (await endedSince(db, since)) {
-      await passOnce(env, db);
+      await passOnce(env, db, renew);
     }
   });
 };
