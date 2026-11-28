@@ -20,10 +20,14 @@ const base = `CREATE TABLE \`chats\` (
 --> statement-breakpoint
 CREATE TABLE \`people\` (\`id\` text PRIMARY KEY NOT NULL);`;
 
-/** What `next`, applied after `base`, changes that the release on `base` relies on. */
-const changes = (next: string): string[] => {
+/**
+ * What `next` changes that the release before it relies on, applied after
+ * `base` and `earlier`.
+ */
+const changes = (next: string, earlier = ""): string[] => {
   const db = new DatabaseSync(":memory:");
   db.exec(base);
+  db.exec(earlier);
   const before = schemaOf(db);
   db.exec(next);
   const found = unsafeChanges(before, schemaOf(db));
@@ -172,6 +176,11 @@ DROP INDEX \`chats_owner\`;`)
         rebuild(withColumns(...all, "`team_id` text DEFAULT 'none' NOT NULL"))
       )
     ).toStrictEqual([]);
+    expect(
+      changes(
+        rebuild(withColumns(...all, "`team_id` text DEFAULT NULL NOT NULL"))
+      )
+    ).toStrictEqual(["adds NOT NULL column chats.team_id without a default"]);
   });
 
   it("flags a foreign key on columns that were there, and passes one on a new column", () => {
@@ -207,7 +216,19 @@ DROP INDEX \`chats_owner\`;`)
     ]);
     expect(
       changes("CREATE UNIQUE INDEX `chats_title` ON `chats` (lower(`title`));")
-    ).toStrictEqual(["adds a unique key on chats (<expression>)"]);
+    ).toStrictEqual(["adds a unique key on chats (<lower(title)>)"]);
+    expect(
+      changes(
+        "CREATE UNIQUE INDEX `chats_title_length` ON `chats` (length(`title`));",
+        "CREATE UNIQUE INDEX `chats_title` ON `chats` (lower(`title`));"
+      )
+    ).toStrictEqual(["adds a unique key on chats (<length(title)>)"]);
+    expect(
+      changes(
+        "CREATE UNIQUE INDEX `chats_title_nocase` ON `chats` (`title` COLLATE NOCASE);",
+        "CREATE UNIQUE INDEX `chats_title` ON `chats` (`title`);"
+      )
+    ).toStrictEqual(["adds a unique key on chats (title collate nocase)"]);
   });
 
   it("passes a unique key an earlier one implies, or whose WHERE reads a new column", () => {
@@ -246,6 +267,28 @@ CREATE UNIQUE INDEX \`chats_title\` ON \`chats\` (\`title\`) WHERE "chats"."arch
         )
       )
     ).toStrictEqual([]);
+  });
+
+  it("flags a CHECK whose string values change, or behind a comment", () => {
+    const kinds = (values: string) =>
+      rebuild(
+        withColumns(...all, `CONSTRAINT "kinds" CHECK("kind" IN (${values}))`)
+      );
+    expect(
+      changes(kinds("'Chat', 'task'"), kinds("'chat', 'task'"))
+    ).toStrictEqual([
+      "adds or changes a CHECK on chats: kind in ('Chat', 'task')",
+    ]);
+    expect(
+      changes(
+        rebuild(
+          withColumns(
+            ...all,
+            "CHECK /* a title ( */\n\n\n      (length(title) > 0)"
+          )
+        )
+      )
+    ).toStrictEqual(["adds or changes a CHECK on chats: length(title) > 0"]);
   });
 });
 

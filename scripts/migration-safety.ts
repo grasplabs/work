@@ -93,13 +93,33 @@ const text = (value: unknown): string =>
 
 const quoted = (name: string): string => `"${name.replaceAll('"', '""')}"`;
 
-/** SQL for comparing: no quoted names, no runs of whitespace, one case. */
+/** A string literal, a quoted name, a comment, or a CHECK's start. */
+const TOKEN =
+  /'(?:[^']|'')*'|"(?:[^"]|"")*"|`[^`]*`|\[[^\]]*\]|--[^\n]*|\/\*[\s\S]*?(?:\*\/|$)|\bcheck\s*\(/giu;
+
+/** `sql` with each comment a space: SQLite keeps them in what it stores. */
+const withoutComments = (sql: string): string =>
+  sql.replaceAll(TOKEN, (token) =>
+    token.startsWith("--") || token.startsWith("/*") ? " " : token
+  );
+
+/**
+ * SQL for comparing: no quotes around names, no runs of whitespace, one
+ * case, but each string literal as it is written.
+ */
 const normalized = (sql: string): string =>
   sql
-    .replaceAll(/[`"[\]]/gu, "")
-    .replaceAll(/\s+/gu, " ")
-    .trim()
-    .toLowerCase();
+    .split(/(?<literal>'(?:[^']|'')*')/u)
+    .map((part, at) =>
+      at % 2 === 1
+        ? part
+        : part
+            .replaceAll(/[`"[\]]/gu, "")
+            .replaceAll(/\s+/gu, " ")
+            .toLowerCase()
+    )
+    .join("")
+    .trim();
 
 /** The columns of `table` an expression names. */
 const columnsIn = (
@@ -140,25 +160,16 @@ const closing = (sql: string, open: number): number => {
 };
 
 /** The expression of every CHECK in a CREATE TABLE. */
-export const checksOf = (sql: string): string[] => {
+export const checksOf = (created: string): string[] => {
+  const sql = withoutComments(created);
   const found: string[] = [];
-  let quote: string | undefined;
-  for (let at = 0; at < sql.length; at += 1) {
-    const char = sql.charAt(at);
-    if (quote !== undefined) {
-      if (char === quote) {
-        quote = undefined;
-      }
-    } else if (char === "'" || char === '"' || char === "`") {
-      quote = char;
-    } else if (
-      /^check\s*\(/iu.test(sql.slice(at, at + 12)) &&
-      !/\w/u.test(sql.charAt(at - 1))
-    ) {
-      const open = sql.indexOf("(", at);
+  const tokens = new RegExp(TOKEN.source, TOKEN.flags);
+  for (let match = tokens.exec(sql); match !== null; match = tokens.exec(sql)) {
+    if (/^check/iu.test(match[0])) {
+      const open = match.index + match[0].length - 1;
       const end = closing(sql, open);
       found.push(normalized(sql.slice(open + 1, end)));
-      at = end;
+      tokens.lastIndex = end;
     }
   }
   return found;
@@ -180,7 +191,10 @@ const tableOf = (
       {
         type: text(column.type).toLowerCase(),
         notNull: column.notnull === 1,
-        hasDefault: column.dflt_value !== null,
+        // `DEFAULT NULL` is no default for a NOT NULL column.
+        hasDefault:
+          column.dflt_value !== null &&
+          text(column.dflt_value).toUpperCase() !== "NULL",
       },
     ])
   );
@@ -205,16 +219,25 @@ const tableOf = (
   const uniqueKeys: UniqueKey[] = rows(db, `PRAGMA index_list(${quoted(name)})`)
     .filter((index) => index.unique === 1)
     .map((index) => {
-      const keyColumns = rows(
-        db,
-        `PRAGMA index_info(${quoted(text(index.name))})`
-      ).map(
-        // An expression has no column name.
-        (part) =>
-          part.name === null ? "<expression>" : text(part.name).toLowerCase()
-      );
       // A UNIQUE in the CREATE TABLE has no SQL of its own: only columns.
       const created = indexSql.get(text(index.name)) ?? "";
+      const open = created.indexOf("(");
+      const keyList = normalized(
+        created.slice(open + 1, closing(created, open))
+      );
+      const parts = rows(
+        db,
+        `PRAGMA index_xinfo(${quoted(text(index.name))})`
+      ).filter((part) => part.key === 1);
+      const keyColumns = parts.map((part) => {
+        // An expression has no column name: its key list tells it apart.
+        const column =
+          part.name === null ? `<${keyList}>` : text(part.name).toLowerCase();
+        const collation = text(part.coll).toLowerCase();
+        return collation === "binary"
+          ? column
+          : `${column} collate ${collation}`;
+      });
       const where =
         /\swhere\s(?<where>.*)$/isu.exec(created)?.groups?.where ?? "";
       return {
@@ -222,8 +245,8 @@ const tableOf = (
         // From its SQL, the key's expressions and WHERE read columns too.
         columns:
           created === ""
-            ? keyColumns
-            : columnsIn(created.slice(created.indexOf("(")), columns),
+            ? parts.map((part) => text(part.name).toLowerCase())
+            : columnsIn(created.slice(open), columns),
         where: normalized(where),
       };
     });
@@ -260,7 +283,7 @@ export const schemaOf = (db: DatabaseSync): Schema => {
   const indexSql = new Map(
     master
       .filter((entry) => entry.type === "index" && entry.sql !== null)
-      .map((entry) => [text(entry.name), text(entry.sql)])
+      .map((entry) => [text(entry.name), withoutComments(text(entry.sql))])
   );
   return new Map(
     master
