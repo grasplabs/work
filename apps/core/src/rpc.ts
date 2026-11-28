@@ -180,13 +180,16 @@ const sessionApi = (
   // The upgrade has just read the session: the next reading is due a
   // window on.
   recheckWhenDue(checkQuietly);
+  // What the connection follows ends with it (drafts-rpc.ts).
+  const closed = new AbortController();
   const end = (): void => {
     ended = true;
     clearTimeout(recheck);
+    closed.abort();
   };
   server.addEventListener("close", end);
   server.addEventListener("error", end);
-  return new SessionRpc(env, check, sessionId);
+  return new SessionRpc(env, check, sessionId, closed.signal);
 };
 
 /**

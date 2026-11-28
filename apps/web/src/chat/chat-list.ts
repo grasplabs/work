@@ -78,10 +78,16 @@ const start = (core: CoreConnection): Watch => {
   };
   started.stop = follow(
     core,
-    async (session) =>
-      await session.chats.watchList((update) => {
-        changed(started, applyListUpdate(started.list, update));
-      }),
+    async (session, ended) =>
+      await session.chats.watchList(
+        Object.assign(
+          (update: ChatListUpdate) => {
+            changed(started, applyListUpdate(started.list, update));
+          },
+          // Core let go of it: followed again (follow-chat.ts `follow`).
+          { [Symbol.dispose]: ended }
+        )
+      ),
     // Only once the person's session ended: anything else is tried
     // again, as nothing reads the list otherwise.
     (failure) => {

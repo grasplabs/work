@@ -4,8 +4,9 @@ import type { PreviewAt, PreviewBundle } from "@grasp-os/shared/chat";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { AppVersionPush } from "@grasp-os/shared/pages";
+import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { appKind } from "../src/apps.ts";
@@ -19,7 +20,7 @@ import { mockIdp } from "./idp.ts";
 import { loadFrame, servedAll } from "./page-frames.ts";
 import { deskFiles, notesApp, notesFiles } from "./preview-drafts.ts";
 import { outcome, previewCall, previewOf, refreshed } from "./previews.ts";
-import { followedVersion, signedInApi } from "./sign-in.ts";
+import { followedVersion, openRpc, signedInApi } from "./sign-in.ts";
 import { startedChat } from "./started-chats.ts";
 
 // The preview of an App's one shared draft: the draft's pages and server
@@ -46,6 +47,17 @@ const newApp = async (
   const { id } = await builder.api.apps.create({ name });
   await release(builder, id, files);
   return appIdSchema.parse(id);
+};
+
+/** Undoes nothing. */
+const nothingToUndo = (): void => {
+  // Nothing done yet.
+};
+
+/** `person` on a connection of its own: another page of theirs. */
+const reconnected = async (person: Person): Promise<Person> => {
+  const { core, closed } = await openRpc(person.session);
+  return { ...person, core, closed, api: core.authenticate() };
 };
 
 /** What a call answered, or the code of the error it failed with. */
@@ -224,27 +236,31 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
 
   it("tells every page that follows the draft of each write, whoever made it", async () => {
     const builder = await signedInApi(idp, "builder");
-    const colleague = await signedInApi(idp, "builder");
+    const other = await signedInApi(idp, "builder");
     const app = await notesApp(builder);
-    const watched = draftWatch(env, { kind: "app", id: app });
+    const subject = { kind: "app" as const, id: app };
     const heard = new Map<string, number[]>();
-    const follow = async (page: string, person: string): Promise<void> => {
-      await watched.watch(person, async (revision: number) => {
+    const follow = async (page: string, person: Person): Promise<void> => {
+      await person.api.drafts.watch(subject, (revision: number) => {
         heard.set(page, [...(heard.get(page) ?? []), revision]);
-        await Promise.resolve();
       });
     };
-    await follow("mine", builder.userId);
-    await follow("theirs", colleague.userId);
+    // A page hears the latest write as it follows: it may have read the
+    // draft before it.
+    const opened = await revisionOf(builder, app);
+    await follow("mine", builder);
+    await follow("also mine", await reconnected(builder));
+    // Someone who doesn't build the App follows nothing of its draft.
+    const outsider = await answer(follow("theirs", other));
 
     const written = await writeDraft(builder, app, {
       "src/routes/index.tsx": deskSaying("Drafted"),
     });
 
     await vi.waitFor(() => {
-      expect(Object.fromEntries(heard)).toStrictEqual({
-        mine: [written],
-        theirs: [written],
+      expect({ heard: Object.fromEntries(heard), outsider }).toStrictEqual({
+        heard: { mine: [opened, written], "also mine": [opened, written] },
+        outsider: "app.not_found",
       });
     });
   });
@@ -252,15 +268,18 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
   it("saves a write while a page that follows the draft never answers, and tells the others", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await notesApp(builder);
-    const watched = draftWatch(env, { kind: "app", id: app });
+    const subject = { kind: "app" as const, id: app };
     const heard: number[] = [];
-    await watched.watch(
-      builder.userId,
+    const opened = await revisionOf(builder, app);
+    // The page never answers: its callback's promise never settles.
+    await builder.api.drafts.watch(
+      subject,
+      // oxlint-disable-next-line typescript/no-misused-promises, typescript/strict-void-return -- see above
       async () => await Promise.withResolvers<never>().promise
     );
-    await watched.watch(builder.userId, async (revision: number) => {
+    const other = await reconnected(builder);
+    await other.api.drafts.watch(subject, (revision: number) => {
       heard.push(revision);
-      await Promise.resolve();
     });
 
     const written = await writeDraft(builder, app, {
@@ -271,8 +290,229 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
     await vi.waitFor(() => {
       expect({ saved, heard }).toStrictEqual({
         saved: written,
-        heard: [written],
+        heard: [opened, written],
       });
+    });
+  });
+
+  it("tells a page of a write once the draft's object slept with its page still following, from what the page's socket carries", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await notesApp(builder);
+    const subject = { kind: "app" as const, id: app };
+    const heard: number[] = [];
+    const opened = await revisionOf(builder, app);
+    await builder.api.drafts.watch(subject, (revision: number) => {
+      heard.push(revision);
+    });
+    const first = await writeDraft(builder, app, {
+      "src/routes/index.tsx": deskSaying("First"),
+    });
+    await vi.waitFor(() => {
+      expect(heard).toStrictEqual([opened, first]);
+    });
+
+    // Hibernated: its memory gone, the page's socket kept.
+    await evictDurableObject(draftWatch(env, subject));
+    const second = await writeDraft(builder, app, {
+      "src/routes/index.tsx": deskSaying("Second"),
+    });
+
+    await vi.waitFor(() => {
+      expect(heard).toStrictEqual([opened, first, second]);
+    });
+  });
+
+  it("tells a page of a write made while the draft's object reset, once, as its socket opens again, and of the next write live", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await notesApp(builder);
+    const subject = { kind: "app" as const, id: app };
+    const heard: number[] = [];
+    const opened = await revisionOf(builder, app);
+    await builder.api.drafts.watch(subject, (revision: number) => {
+      heard.push(revision);
+    });
+    const first = await writeDraft(builder, app, {
+      "src/routes/index.tsx": deskSaying("First"),
+    });
+    await vi.waitFor(() => {
+      expect(heard).toStrictEqual([opened, first]);
+    });
+
+    // Reset: memory and sockets gone; the write lands at once, whether
+    // before the page's socket opens again or after.
+    await evictDurableObject(draftWatch(env, subject), {
+      webSockets: "close",
+    });
+    const second = await writeDraft(builder, app, {
+      "src/routes/index.tsx": deskSaying("Second"),
+    });
+    await vi.waitFor(() => {
+      expect(heard).toStrictEqual([opened, first, second]);
+    });
+    const third = await writeDraft(builder, app, {
+      "src/routes/index.tsx": deskSaying("Third"),
+    });
+
+    await vi.waitFor(() => {
+      expect(heard).toStrictEqual([opened, first, second, third]);
+    });
+  });
+
+  it("stops telling a page that let go of the draft, and tells the page that follows it after", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await notesApp(builder);
+    const subject = { kind: "app" as const, id: app };
+    const left: number[] = [];
+    const later: number[] = [];
+    const subscription = await builder.api.drafts.watch(
+      subject,
+      (revision: number) => {
+        left.push(revision);
+      }
+    );
+    await subscription.release();
+    const opened = await revisionOf(builder, app);
+    await builder.api.drafts.watch(subject, (revision: number) => {
+      later.push(revision);
+    });
+
+    const written = await writeDraft(builder, app, {
+      "src/routes/index.tsx": deskSaying("Drafted"),
+    });
+
+    await vi.waitFor(() => {
+      expect(later).toStrictEqual([opened, written]);
+    });
+    // Only the telling it heard as it followed.
+    expect(left.length <= 1).toBeTruthy();
+  });
+
+  it("tells a page core's Worker of the release before follows the old way, its callback kept in the object, while a deploy runs both", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await notesApp(builder);
+    const heard: number[] = [];
+    await draftWatch(env, { kind: "app", id: app }).watch(
+      builder.userId,
+      async (revision: number) => {
+        heard.push(revision);
+        await Promise.resolve();
+      }
+    );
+
+    const written = await writeDraft(builder, app, {
+      "src/routes/index.tsx": deskSaying("Drafted"),
+    });
+
+    await vi.waitFor(() => {
+      expect(heard).toStrictEqual([written]);
+    });
+  });
+
+  it("follows a draft the old way while its object still runs the code of the release before, which takes no socket", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await notesApp(builder);
+    const subject = { kind: "app" as const, id: app };
+    const object = draftWatch(env, subject);
+    // As the code before had it: no `fetch`, so opening a socket throws.
+    const restore = { undo: nothingToUndo };
+    await runInDurableObject(object, (instance) => {
+      // SAFETY: an object's prototype holds its methods.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      const methods = Object.getPrototypeOf(instance) as {
+        fetch: (request: Request) => Response;
+      };
+      const original = methods.fetch;
+      methods.fetch = () => {
+        throw new TypeError("Handler does not export a fetch() function.");
+      };
+      restore.undo = () => {
+        methods.fetch = original;
+      };
+    });
+    onTestFinished(() => {
+      restore.undo();
+    });
+    const heard: number[] = [];
+
+    await builder.api.drafts.watch(subject, (revision: number) => {
+      heard.push(revision);
+    });
+    const written = await writeDraft(builder, app, {
+      "src/routes/index.tsx": deskSaying("Drafted"),
+    });
+
+    await vi.waitFor(() => {
+      expect(heard).toStrictEqual([written]);
+    });
+  });
+
+  it("pushes out a person's oldest follow past the most of one draft, saying it was displaced, and nobody else's", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await notesApp(builder);
+    const subject = { kind: "app" as const, id: app };
+    // Ten follows a connection, as core allows: three tabs of theirs.
+    const tabs = [
+      builder,
+      await reconnected(builder),
+      await reconnected(builder),
+    ];
+    const released: boolean[] = [];
+    const holds: Awaited<ReturnType<Person["api"]["drafts"]["watch"]>>[] = [];
+    for (let follow = 0; follow < 21; follow += 1) {
+      const tab = tabs[Math.floor(follow / 10)] ?? builder;
+      const at = released.length;
+      released.push(false);
+      // oxlint-disable-next-line no-await-in-loop -- one after the other, the oldest first
+      const hold = await tab.api.drafts.watch(
+        subject,
+        Object.assign(
+          () => {
+            // Hears nothing here.
+          },
+          {
+            [Symbol.dispose]: () => {
+              released[at] = true;
+            },
+          }
+        )
+      );
+      holds.push(hold);
+    }
+
+    await vi.waitFor(() => {
+      expect(released.indexOf(true)).toBe(0);
+    });
+    expect({
+      released: released.filter(Boolean).length,
+      endedBy: await Promise.all(
+        [holds[0], holds[1], holds[20]].map(
+          async (hold) => await hold?.endedBy()
+        )
+      ),
+    }).toStrictEqual({ released: 1, endedBy: ["displaced", null, null] });
+  });
+
+  it("lets go of a closed connection's follows: the draft's object holds none of its sockets", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await notesApp(builder);
+    const subject = { kind: "app" as const, id: app };
+    const tab = await openRpc(builder.session);
+    await tab.core.authenticate().drafts.watch(subject, () => {
+      // Hears nothing here.
+    });
+    const sockets = async (): Promise<number> =>
+      await runInDurableObject(
+        draftWatch(env, subject),
+        (_instance, state) => state.getWebSockets().length
+      );
+    await vi.waitFor(async () => {
+      await expect(sockets()).resolves.toBe(1);
+    });
+
+    tab.socket.close();
+
+    await vi.waitFor(async () => {
+      await expect(sockets()).resolves.toBe(0);
     });
   });
 
@@ -285,12 +525,17 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
       "src/routes/index.tsx": deskSaying("Later"),
     });
     const heard: number[] = [];
-    await draftWatch(env, { kind: "app", id: app }).watch(
-      builder.userId,
-      async (revision: number) => {
+    await builder.api.drafts.watch(
+      { kind: "app", id: app },
+      (revision: number) => {
         heard.push(revision);
-        await Promise.resolve();
       }
+    );
+    // Nothing was told of the draft yet, so the page heard nothing as it
+    // followed: whatever it hears is the rollback's.
+    const toldBefore = await runInDurableObject(
+      draftWatch(env, { kind: "app", id: app }),
+      (_instance, state) => state.storage.kv.get("told")
     );
     const before = await builder.api.drafts.get({ kind: "app", id: app });
 
@@ -300,10 +545,12 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
 
     await vi.waitFor(() => {
       expect({
+        toldBefore,
         told: heard.length > 0,
         draft: { changed: before.changed, base: after.base },
       }).toStrictEqual({
         told: true,
+        toldBefore: undefined,
         draft: { changed: [], base: version },
       });
     });

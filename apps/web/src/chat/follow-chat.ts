@@ -17,6 +17,7 @@ import type {
 } from "@grasp-os/shared/chat";
 import { authErrors, failureText } from "@grasp-os/shared/errors";
 import type { ModelWait } from "@grasp-os/shared/models";
+import type { SubscriptionApi } from "@grasp-os/shared/pages";
 import { RpcStub } from "capnweb";
 
 import type { CoreConnection } from "../core-connection.ts";
@@ -223,17 +224,57 @@ const retryingUntilSignedOut = async <T>(
 };
 
 /**
- * Follows what `watch` subscribes to over `core`, until stopped: again on
- * the next connection whenever the one it was on drops, as `watch` then
- * says to (from where the page got to). `onFailed` gets why following
- * stopped for good, and whether that is because core has no such thing
- * for the person (`agent.chat_not_found`). Returns what stops it.
+ * The pauses before following again once a follow ended by itself (its
+ * connection dropped, or core let go of it): longer each time it ends
+ * soon after it began, so no way a follow can end ever makes a tight
+ * loop; back to the first once a follow lasted `steadyMs`. Each with full
+ * jitter, so tabs that lost core together don't come back together.
+ */
+const followAgainMs = [0, 1000, 2000, 4000, 8000, 15_000] as const;
+
+/** How long a follow must have lasted for its next end to start the pauses over. */
+const steadyMs = 30_000;
+
+/** What a follow's hold is: how it is let go of, and why core let go of it. */
+type Hold = Pick<SubscriptionApi, "release" | "endedBy"> & Disposable;
+
+/** Why core let go of `hold`, if it says; nothing when it can't be asked. */
+const endedBy = async (hold: Hold | null): Promise<"displaced" | null> => {
+  try {
+    return (await hold?.endedBy()) ?? null;
+  } catch {
+    return null;
+  }
+};
+
+/** Calls `back` once, the next time the page comes back to the front. */
+const onceVisible = (back: () => void): void => {
+  const visible = (): void => {
+    if (document.visibilityState === "visible") {
+      document.removeEventListener("visibilitychange", visible);
+      back();
+    }
+  };
+  document.addEventListener("visibilitychange", visible);
+};
+
+/**
+ * Follows what `watch` subscribes to over `core`, until stopped. `watch`
+ * gets `ended`, which its callback calls once core lets go of it (the
+ * callback's `Symbol.dispose`). Followed again whenever it ends by itself:
+ * the connection it was on dropped, or core let go of it (its object
+ * gone, or more follows than core keeps), after a pause that grows while
+ * it keeps ending soon (`followAgainMs`). One core let go of because the
+ * person follows the same thing in more places than core keeps
+ * (`displaced`) is followed again only once the page comes back to the
+ * front: following again at once would only push out the person's next
+ * oldest, which would do the same. `onFailed` gets why following stopped
+ * for good, and whether that is because core has no such thing for the
+ * person (`agent.chat_not_found`). Returns what stops it.
  */
 export const follow = (
   core: CoreConnection,
-  watch: (
-    session: Session
-  ) => Promise<{ release: () => Promise<void> } & Disposable>,
+  watch: (session: Session, ended: () => void) => Promise<Hold>,
   onFailed: (reason: string, gone: boolean) => void,
   {
     untilSignedOut = false,
@@ -246,7 +287,7 @@ export const follow = (
      * as it takes.
      */
     untilSignedOut?: boolean;
-    /** The connection dropped: what the page has may be behind until the next update. */
+    /** It ended by itself: what the page has may be behind until it follows again. */
     onDropped?: () => void;
   } = {}
 ): (() => void) => {
@@ -254,20 +295,48 @@ export const follow = (
   // Gives up waiting for a connection once following stops.
   const stopping = new AbortController();
   let release: (() => void) | undefined;
-  const attempt = async (again: boolean) =>
-    await core.withSession(
-      watch,
-      again || untilSignedOut ? stopping.signal : undefined
-    );
+  /** Follows in a row that ended soon after they began. */
+  let endedSoon = 0;
   const start = async (again: boolean): Promise<void> => {
+    let current = true;
+    /** The follow's hold, once it was made (none if it wasn't). */
+    const held = Promise.withResolvers<Hold | null>();
+    const startedAt = Date.now();
+    /** It ended by itself: followed again, once, as the header says. */
+    const ended = (): void => {
+      if (!current || closed) {
+        return;
+      }
+      current = false;
+      onDropped?.();
+      endedSoon = Date.now() - startedAt >= steadyMs ? 0 : endedSoon + 1;
+      void (async () => {
+        if ((await endedBy(await held.promise)) === "displaced") {
+          onceVisible(() => {
+            if (!closed) {
+              void start(true);
+            }
+          });
+          return;
+        }
+        const pause =
+          followAgainMs[Math.min(endedSoon, followAgainMs.length - 1)] ?? 0;
+        await wait(Math.random() * pause);
+        if (!closed) {
+          void start(true);
+        }
+      })();
+    };
+    const attempt = async () =>
+      await core.withSession(
+        async (session) => await watch(session, ended),
+        again || untilSignedOut ? stopping.signal : undefined
+      );
     try {
-      const subscription = untilSignedOut
-        ? await retryingUntilSignedOut(
-            async () => await attempt(again),
-            stopping.signal
-          )
+      const followed = untilSignedOut
+        ? await retryingUntilSignedOut(attempt, stopping.signal)
         : await retrying(
-            async () => await attempt(again),
+            attempt,
             startRetryMs,
             // No connection came in its few seconds: say so, rather than
             // wait on, as a page does when core is out of reach. Stopped:
@@ -277,26 +346,25 @@ export const follow = (
               isTransient(failure) &&
               !(failure instanceof CoreTimeoutError)
           );
+      held.resolve(followed);
       release = () => {
-        void releaseQuietly(subscription);
-        subscription[Symbol.dispose]();
+        current = false;
+        void releaseQuietly(followed);
+        followed[Symbol.dispose]();
       };
       if (closed) {
         release();
         return;
       }
-      // The connection dropped: watch again on the next. Core answers
-      // the watch with a stub.
-      const stub: unknown = subscription;
+      // The connection dropped: followed again on the next. Core answers
+      // the follow with a stub.
+      const stub: unknown = followed;
       if (stub instanceof RpcStub) {
-        stub.onRpcBroken(() => {
-          if (!closed) {
-            onDropped?.();
-            void start(true);
-          }
-        });
+        stub.onRpcBroken(ended);
       }
     } catch (error) {
+      held.resolve(null);
+      current = false;
       if (!closed) {
         onFailed(
           failureText(error),
@@ -339,7 +407,12 @@ export const followChat = (
   };
   return follow(
     core,
-    async (session) => await session.chats.watch(chatId, after, received),
+    async (session, ended) =>
+      await session.chats.watch(
+        chatId,
+        after,
+        Object.assign(received, { [Symbol.dispose]: ended })
+      ),
     onFailed,
     onDropped === undefined ? {} : { onDropped }
   );

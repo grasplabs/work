@@ -103,8 +103,16 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #onboarding: OnboardingRpc;
   readonly #onboardingGate: OnboardingGateRpc;
 
-  /** `sessionId`: the session the connection is signed in with. */
-  constructor(env: Env, connectionCheck: SessionCheck, sessionId: string) {
+  /**
+   * `sessionId`: the session the connection is signed in with; `closed`:
+   * aborted once the connection closes, which ends what it follows.
+   */
+  constructor(
+    env: Env,
+    connectionCheck: SessionCheck,
+    sessionId: string,
+    closed: AbortSignal
+  ) {
     super();
     // Every view and action of Grasp's staff, on every namespace, is in
     // the client's audit log (staff-audit.ts): the one check they all ask.
@@ -118,7 +126,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     const full = fullAccess(check);
     this.#full = full;
     this.#apps = new AppsRpc(env, full);
-    this.#drafts = new DraftsRpc(env, full);
+    this.#drafts = new DraftsRpc(env, full, closed);
     this.#versions = new VersionsRpc(env, full);
     this.#brain = new BrainRpc(env, full);
     this.#brainSources = new BrainSourcesRpc(env, full);

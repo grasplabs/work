@@ -1,8 +1,8 @@
 import type { Draft } from "@grasp-os/shared/drafts";
 import type { Subject } from "@grasp-os/shared/subject";
-import { RpcStub } from "capnweb";
 import { useEffect, useState } from "react";
 
+import { follow } from "../chat/follow-chat.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
@@ -21,70 +21,37 @@ import { useCore } from "../use-core.ts";
 export const hasChanges = (draft: Draft | undefined): boolean =>
   draft !== undefined && (draft.changed.length > 0 || draft.definitionChanged);
 
-/** Lets go of a watch; one whose connection is gone already is let go. */
-const releaseQuietly = async (subscription: {
-  release: () => Promise<void>;
-}): Promise<void> => {
-  try {
-    await subscription.release();
-  } catch {
-    // The connection is gone, and core drops the watch with it.
-  }
-};
-
 /**
  * Follows the draft of `subject` over `core`: `onWritten` hears of each
- * write. Followed again on the next connection when the tab's drops; a
- * watch core refuses just ends, as the other reads still come. Returns
- * what stops it.
+ * write, and of what may have been written while it wasn't followed, as
+ * it is followed again (follow-chat.ts `follow`, which follows again as
+ * it says). A refusal (no longer a builder of it) ends it, as the other
+ * reads still come. Returns what stops it.
  */
 const followDraft = (
   core: CoreConnection,
   subject: Subject,
   onWritten: () => void
-): (() => void) => {
-  let closed = false;
-  let release: (() => void) | undefined;
-  const watch = async (again = false): Promise<void> => {
-    try {
-      const subscription = await core.withSession(
-        async (session) =>
-          await session.drafts.watch(subject, () => {
+): (() => void) =>
+  follow(
+    core,
+    async (session, ended) =>
+      await session.drafts.watch(
+        subject,
+        Object.assign(
+          () => {
             onWritten();
-          })
-      );
-      release = () => {
-        void releaseQuietly(subscription);
-        subscription[Symbol.dispose]();
-      };
-      if (closed) {
-        release();
-        return;
-      }
-      // Followed again after the connection dropped: whatever was written
-      // while it was down is read now.
-      if (again) {
-        onWritten();
-      }
-      const stub: unknown = subscription;
-      if (stub instanceof RpcStub) {
-        stub.onRpcBroken(() => {
-          if (!closed) {
-            void watch(true);
-          }
-        });
-      }
-    } catch {
+          },
+          { [Symbol.dispose]: ended }
+        )
+      ),
+    () => {
       // Refused or out of reach: the chat's writes and the page's own
       // still read it again.
-    }
-  };
-  void watch();
-  return () => {
-    closed = true;
-    release?.();
-  };
-};
+    },
+    // Whatever was written while it wasn't followed is read again.
+    { onDropped: onWritten }
+  );
 
 /**
  * The subject's draft as read last; undefined until the first read lands,
