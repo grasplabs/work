@@ -15,13 +15,21 @@
  *
  * Last, no migration may break the release before it, which still runs
  * on the new schema for a while after a deploy and after a rollback
- * (scripts/migration-safety.ts).
+ * (scripts/migration-safety.ts). So each folder holds exactly its
+ * journal's migrations (every `.sql` in it ships, and a Durable Object
+ * applies what its `migrations.js` lists), and no cut-off of that check
+ * covers a migration the branch adds.
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-import { checkDatabase, firstChecked } from "./migration-safety.ts";
+import {
+  checkDatabase,
+  cutOffErrors,
+  firstChecked,
+  journalErrors,
+} from "./migration-safety.ts";
 import { ofRemovedDatabase, storageOf } from "./removed-databases.ts";
 import type { BranchView } from "./removed-databases.ts";
 
@@ -181,6 +189,37 @@ const movedJournals = new Map(
     })
 );
 
+/**
+ * Every index the release before names with `INDEXED BY`, where SQLite
+ * fails rather than scans when the index is gone.
+ */
+const indexedByMatches = (): string => {
+  try {
+    return git(
+      "grep",
+      "-h",
+      "-o",
+      "-i",
+      "-I",
+      "-E",
+      "indexed by +[a-z_][a-z0-9_]*",
+      base,
+      "--",
+      "*.ts",
+      "*.tsx"
+    );
+  } catch {
+    // `git grep` exits 1 when nothing matches.
+    return "";
+  }
+};
+const indexedBy = new Set(
+  indexedByMatches()
+    .split("\n")
+    .filter(Boolean)
+    .map((match) => match.replace(/^indexed by +/iu, "").toLowerCase())
+);
+
 const journals = git("ls-files", "*/migrations/meta/_journal.json")
   .split("\n")
   .filter(Boolean);
@@ -215,24 +254,74 @@ for (const file of journals) {
       );
     }
   }
-  // And none breaks the release before it (scripts/migration-safety.ts).
-  // A database added since this check was is judged whole.
+  // And none breaks the release before it (scripts/migration-safety.ts),
+  // nor ships unjudged beside its journal. A database added since that
+  // check was is judged whole.
   const dir = path.dirname(path.dirname(file));
-  const migrations = entries.map(({ idx, tag }) => ({
-    idx,
-    tag,
-    sql: readFileSync(`${dir}/${tag}.sql`, "utf-8"),
-  }));
-  errors.push(...checkDatabase(dir, migrations, firstChecked[dir] ?? 0));
-}
-
-for (const dir of Object.keys(firstChecked)) {
-  if (!journals.includes(`${dir}/meta/_journal.json`)) {
+  const tags = entries.map(({ tag }) => tag);
+  const folderErrors = journalErrors(
+    dir,
+    tags,
+    readdirSync(dir).filter((name) => name.endsWith(".sql")),
+    existsSync(`${dir}/migrations.js`)
+      ? readFileSync(`${dir}/migrations.js`, "utf-8")
+      : undefined
+  );
+  errors.push(...folderErrors);
+  if (folderErrors.length === 0) {
+    const migrations = entries.map(({ idx, tag }) => ({
+      idx,
+      tag,
+      sql: readFileSync(`${dir}/${tag}.sql`, "utf-8"),
+    }));
     errors.push(
-      `scripts/migration-safety.ts names ${dir}, which has no journal: remove it from firstChecked.`
+      ...checkDatabase(dir, migrations, {
+        from: firstChecked[dir] ?? 0,
+        now: new Date(),
+        indexedBy,
+      })
     );
   }
 }
+
+const journalDirs = new Set(
+  journals.map((file) => path.dirname(path.dirname(file)))
+);
+// A migration folder without a journal would ship its SQL unjudged.
+const sqlDirs = new Set(
+  git(
+    "ls-files",
+    "--cached",
+    "--others",
+    "--exclude-standard",
+    ":(glob)**/src/db/**/migrations/*.sql"
+  )
+    .split("\n")
+    .filter((file) => file !== "" && existsSync(file))
+    .map((file) => path.dirname(file))
+);
+for (const dir of sqlDirs) {
+  if (!journalDirs.has(dir)) {
+    errors.push(
+      `${dir} has migrations but no journal (meta/_journal.json): generate them with \`vp run -r db:generate\`.`
+    );
+  }
+}
+errors.push(
+  ...cutOffErrors(
+    firstChecked,
+    journalDirs,
+    new Map(
+      [...journalDirs].map((dir) => {
+        const atBase = fileAt(base, `${dir}/meta/_journal.json`);
+        return [
+          dir,
+          atBase === undefined ? 0 : readJournal(dir, atBase).entries.length,
+        ] as const;
+      })
+    )
+  )
+);
 
 if (errors.length > 0) {
   console.error(errors.join("\n"));

@@ -1,6 +1,7 @@
 /**
  * Refuses a migration the release before it cannot run on, unless the
- * migration says which release stopped using what it removes.
+ * migration names each such change and the release that removed its last
+ * use.
  *
  * For up to 15 minutes after a deploy, a client's Durable Objects still
  * run the previous release's code against the new schema, and the admin
@@ -13,25 +14,34 @@
  * uses (its table rebuilds among them) is judged by what it does to the
  * schema, not by how it is written. A migration is unsafe when it:
  *
- * - drops or renames a table or a column,
- * - changes a column's type,
- * - makes a column NOT NULL, drops the default of a NOT NULL column, or
- *   adds a NOT NULL column without a default to a table that was there,
+ * - drops or renames a table, a view or a column,
+ * - changes a column's type, or changes or removes its default,
+ * - makes a column NOT NULL, or adds a NOT NULL column without a default
+ *   to a table that was there,
+ * - changes a table's primary key, or removes its AUTOINCREMENT,
  * - adds or changes a foreign key, a unique key (with the columns of its
- *   WHERE) or a CHECK on columns that were there only. A column the
- *   previous release does not know it writes as NULL or its default.
+ *   WHERE) or a CHECK on columns that were there only (a column the
+ *   previous release does not know it writes as NULL or its default),
+ * - adds or changes a trigger that can refuse a write (`RAISE(`) on a
+ *   table that was there: this codebase uses them as constraints,
+ * - drops an index code names with `INDEXED BY`, where SQLite fails
+ *   rather than scans without it.
  *
- * Not judged: dropping an index the previous release's queries need, and
- * triggers, which are hand-written for their case and read in review.
+ * Not judged: dropping any other index, and what a migration does to the
+ * data (an UPDATE or DELETE, a rebuild that copies nothing or swaps
+ * columns, a table dropped and created again with the same columns). Only
+ * running the previous release on a seeded copy catches those.
  *
  * Such a migration is the contract step of expand, then contract, and
- * passes only with the marker
+ * passes only with one marker per unsafe change, each a whole-line
+ * comment naming the change as this check does and the release from
+ * which no code relies on what it changes:
  *
- *   -- contract: release 26.11.40 removed the last use
+ *   -- contract: drop column chats.title: release 26.11.40 removed the last use
  *
- * naming the published release from which no code uses what it removes
- * or writes what it now refuses. Reviewers see it in the diff; a release
- * before the one it names cannot run on this schema.
+ * The check reads the release id's format, and that it is not of a month
+ * after this one; the reviewer confirms the release. A release before the
+ * one named cannot run on this schema.
  */
 import { DatabaseSync } from "node:sqlite";
 
@@ -40,7 +50,8 @@ import { parsePublishedReleaseId } from "@grasp-os/shared/release-id";
 /**
  * The first migration of each database this check judges, by its index
  * in the journal. The ones before it were on main before the check was,
- * and are applied everywhere already.
+ * and are applied everywhere already. It never rises above what main has:
+ * a cut-off never covers a migration of the branch itself.
  */
 export const firstChecked: Readonly<Record<string, number>> = {
   "apps/admin/src/db/migrations": 59,
@@ -56,7 +67,8 @@ export const firstChecked: Readonly<Record<string, number>> = {
 interface Column {
   type: string;
   notNull: boolean;
-  hasDefault: boolean;
+  /** Its default as compared; undefined for none, `DEFAULT NULL` too. */
+  default: string | undefined;
 }
 
 /** A constraint, by the columns it reads. */
@@ -74,16 +86,38 @@ interface UniqueKey extends Constraint {
 interface Table {
   /** By lower-cased name: SQLite's names are case-insensitive. */
   columns: Map<string, Column>;
+  primaryKey: readonly string[];
+  autoincrement: boolean;
   /** By what each references, as one line. */
   foreignKeys: Map<string, Constraint>;
-  /** The primary key and every unique index. */
+  /** Every unique index; the primary key is judged on its own. */
   uniqueKeys: UniqueKey[];
   /** By expression, without quotes and runs of whitespace. */
   checks: Map<string, Constraint>;
 }
 
-/** Each table of a database, by name. */
-export type Schema = Map<string, Table>;
+interface Trigger {
+  table: string;
+  sql: string;
+}
+
+/** A database's schema, as the check compares it. */
+export interface Schema {
+  tables: Map<string, Table>;
+  views: Set<string>;
+  /** Every index created by name, lower-cased. */
+  indexes: Set<string>;
+  triggers: Map<string, Trigger>;
+}
+
+/**
+ * One change the previous release cannot run on: what its marker names,
+ * and what else the message says.
+ */
+export interface Change {
+  subject: string;
+  detail?: string;
+}
 
 const rows = (db: DatabaseSync, sql: string): Record<string, unknown>[] =>
   db.prepare(sql).all();
@@ -97,18 +131,19 @@ const quoted = (name: string): string => `"${name.replaceAll('"', '""')}"`;
 const TOKEN =
   /'(?:[^']|'')*'|"(?:[^"]|"")*"|`[^`]*`|\[[^\]]*\]|--[^\n]*|\/\*[\s\S]*?(?:\*\/|$)|\bcheck\s*\(/giu;
 
+const isComment = (token: string): boolean =>
+  token.startsWith("--") || token.startsWith("/*");
+
 /** `sql` with each comment a space: SQLite keeps them in what it stores. */
 const withoutComments = (sql: string): string =>
-  sql.replaceAll(TOKEN, (token) =>
-    token.startsWith("--") || token.startsWith("/*") ? " " : token
-  );
+  sql.replaceAll(TOKEN, (token) => (isComment(token) ? " " : token));
 
 /**
  * SQL for comparing: no quotes around names, no runs of whitespace, one
  * case, but each string literal as it is written.
  */
 const normalized = (sql: string): string =>
-  sql
+  withoutComments(sql)
     .split(/(?<literal>'(?:[^']|'')*')/u)
     .map((part, at) =>
       at % 2 === 1
@@ -135,8 +170,15 @@ const columnsIn = (
   ),
 ];
 
-/** Where the parenthesis that opens at `open` closes, past strings and names. */
-const closing = (sql: string, open: number): number => {
+/**
+ * Where the parenthesis that opens at `open` closes, past strings and
+ * names, and the offsets of the commas directly inside it.
+ */
+const closing = (
+  sql: string,
+  open: number
+): { end: number; commas: number[] } => {
+  const commas: number[] = [];
   let depth = 0;
   let quote: string | undefined;
   for (let at = open; at < sql.length; at += 1) {
@@ -152,11 +194,13 @@ const closing = (sql: string, open: number): number => {
     } else if (char === ")") {
       depth -= 1;
       if (depth === 0) {
-        return at;
+        return { end: at, commas };
       }
+    } else if (char === "," && depth === 1) {
+      commas.push(at);
     }
   }
-  return sql.length;
+  return { end: sql.length, commas };
 };
 
 /** The expression of every CHECK in a CREATE TABLE. */
@@ -167,13 +211,62 @@ export const checksOf = (created: string): string[] => {
   for (let match = tokens.exec(sql); match !== null; match = tokens.exec(sql)) {
     if (/^check/iu.test(match[0])) {
       const open = match.index + match[0].length - 1;
-      const end = closing(sql, open);
+      const { end } = closing(sql, open);
       found.push(normalized(sql.slice(open + 1, end)));
       tokens.lastIndex = end;
     }
   }
   return found;
 };
+
+/** Each part of an index's key list, as written, by position. */
+const keyParts = (created: string): string[] => {
+  const open = created.indexOf("(");
+  if (open === -1) {
+    return [];
+  }
+  const { end, commas } = closing(created, open);
+  return [open, ...commas, end]
+    .slice(0, -1)
+    .map((from, at) => created.slice(from + 1, [...commas, end][at] ?? end));
+};
+
+const uniqueKeyOf = (
+  db: DatabaseSync,
+  index: string,
+  created: string,
+  columns: ReadonlyMap<string, Column>
+): UniqueKey => {
+  const written = keyParts(created);
+  const parts = rows(db, `PRAGMA index_xinfo(${quoted(index)})`).filter(
+    (part) => part.key === 1
+  );
+  const keyColumns = parts.map((part, at) => {
+    if (part.name === null) {
+      // An expression has no column name: its own text tells it apart.
+      return `<${normalized(written[at] ?? "").replace(/\s+(?:asc|desc)$/u, "")}>`;
+    }
+    const collation = text(part.coll).toLowerCase();
+    const column = text(part.name).toLowerCase();
+    return collation === "binary" ? column : `${column} collate ${collation}`;
+  });
+  const where = /\swhere\s(?<where>.*)$/isu.exec(created)?.groups?.where ?? "";
+  return {
+    keyColumns,
+    // A UNIQUE in the CREATE TABLE has no SQL of its own: only columns.
+    // From its SQL, the key's expressions and WHERE read columns too.
+    columns:
+      created === ""
+        ? parts.map((part) => text(part.name).toLowerCase())
+        : columnsIn(created.slice(created.indexOf("(")), columns),
+    where: normalized(where),
+  };
+};
+
+const defaultOf = (value: unknown): string | undefined =>
+  value === null || text(value).toUpperCase() === "NULL"
+    ? undefined
+    : normalized(text(value));
 
 const tableOf = (
   db: DatabaseSync,
@@ -191,10 +284,7 @@ const tableOf = (
       {
         type: text(column.type).toLowerCase(),
         notNull: column.notnull === 1,
-        // `DEFAULT NULL` is no default for a NOT NULL column.
-        hasDefault:
-          column.dflt_value !== null &&
-          text(column.dflt_value).toUpperCase() !== "NULL",
+        default: defaultOf(column.dflt_value),
       },
     ])
   );
@@ -212,51 +302,26 @@ const tableOf = (
       { columns: from }
     );
   }
-  const primaryKey = info
-    .filter((column) => Number(column.pk) > 0)
-    .toSorted((a, b) => Number(a.pk) - Number(b.pk))
-    .map((column) => text(column.name).toLowerCase());
-  const uniqueKeys: UniqueKey[] = rows(db, `PRAGMA index_list(${quoted(name)})`)
-    .filter((index) => index.unique === 1)
-    .map((index) => {
-      // A UNIQUE in the CREATE TABLE has no SQL of its own: only columns.
-      const created = indexSql.get(text(index.name)) ?? "";
-      const open = created.indexOf("(");
-      const keyList = normalized(
-        created.slice(open + 1, closing(created, open))
-      );
-      const parts = rows(
-        db,
-        `PRAGMA index_xinfo(${quoted(text(index.name))})`
-      ).filter((part) => part.key === 1);
-      const keyColumns = parts.map((part) => {
-        // An expression has no column name: its key list tells it apart.
-        const column =
-          part.name === null ? `<${keyList}>` : text(part.name).toLowerCase();
-        const collation = text(part.coll).toLowerCase();
-        return collation === "binary"
-          ? column
-          : `${column} collate ${collation}`;
-      });
-      const where =
-        /\swhere\s(?<where>.*)$/isu.exec(created)?.groups?.where ?? "";
-      return {
-        keyColumns,
-        // From its SQL, the key's expressions and WHERE read columns too.
-        columns:
-          created === ""
-            ? parts.map((part) => text(part.name).toLowerCase())
-            : columnsIn(created.slice(open), columns),
-        where: normalized(where),
-      };
-    });
-  if (primaryKey.length > 0) {
-    uniqueKeys.push({ keyColumns: primaryKey, columns: primaryKey, where: "" });
-  }
   return {
     columns,
+    primaryKey: info
+      .filter((column) => Number(column.pk) > 0)
+      .toSorted((a, b) => Number(a.pk) - Number(b.pk))
+      .map((column) => text(column.name).toLowerCase()),
+    autoincrement: /\bautoincrement\b/iu.test(
+      withoutComments(sql).replaceAll(/'(?:[^']|'')*'/gu, "")
+    ),
     foreignKeys,
-    uniqueKeys,
+    uniqueKeys: rows(db, `PRAGMA index_list(${quoted(name)})`)
+      .filter((index) => index.unique === 1 && index.origin !== "pk")
+      .map((index) =>
+        uniqueKeyOf(
+          db,
+          text(index.name),
+          indexSql.get(text(index.name)) ?? "",
+          columns
+        )
+      ),
     checks: new Map(
       checksOf(sql).map((check) => [
         check,
@@ -266,7 +331,7 @@ const tableOf = (
   };
 };
 
-/** The tables of `db`, as the check compares them. */
+/** The schema of `db`, as the check compares it. */
 export const schemaOf = (db: DatabaseSync): Schema => {
   const listed = new Set(
     rows(db, "PRAGMA table_list")
@@ -279,49 +344,89 @@ export const schemaOf = (db: DatabaseSync): Schema => {
       )
       .map((table) => text(table.name))
   );
-  const master = rows(db, "SELECT type, name, sql FROM sqlite_master");
+  const master = rows(
+    db,
+    "SELECT type, name, tbl_name, sql FROM sqlite_master"
+  );
+  const ofType = (type: string) =>
+    master.filter((entry) => entry.type === type && entry.sql !== null);
   const indexSql = new Map(
-    master
-      .filter((entry) => entry.type === "index" && entry.sql !== null)
-      .map((entry) => [text(entry.name), withoutComments(text(entry.sql))])
+    ofType("index").map((entry) => [text(entry.name), text(entry.sql)])
   );
-  return new Map(
-    master
-      .filter((entry) => entry.type === "table" && listed.has(text(entry.name)))
-      .map((entry) => [
+  return {
+    tables: new Map(
+      ofType("table")
+        .filter((entry) => listed.has(text(entry.name)))
+        .map((entry) => [
+          text(entry.name),
+          tableOf(db, text(entry.name), text(entry.sql), indexSql),
+        ])
+    ),
+    views: new Set(ofType("view").map((entry) => text(entry.name))),
+    indexes: new Set(
+      ofType("index").map((entry) => text(entry.name).toLowerCase())
+    ),
+    triggers: new Map(
+      ofType("trigger").map((entry) => [
         text(entry.name),
-        tableOf(db, text(entry.name), text(entry.sql), indexSql),
+        { table: text(entry.tbl_name), sql: normalized(text(entry.sql)) },
       ])
-  );
+    ),
+  };
 };
 
 /** What of `old`'s columns `table` changes so its release cannot run. */
-const columnChanges = (name: string, old: Table, table: Table): string[] => {
-  const found: string[] = [];
+const columnChanges = (name: string, old: Table, table: Table): Change[] => {
+  const found: Change[] = [];
   for (const [columnName, oldColumn] of old.columns) {
     const column = table.columns.get(columnName);
     const label = `${name}.${columnName}`;
     if (column === undefined) {
-      found.push(`drops or renames column ${label}`);
+      found.push({
+        subject: `drop column ${label}`,
+        detail: "dropped or renamed",
+      });
       continue;
     }
     if (column.type !== oldColumn.type) {
-      found.push(
-        `changes the type of ${label} from ${oldColumn.type || "none"} to ${column.type || "none"}`
-      );
+      found.push({
+        subject: `change type ${label}`,
+        detail: `${oldColumn.type || "none"} to ${column.type || "none"}`,
+      });
     }
     if (column.notNull && !oldColumn.notNull) {
-      found.push(`makes ${label} NOT NULL`);
-    } else if (column.notNull && oldColumn.hasDefault && !column.hasDefault) {
-      found.push(`drops the default of NOT NULL column ${label}`);
+      found.push({ subject: `make not null ${label}` });
+    }
+    if (
+      oldColumn.default !== undefined &&
+      column.default !== oldColumn.default
+    ) {
+      found.push({
+        subject: `change default ${label}`,
+        detail: `${oldColumn.default} to ${column.default ?? "none"}`,
+      });
     }
   }
   for (const [columnName, column] of table.columns) {
-    if (!old.columns.has(columnName) && column.notNull && !column.hasDefault) {
-      found.push(
-        `adds NOT NULL column ${name}.${columnName} without a default`
-      );
+    if (
+      !old.columns.has(columnName) &&
+      column.notNull &&
+      column.default === undefined
+    ) {
+      found.push({
+        subject: `add not null column ${name}.${columnName}`,
+        detail: "without a default",
+      });
     }
+  }
+  if (old.primaryKey.join(",") !== table.primaryKey.join(",")) {
+    found.push({
+      subject: `change primary key ${name}`,
+      detail: `(${old.primaryKey.join(", ")}) to (${table.primaryKey.join(", ")})`,
+    });
+  }
+  if (old.autoincrement && !table.autoincrement) {
+    found.push({ subject: `drop autoincrement ${name}` });
   }
   return found;
 };
@@ -331,7 +436,7 @@ const constraintChanges = (
   name: string,
   old: Table,
   table: Table
-): string[] => {
+): Change[] => {
   // A constraint that reads a column the previous release doesn't know
   // sees NULL or its default there, from that release's writes.
   const onOldColumns = ({ columns }: Constraint): boolean =>
@@ -341,73 +446,138 @@ const constraintChanges = (
       ([key, foreignKey]) =>
         !old.foreignKeys.has(key) && onOldColumns(foreignKey)
     )
-    .map(([key]) => `adds or changes a foreign key on ${name}: ${key}`);
+    .map(([key, { columns }]) => ({
+      subject: `add foreign key ${name}.${columns.join(",")}`,
+      detail: key,
+    }));
+  // The same key, or one on some of its columns for every row (the
+  // primary key among them), already made them unique.
+  const earlier = [
+    ...old.uniqueKeys,
+    { keyColumns: old.primaryKey, columns: old.primaryKey, where: "" },
+  ].filter(({ keyColumns }) => keyColumns.length > 0);
   const uniqueKeys = table.uniqueKeys
     .filter(
       (key) =>
         onOldColumns(key) &&
-        // The same key, or one on some of its columns for every row,
-        // already made them unique.
-        !old.uniqueKeys.some(
+        !earlier.some(
           (oldKey) =>
             (oldKey.where === "" || oldKey.where === key.where) &&
             oldKey.keyColumns.every((column) => key.keyColumns.includes(column))
         )
     )
-    .map(
-      (key) =>
-        `adds a unique key on ${name} (${key.keyColumns.join(", ")})${key.where === "" ? "" : ` where ${key.where}`}`
-    );
+    .map((key) => ({
+      subject: `add unique key ${name}`,
+      detail: `(${key.keyColumns.join(", ")})${key.where === "" ? "" : ` where ${key.where}`}`,
+    }));
   const checks = [...table.checks]
     .filter(
       ([check, constraint]) =>
         !old.checks.has(check) && onOldColumns(constraint)
     )
-    .map(([check]) => `adds or changes a CHECK on ${name}: ${check}`);
+    .map(([check]) => ({ subject: `add check ${name}`, detail: check }));
   return [...foreignKeys, ...uniqueKeys, ...checks];
 };
 
-/** What in `after` the release on `before` cannot run on, one line each. */
-export const unsafeChanges = (before: Schema, after: Schema): string[] =>
-  [...before].flatMap(([name, old]) => {
-    const table = after.get(name);
+/**
+ * What in `after` the release on `before` cannot run on. `indexedBy` is
+ * every index name code gives `INDEXED BY`, lower-cased.
+ */
+export const unsafeChanges = (
+  before: Schema,
+  after: Schema,
+  indexedBy: ReadonlySet<string> = new Set()
+): Change[] => [
+  ...[...before.tables].flatMap(([name, old]) => {
+    const table = after.tables.get(name);
     return table === undefined
-      ? [`drops or renames table ${name}`]
+      ? [{ subject: `drop table ${name}`, detail: "dropped or renamed" }]
       : [
           ...columnChanges(name, old, table),
           ...constraintChanges(name, old, table),
         ];
-  });
+  }),
+  ...[...before.views]
+    .filter((name) => !after.views.has(name))
+    .map((name) => ({
+      subject: `drop view ${name}`,
+      detail: "dropped or renamed",
+    })),
+  ...[...before.indexes]
+    .filter((name) => indexedBy.has(name) && !after.indexes.has(name))
+    .map((name) => ({
+      subject: `drop index ${name}`,
+      detail: "code names it with INDEXED BY",
+    })),
+  ...[...after.triggers]
+    .filter(
+      ([name, trigger]) =>
+        before.tables.has(trigger.table) &&
+        before.triggers.get(name)?.sql !== trigger.sql &&
+        /\braise\s*\(/u.test(trigger.sql)
+    )
+    .map(([name, trigger]) => ({
+      subject: `add trigger ${name}`,
+      detail: `added or changed, and can refuse writes to ${trigger.table}`,
+    })),
+];
 
 /** A line that means to be a contract marker, however it is spelled. */
-const MARKER = /^--\s*contract\b.*$/gimu;
-const MARKER_TEXT =
-  /^-- contract: release (?<release>\S+) removed the last use$/u;
+const MARKER_LIKE = /^--\s*contract\b/iu;
+const MARKER =
+  /^-- contract: (?<subject>.+): release (?<release>\S+) removed the last use$/u;
 
 /** A marker as it must read, for messages. */
-export const markerExample =
-  "-- contract: release 26.11.40 removed the last use";
+export const markerFor = (subject: string): string =>
+  `-- contract: ${subject}: release YY.MM.N removed the last use`;
+
+const YEAR_2000 = 2000;
 
 /**
- * The release a migration's contract marker names; undefined without one,
- * an error unless it has one marker that reads as it must.
+ * The changes a migration's contract markers name, each with its release,
+ * and what is wrong with them. A marker is a whole-line `--` comment,
+ * outside strings and block comments. Its release must read as a
+ * published one and not be of a month after `now`'s: whether that release
+ * exists is the reviewer's to confirm.
  */
-export const contractMarker = (
-  sql: string
-): { release: string } | { error: string } | undefined => {
-  const markers = (sql.match(MARKER) ?? []).map((line) => line.trimEnd());
-  if (markers.length === 0) {
-    return undefined;
+export const contractMarkers = (
+  sql: string,
+  now: Date
+): { subjects: Set<string>; errors: string[] } => {
+  const subjects = new Set<string>();
+  const errors: string[] = [];
+  const tokens = new RegExp(TOKEN.source, TOKEN.flags);
+  for (let match = tokens.exec(sql); match !== null; match = tokens.exec(sql)) {
+    const [token] = match;
+    const lineStart = sql.lastIndexOf("\n", match.index - 1) + 1;
+    if (
+      !token.startsWith("--") ||
+      sql.slice(lineStart, match.index).trim() !== "" ||
+      !MARKER_LIKE.test(token)
+    ) {
+      continue;
+    }
+    const line = token.trimEnd();
+    const groups = MARKER.exec(line)?.groups;
+    const release = parsePublishedReleaseId(groups?.release ?? "");
+    if (groups?.subject === undefined || release === undefined) {
+      errors.push(
+        `has the contract marker "${line}", which must read "${markerFor("<change>")}" with a release id such as 26.11.40`
+      );
+    } else if (
+      (YEAR_2000 + release.year) * 12 + release.month >
+      now.getUTCFullYear() * 12 + now.getUTCMonth() + 1
+    ) {
+      errors.push(
+        `names release ${groups.release}, which is of a later month than this one`
+      );
+    } else if (subjects.has(groups.subject)) {
+      errors.push(`has two contract markers for ${groups.subject}`);
+    } else {
+      subjects.add(groups.subject);
+    }
   }
-  const [line = ""] = markers;
-  const release =
-    markers.length === 1 ? MARKER_TEXT.exec(line)?.groups?.release : undefined;
-  if (release === undefined || parsePublishedReleaseId(release) === undefined) {
-    return {
-      error: `needs one contract marker that reads "${markerExample}", with a published release's id, and has: ${markers.join(" | ")}`,
-    };
-  }
-  return { release };
+  return { subjects, errors };
 };
 
 /** One migration as its journal orders it. */
@@ -417,41 +587,79 @@ export interface Migration {
   sql: string;
 }
 
-/**
- * What is wrong with the migrations of one database, applied in order:
- * those from `from` on are judged.
- */
+/** How a database is judged. */
+export interface Judging {
+  /** The first migration judged, by its index in the journal. */
+  from: number;
+  /** For a marker's release: none may be of a later month. */
+  now: Date;
+  /** Every index name code gives `INDEXED BY`, lower-cased. */
+  indexedBy: ReadonlySet<string>;
+}
+
+const judge = (
+  file: string,
+  sql: string,
+  changes: readonly Change[],
+  now: Date
+): string[] => {
+  const { subjects, errors } = contractMarkers(sql, now);
+  const found = errors.map((error) => `${file} ${error}.`);
+  const unmarked = changes.filter(({ subject }) => !subjects.has(subject));
+  if (unmarked.length > 0) {
+    found.push(
+      [
+        `${file} breaks the release before it, which still runs on the new schema for a while and after a rollback:`,
+        ...unmarked.map(
+          ({ subject, detail }) =>
+            `  - ${subject}${detail === undefined ? "" : ` (${detail})`}`
+        ),
+        "  Expand first: add columns as nullable or with a default, and remove the last use in a release before. Then, as the contract step, name each change and the release that removed its last use, in the migration:",
+        ...[...new Set(unmarked.map(({ subject }) => subject))].map(
+          (subject) => `  ${markerFor(subject)}`
+        ),
+      ].join("\n")
+    );
+  }
+  const changed = new Set(changes.map(({ subject }) => subject));
+  for (const subject of subjects) {
+    if (!changed.has(subject)) {
+      found.push(
+        `${file} has a contract marker for ${subject}, which it does not change in a way the release before it relies on: remove the marker.`
+      );
+    }
+  }
+  return found;
+};
+
+/** What is wrong with the migrations of one database, applied in order. */
 export const checkDatabase = (
   dir: string,
   migrations: readonly Migration[],
-  from: number
+  { from, now, indexedBy }: Judging
 ): string[] => {
   const errors: string[] = [];
   const db = new DatabaseSync(":memory:");
   try {
     for (const { idx, tag, sql } of migrations) {
-      const before = idx >= from ? schemaOf(db) : undefined;
-      db.exec(sql);
-      if (before === undefined) {
-        continue;
-      }
       const file = `${dir}/${tag}.sql`;
-      const changes = unsafeChanges(before, schemaOf(db));
-      const marker = contractMarker(sql);
-      if (marker !== undefined && "error" in marker) {
-        errors.push(`${file} ${marker.error}.`);
-      } else if (changes.length > 0 && marker === undefined) {
+      const before = idx >= from ? schemaOf(db) : undefined;
+      try {
+        db.exec(sql);
+      } catch (error) {
         errors.push(
-          [
-            `${file} breaks the release before it, which still runs on the new schema for a while and after a rollback:`,
-            ...changes.map((change) => `  - ${change}`),
-            "  Expand first: add columns as nullable or with a default, and remove the last use in a release before. Then, as the contract step, say which release removed it, in the migration:",
-            `  ${markerExample}`,
-          ].join("\n")
+          `${file} does not apply after the migrations before it: ${error instanceof Error ? error.message : String(error)}`
         );
-      } else if (changes.length === 0 && marker !== undefined) {
+        break;
+      }
+      if (before !== undefined) {
         errors.push(
-          `${file} has a contract marker but changes nothing the release before it relies on: remove the marker.`
+          ...judge(
+            file,
+            sql,
+            unsafeChanges(before, schemaOf(db), indexedBy),
+            now
+          )
         );
       }
     }
@@ -460,3 +668,81 @@ export const checkDatabase = (
   }
   return errors;
 };
+
+/**
+ * What is wrong between a database's journal and its folder: every `.sql`
+ * in the folder ships with its release (a D1 database applies them in
+ * name order), and a Durable Object applies what its `migrations.js`
+ * lists, so each must be exactly the journal's, in order.
+ */
+export const journalErrors = (
+  dir: string,
+  tags: readonly string[],
+  sqlFiles: readonly string[],
+  migrationsJs?: string
+): string[] => {
+  const errors: string[] = [];
+  const inJournal = new Set(tags);
+  const inFolder = new Set(sqlFiles.map((file) => file.replace(/\.sql$/u, "")));
+  for (const tag of inFolder) {
+    if (!inJournal.has(tag)) {
+      errors.push(
+        `${dir}/${tag}.sql is not in its journal, so nothing checks it but it would ship: generate migrations with \`vp run -r db:generate\`, or remove it.`
+      );
+    }
+  }
+  for (const tag of tags) {
+    if (!inFolder.has(tag)) {
+      errors.push(
+        `${dir}/meta/_journal.json lists ${tag}, which has no .sql file.`
+      );
+    }
+  }
+  if (migrationsJs !== undefined) {
+    const imported = new Map(
+      [
+        ...migrationsJs.matchAll(
+          /import\s+(?<name>\w+)\s+from\s+'\.\/(?<tag>[^']+)\.sql'/gu
+        ),
+      ].map((match) => [match.groups?.name, match.groups?.tag])
+    );
+    const listed = (
+      /migrations\s*:\s*\{(?<names>[^}]*)\}/u.exec(migrationsJs)?.groups
+        ?.names ?? ""
+    )
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean)
+      .map((name) => imported.get(name) ?? name);
+    if (listed.join("\n") !== tags.join("\n")) {
+      errors.push(
+        `${dir}/migrations.js does not apply the journal's migrations, in its order: generate it again with \`vp run -r db:generate\`.`
+      );
+    }
+  }
+  return errors;
+};
+
+/**
+ * What is wrong with `firstChecked`: each cut-off names a database there
+ * is, and covers only migrations main already had where the branch left
+ * it (`countsAtBase`, by folder), never one the branch adds.
+ */
+export const cutOffErrors = (
+  cutOffs: Readonly<Record<string, number>>,
+  dirs: ReadonlySet<string>,
+  countsAtBase: ReadonlyMap<string, number>
+): string[] =>
+  Object.entries(cutOffs).flatMap(([dir, cutOff]) => {
+    if (!dirs.has(dir)) {
+      return [
+        `scripts/migration-safety.ts names ${dir}, which has no journal: remove it from firstChecked.`,
+      ];
+    }
+    const count = countsAtBase.get(dir) ?? 0;
+    return cutOff > count
+      ? [
+          `scripts/migration-safety.ts judges ${dir} from migration ${cutOff}, but main had ${count} where the branch left it: a cut-off never covers a migration the branch adds.`,
+        ]
+      : [];
+  });

@@ -5,10 +5,13 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   checkDatabase,
   checksOf,
-  contractMarker,
+  contractMarkers,
+  cutOffErrors,
+  journalErrors,
   schemaOf,
   unsafeChanges,
 } from "./migration-safety.ts";
+import type { Change } from "./migration-safety.ts";
 
 const base = `CREATE TABLE \`chats\` (
 	\`id\` text PRIMARY KEY NOT NULL,
@@ -20,17 +23,24 @@ const base = `CREATE TABLE \`chats\` (
 --> statement-breakpoint
 CREATE TABLE \`people\` (\`id\` text PRIMARY KEY NOT NULL);`;
 
+const line = ({ subject, detail }: Change): string =>
+  detail === undefined ? subject : `${subject} (${detail})`;
+
 /**
  * What `next` changes that the release before it relies on, applied after
  * `base` and `earlier`.
  */
-const changes = (next: string, earlier = ""): string[] => {
+const changes = (
+  next: string,
+  earlier = "",
+  indexedBy: ReadonlySet<string> = new Set()
+): string[] => {
   const db = new DatabaseSync(":memory:");
   db.exec(base);
   db.exec(earlier);
   const before = schemaOf(db);
   db.exec(next);
-  const found = unsafeChanges(before, schemaOf(db));
+  const found = unsafeChanges(before, schemaOf(db), indexedBy).map(line);
   db.close();
   return found;
 };
@@ -58,12 +68,20 @@ const columns = {
 const all = Object.values(columns);
 const withColumns = (...list: string[]) => list.join(",\n\t");
 
+/** A trigger that refuses changing a chat's owner, its body as given. */
+const ownerKept = (body = "SELECT RAISE(ABORT, 'owner kept');") =>
+  `CREATE TRIGGER \`chats_owner_kept\` BEFORE UPDATE OF \`owner_id\` ON \`chats\`
+BEGIN
+	${body}
+END;`;
+
 describe(unsafeChanges, () => {
   it("passes what the previous release runs on", () => {
     expect(
       changes(`ALTER TABLE \`chats\` ADD \`summary\` text;--> statement-breakpoint
 ALTER TABLE \`chats\` ADD \`pinned\` integer DEFAULT false NOT NULL;--> statement-breakpoint
 CREATE TABLE \`tags\` (\`id\` text PRIMARY KEY NOT NULL, \`name\` text NOT NULL, CONSTRAINT "named" CHECK(length(name) > 0));--> statement-breakpoint
+CREATE TRIGGER \`tags_kept\` BEFORE DELETE ON \`tags\` BEGIN SELECT RAISE(ABORT, 'kept'); END;--> statement-breakpoint
 CREATE INDEX \`chats_owner\` ON \`chats\` (\`owner_id\`);--> statement-breakpoint
 CREATE UNIQUE INDEX \`tags_name\` ON \`tags\` (\`name\`);`)
     ).toStrictEqual([]);
@@ -75,7 +93,7 @@ CREATE UNIQUE INDEX \`tags_name\` ON \`tags\` (\`name\`);`)
         rebuild(
           withColumns(
             columns.id,
-            columns.title,
+            "`title` text DEFAULT ''",
             columns.kind,
             "`owner_id` text",
             columns.created,
@@ -86,29 +104,31 @@ CREATE UNIQUE INDEX \`tags_name\` ON \`tags\` (\`name\`);`)
     ).toStrictEqual([]);
   });
 
-  it("does not judge dropping an index", () => {
-    expect(
-      changes(`CREATE INDEX \`chats_owner\` ON \`chats\` (\`owner_id\`);--> statement-breakpoint
-DROP INDEX \`chats_owner\`;`)
-    ).toStrictEqual([]);
-  });
-
   it("flags dropping or renaming a table", () => {
     expect(changes("DROP TABLE `people`;")).toStrictEqual([
-      "drops or renames table people",
+      "drop table people (dropped or renamed)",
     ]);
     expect(changes("ALTER TABLE `people` RENAME TO `persons`;")).toStrictEqual([
-      "drops or renames table people",
+      "drop table people (dropped or renamed)",
     ]);
+  });
+
+  it("flags dropping or renaming a view", () => {
+    expect(
+      changes(
+        "DROP VIEW `chat_titles`;",
+        "CREATE VIEW `chat_titles` AS SELECT `id`, `title` FROM `chats`;"
+      )
+    ).toStrictEqual(["drop view chat_titles (dropped or renamed)"]);
   });
 
   it("flags dropping or renaming a column", () => {
     expect(changes("ALTER TABLE `chats` DROP COLUMN `title`;")).toStrictEqual([
-      "drops or renames column chats.title",
+      "drop column chats.title (dropped or renamed)",
     ]);
     expect(
       changes("ALTER TABLE `chats` RENAME COLUMN `title` TO `name`;")
-    ).toStrictEqual(["drops or renames column chats.title"]);
+    ).toStrictEqual(["drop column chats.title (dropped or renamed)"]);
     expect(
       changes(
         rebuild(
@@ -116,7 +136,7 @@ DROP INDEX \`chats_owner\`;`)
           "id, kind, owner_id, created_at"
         )
       )
-    ).toStrictEqual(["drops or renames column chats.title"]);
+    ).toStrictEqual(["drop column chats.title (dropped or renamed)"]);
   });
 
   it("flags a type change", () => {
@@ -132,7 +152,7 @@ DROP INDEX \`chats_owner\`;`)
           )
         )
       )
-    ).toStrictEqual(["changes the type of chats.title from text to integer"]);
+    ).toStrictEqual(["change type chats.title (text to integer)"]);
   });
 
   it("flags making a column NOT NULL, even with a default", () => {
@@ -148,29 +168,35 @@ DROP INDEX \`chats_owner\`;`)
           )
         )
       )
-    ).toStrictEqual(["makes chats.title NOT NULL"]);
+    ).toStrictEqual(["make not null chats.title"]);
   });
 
-  it("flags dropping the default of a NOT NULL column", () => {
-    expect(
-      changes(
-        rebuild(
-          withColumns(
-            columns.id,
-            columns.title,
-            "`kind` text NOT NULL",
-            columns.owner,
-            columns.created
-          )
+  it("flags a changed or removed default", () => {
+    const kind = (column: string) =>
+      rebuild(
+        withColumns(
+          columns.id,
+          columns.title,
+          column,
+          columns.owner,
+          columns.created
         )
-      )
-    ).toStrictEqual(["drops the default of NOT NULL column chats.kind"]);
+      );
+    expect(changes(kind("`kind` text NOT NULL"))).toStrictEqual([
+      "change default chats.kind ('chat' to none)",
+    ]);
+    expect(changes(kind("`kind` text DEFAULT NULL NOT NULL"))).toStrictEqual([
+      "change default chats.kind ('chat' to none)",
+    ]);
+    expect(changes(kind("`kind` text DEFAULT 'task' NOT NULL"))).toStrictEqual([
+      "change default chats.kind ('chat' to 'task')",
+    ]);
   });
 
   it("flags a new NOT NULL column without a default, and passes one with a default", () => {
     expect(
       changes(rebuild(withColumns(...all, "`team_id` text NOT NULL")))
-    ).toStrictEqual(["adds NOT NULL column chats.team_id without a default"]);
+    ).toStrictEqual(["add not null column chats.team_id (without a default)"]);
     expect(
       changes(
         rebuild(withColumns(...all, "`team_id` text DEFAULT 'none' NOT NULL"))
@@ -180,7 +206,49 @@ DROP INDEX \`chats_owner\`;`)
       changes(
         rebuild(withColumns(...all, "`team_id` text DEFAULT NULL NOT NULL"))
       )
-    ).toStrictEqual(["adds NOT NULL column chats.team_id without a default"]);
+    ).toStrictEqual(["add not null column chats.team_id (without a default)"]);
+  });
+
+  it("flags a changed primary key, and a removed AUTOINCREMENT", () => {
+    expect(
+      changes(
+        rebuild(
+          withColumns(
+            "`id` text NOT NULL",
+            columns.title,
+            columns.kind,
+            columns.owner,
+            columns.created,
+            "PRIMARY KEY(`id`, `owner_id`)"
+          )
+        )
+      )
+    ).toStrictEqual(["change primary key chats ((id) to (id, owner_id))"]);
+    expect(
+      changes(
+        `CREATE TABLE \`__new_events\` (\`id\` integer PRIMARY KEY, \`name\` text);--> statement-breakpoint
+INSERT INTO \`__new_events\` SELECT * FROM \`events\`;--> statement-breakpoint
+DROP TABLE \`events\`;--> statement-breakpoint
+ALTER TABLE \`__new_events\` RENAME TO \`events\`;`,
+        "CREATE TABLE `events` (`id` integer PRIMARY KEY AUTOINCREMENT, `name` text);"
+      )
+    ).toStrictEqual(["drop autoincrement events"]);
+  });
+
+  it("flags dropping an index code names with INDEXED BY, and no other", () => {
+    const earlier = "CREATE INDEX `chats_owner` ON `chats` (`owner_id`);";
+    expect(
+      changes("DROP INDEX `chats_owner`;", earlier, new Set(["chats_owner"]))
+    ).toStrictEqual(["drop index chats_owner (code names it with INDEXED BY)"]);
+    expect(changes("DROP INDEX `chats_owner`;", earlier)).toStrictEqual([]);
+    expect(
+      changes(
+        `DROP INDEX \`chats_owner\`;--> statement-breakpoint
+${earlier}`,
+        earlier,
+        new Set(["chats_owner"])
+      )
+    ).toStrictEqual([]);
   });
 
   it("flags a foreign key on columns that were there, and passes one on a new column", () => {
@@ -194,7 +262,7 @@ DROP INDEX \`chats_owner\`;`)
         )
       )
     ).toStrictEqual([
-      "adds or changes a foreign key on chats: (owner_id) references people (id) on update NO ACTION on delete CASCADE",
+      "add foreign key chats.owner_id ((owner_id) references people (id) on update NO ACTION on delete CASCADE)",
     ]);
     expect(
       changes(
@@ -206,35 +274,41 @@ DROP INDEX \`chats_owner\`;`)
   it("flags a unique key on columns that were there", () => {
     expect(
       changes("CREATE UNIQUE INDEX `chats_title` ON `chats` (`title`);")
-    ).toStrictEqual(["adds a unique key on chats (title)"]);
+    ).toStrictEqual(["add unique key chats ((title))"]);
     expect(
       changes(
         'CREATE UNIQUE INDEX `chats_title` ON `chats` (`title`) WHERE "chats"."kind" = \'chat\';'
       )
     ).toStrictEqual([
-      "adds a unique key on chats (title) where chats.kind = 'chat'",
+      "add unique key chats ((title) where chats.kind = 'chat')",
     ]);
     expect(
       changes("CREATE UNIQUE INDEX `chats_title` ON `chats` (lower(`title`));")
-    ).toStrictEqual(["adds a unique key on chats (<lower(title)>)"]);
+    ).toStrictEqual(["add unique key chats ((<lower(title)>))"]);
     expect(
       changes(
         "CREATE UNIQUE INDEX `chats_title_length` ON `chats` (length(`title`));",
         "CREATE UNIQUE INDEX `chats_title` ON `chats` (lower(`title`));"
       )
-    ).toStrictEqual(["adds a unique key on chats (<length(title)>)"]);
+    ).toStrictEqual(["add unique key chats ((<length(title)>))"]);
     expect(
       changes(
         "CREATE UNIQUE INDEX `chats_title_nocase` ON `chats` (`title` COLLATE NOCASE);",
         "CREATE UNIQUE INDEX `chats_title` ON `chats` (`title`);"
       )
-    ).toStrictEqual(["adds a unique key on chats (title collate nocase)"]);
+    ).toStrictEqual(["add unique key chats ((title collate nocase))"]);
   });
 
   it("passes a unique key an earlier one implies, or whose WHERE reads a new column", () => {
     expect(
       changes(
         "CREATE UNIQUE INDEX `chats_id_title` ON `chats` (`id`, `title`);"
+      )
+    ).toStrictEqual([]);
+    expect(
+      changes(
+        "CREATE UNIQUE INDEX `chats_title_owner` ON `chats` (lower(`title`), `owner_id`);",
+        "CREATE UNIQUE INDEX `chats_title` ON `chats` (lower(`title`));"
       )
     ).toStrictEqual([]);
     expect(
@@ -253,9 +327,7 @@ CREATE UNIQUE INDEX \`chats_title\` ON \`chats\` (\`title\`) WHERE "chats"."arch
           )
         )
       )
-    ).toStrictEqual([
-      "adds or changes a CHECK on chats: kind in ('chat', 'task')",
-    ]);
+    ).toStrictEqual(["add check chats (kind in ('chat', 'task'))"]);
     expect(
       changes(
         rebuild(
@@ -276,9 +348,7 @@ CREATE UNIQUE INDEX \`chats_title\` ON \`chats\` (\`title\`) WHERE "chats"."arch
       );
     expect(
       changes(kinds("'Chat', 'task'"), kinds("'chat', 'task'"))
-    ).toStrictEqual([
-      "adds or changes a CHECK on chats: kind in ('Chat', 'task')",
-    ]);
+    ).toStrictEqual(["add check chats (kind in ('Chat', 'task'))"]);
     expect(
       changes(
         rebuild(
@@ -288,42 +358,99 @@ CREATE UNIQUE INDEX \`chats_title\` ON \`chats\` (\`title\`) WHERE "chats"."arch
           )
         )
       )
-    ).toStrictEqual(["adds or changes a CHECK on chats: length(title) > 0"]);
+    ).toStrictEqual(["add check chats (length(title) > 0)"]);
+  });
+
+  it("flags a new or changed trigger that can refuse writes to a table that was there", () => {
+    const refusing =
+      "add trigger chats_owner_kept (added or changed, and can refuse writes to chats)";
+    expect(changes(ownerKept())).toStrictEqual([refusing]);
+    expect(
+      changes(
+        `DROP TRIGGER \`chats_owner_kept\`;--> statement-breakpoint
+${ownerKept("SELECT RAISE(ABORT, 'the owner is kept');")}`,
+        ownerKept()
+      )
+    ).toStrictEqual([refusing]);
+    expect(
+      changes(ownerKept("UPDATE `people` SET `id` = `id` WHERE 0;"))
+    ).toStrictEqual([]);
+  });
+
+  it("passes a trigger written again as it was", () => {
+    expect(
+      changes(
+        `DROP TRIGGER \`chats_owner_kept\`;--> statement-breakpoint
+${ownerKept("SELECT   RAISE(ABORT,   'owner kept');")}`,
+        ownerKept()
+      )
+    ).toStrictEqual([]);
   });
 });
 
 describe(checksOf, () => {
-  it("reads every CHECK's expression, past strings and nested parentheses", () => {
+  it("reads every CHECK's expression, past strings, comments and nested parentheses", () => {
     expect(
       checksOf(
-        "CREATE TABLE `t` (`a` text CHECK(a <> 'check('), `b` int, CONSTRAINT \"c\" CHECK ((b > 0) AND (b < 9)))"
+        "CREATE TABLE `t` (`a` text CHECK(a <> 'check('), -- check(no)\n `b` int, CONSTRAINT \"c\" CHECK /* ( */ ((b > 0) AND (b < 9)))"
       )
     ).toStrictEqual(["a <> 'check('", "(b > 0) and (b < 9)"]);
   });
 });
 
-describe(contractMarker, () => {
-  it("reads the release a marker names", () => {
+describe(contractMarkers, () => {
+  const now = new Date("2026-11-28T12:00:00Z");
+
+  it("reads the change each marker names", () => {
     expect(
-      contractMarker(
-        "-- contract: release 26.11.40 removed the last use\nDROP TABLE `people`;"
+      contractMarkers(
+        "-- contract: drop table people: release 26.11.40 removed the last use\n  -- contract: drop column chats.title: release 26.10.2 removed the last use\nDROP TABLE `people`;",
+        now
       )
-    ).toStrictEqual({ release: "26.11.40" });
+    ).toStrictEqual({
+      subjects: new Set(["drop table people", "drop column chats.title"]),
+      errors: [],
+    });
   });
 
-  it("is undefined without a marker", () => {
-    expect(contractMarker("DROP TABLE `people`;")).toBeUndefined();
+  it("counts only whole-line comments outside strings and block comments", () => {
+    const marker =
+      "-- contract: drop table people: release 26.11.40 removed the last use";
+    for (const sql of [
+      `SELECT '\n${marker}\n';`,
+      `/*\n${marker}\n*/`,
+      `DROP TABLE \`people\`; ${marker}`,
+    ]) {
+      expect(contractMarkers(sql, now).subjects).toStrictEqual(new Set());
+    }
   });
 
   it("refuses a marker that does not read as it must", () => {
     for (const sql of [
-      "-- contract: release dev-abc removed the last use",
-      "-- contract: release 26.13.1 removed the last use",
-      "-- Contract: 26.11.40",
-      "-- contract: release 26.11.40 removed the last use\n-- contract: release 26.11.41 removed the last use",
+      "-- contract: drop table people: release dev-abc removed the last use",
+      "-- contract: drop table people: release 26.13.1 removed the last use",
+      "-- contract: release 26.11.40 removed the last use",
+      "-- Contract: drop table people",
     ]) {
-      expect(contractMarker(sql)).toHaveProperty("error");
+      expect(contractMarkers(sql, now).errors).toHaveLength(1);
     }
+  });
+
+  it("refuses a release of a later month, and two markers for one change", () => {
+    expect(
+      contractMarkers(
+        "-- contract: drop table people: release 26.12.1 removed the last use",
+        now
+      ).errors
+    ).toStrictEqual([
+      "names release 26.12.1, which is of a later month than this one",
+    ]);
+    expect(
+      contractMarkers(
+        "-- contract: drop table people: release 26.11.1 removed the last use\n-- contract: drop table people: release 26.11.2 removed the last use",
+        now
+      ).errors
+    ).toStrictEqual(["has two contract markers for drop table people"]);
   });
 });
 
@@ -335,46 +462,133 @@ describe(checkDatabase, () => {
         { idx: 0, tag: "0000_base", sql: base },
         { idx: 1, tag: "0001_next", sql: next },
       ],
-      from
+      { from, now: new Date("2026-11-28T12:00:00Z"), indexedBy: new Set() }
     );
+  const dropPeople =
+    "-- contract: drop table people: release 26.11.40 removed the last use";
+  const dropTitle =
+    "-- contract: drop column chats.title: release 26.11.40 removed the last use";
+  const both = "DROP TABLE `people`;\nALTER TABLE `chats` DROP COLUMN `title`;";
 
-  it("refuses an unsafe migration without a marker, naming each change and the marker", () => {
+  it("refuses an unsafe migration without a marker, naming each change and its marker", () => {
     const [error, ...rest] = judged("DROP TABLE `people`;");
     expect(rest).toStrictEqual([]);
     expect(error).toContain("db/0001_next.sql breaks the release before it");
-    expect(error).toContain("  - drops or renames table people");
+    expect(error).toContain("  - drop table people (dropped or renamed)");
     expect(error).toContain(
-      "-- contract: release 26.11.40 removed the last use"
+      "  -- contract: drop table people: release YY.MM.N removed the last use"
     );
   });
 
-  it("passes an unsafe migration with a marker", () => {
-    expect(
-      judged(
-        "-- contract: release 26.11.40 removed the last use\nDROP TABLE `people`;"
-      )
-    ).toStrictEqual([]);
+  it("passes an unsafe migration with a marker for each change", () => {
+    expect(judged(`${dropPeople}\n${dropTitle}\n${both}`)).toStrictEqual([]);
   });
 
-  it("refuses a marker on a safe migration", () => {
+  it("refuses a change its markers do not name", () => {
+    const [error, ...rest] = judged(`${dropPeople}\n${both}`);
+    expect(rest).toStrictEqual([]);
+    expect(error).toContain("  - drop column chats.title (dropped or renamed)");
+    expect(error).not.toContain("drop table people");
+  });
+
+  it("refuses a marker that names no change", () => {
     expect(
-      judged(
-        "-- contract: release 26.11.40 removed the last use\nALTER TABLE `chats` ADD `summary` text;"
-      )
+      judged(`${dropTitle}\nALTER TABLE \`chats\` ADD \`summary\` text;`)
     ).toStrictEqual([
-      "db/0001_next.sql has a contract marker but changes nothing the release before it relies on: remove the marker.",
+      "db/0001_next.sql has a contract marker for drop column chats.title, which it does not change in a way the release before it relies on: remove the marker.",
     ]);
   });
 
   it("refuses a marker that does not read as it must", () => {
-    expect(
-      judged("-- contract: after 26.11.40\nDROP TABLE `people`;")
-    ).toStrictEqual([
-      'db/0001_next.sql needs one contract marker that reads "-- contract: release 26.11.40 removed the last use", with a published release\'s id, and has: -- contract: after 26.11.40.',
-    ]);
+    const [error] = judged(
+      "-- contract: after 26.11.40\nALTER TABLE `chats` ADD `summary` text;"
+    );
+    expect(error).toContain(
+      'db/0001_next.sql has the contract marker "-- contract: after 26.11.40"'
+    );
   });
 
   it("does not judge a migration before the first one checked", () => {
     expect(judged("DROP TABLE `people`;", 2)).toStrictEqual([]);
+  });
+
+  it("names the migration that does not apply", () => {
+    const [error] = judged("ALTER TABLE `nothing` ADD `x` text;");
+    expect(error).toContain(
+      "db/0001_next.sql does not apply after the migrations before it: no such table: nothing"
+    );
+  });
+});
+
+describe(journalErrors, () => {
+  const tags = ["0000_chats", "0001_titles"];
+  const migrationsJs = (
+    names: string[]
+  ) => `import journal from './meta/_journal.json';
+${tags.map((tag, at) => `import m000${at} from './${tag}.sql';`).join("\n")}
+
+  export default {
+    journal,
+    migrations: {
+      ${names.join(",\n")}
+    }
+  }
+`;
+
+  it("passes a folder, and a Durable Object's migrations.js, that match the journal", () => {
+    expect(
+      journalErrors(
+        "db",
+        tags,
+        ["0001_titles.sql", "0000_chats.sql"],
+        migrationsJs(["m0000", "m0001"])
+      )
+    ).toStrictEqual([]);
+  });
+
+  it("refuses a .sql the journal does not list, and an entry without its .sql", () => {
+    expect(
+      journalErrors("db", tags, ["0000_chats.sql", "0002_orphan.sql"])
+    ).toStrictEqual([
+      "db/0002_orphan.sql is not in its journal, so nothing checks it but it would ship: generate migrations with `vp run -r db:generate`, or remove it.",
+      "db/meta/_journal.json lists 0001_titles, which has no .sql file.",
+    ]);
+  });
+
+  it("refuses a migrations.js that leaves one out or reorders them", () => {
+    for (const names of [["m0000"], ["m0001", "m0000"]]) {
+      expect(
+        journalErrors(
+          "db",
+          tags,
+          ["0000_chats.sql", "0001_titles.sql"],
+          migrationsJs(names)
+        )
+      ).toStrictEqual([
+        "db/migrations.js does not apply the journal's migrations, in its order: generate it again with `vp run -r db:generate`.",
+      ]);
+    }
+  });
+});
+
+describe(cutOffErrors, () => {
+  it("passes a cut-off at most the migrations main had where the branch left it", () => {
+    expect(
+      cutOffErrors({ db: 59 }, new Set(["db"]), new Map([["db", 59]]))
+    ).toStrictEqual([]);
+  });
+
+  it("refuses a cut-off that covers a migration the branch adds", () => {
+    expect(
+      cutOffErrors({ db: 60 }, new Set(["db"]), new Map([["db", 59]]))
+    ).toStrictEqual([
+      "scripts/migration-safety.ts judges db from migration 60, but main had 59 where the branch left it: a cut-off never covers a migration the branch adds.",
+    ]);
+  });
+
+  it("refuses a cut-off for a database there is not", () => {
+    expect(cutOffErrors({ gone: 3 }, new Set(), new Map())).toStrictEqual([
+      "scripts/migration-safety.ts names gone, which has no journal: remove it from firstChecked.",
+    ]);
   });
 });
