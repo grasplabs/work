@@ -361,10 +361,12 @@ export const clientRuns = sqliteTable("client_runs", {
   /**
    * Which Workflow the runner is an instance of: `provision_placed`
    * provisions a client placed in a hosting destination
-   * (src/hosting/workflow.ts).
+   * (src/hosting/workflow.ts); `rollout` takes it to a release, a step a
+   * phase (src/rollout/org-rollout.ts); `deploy`, the same in one step
+   * (src/rollout/deploy.ts), until that goes.
    */
   kind: text({
-    enum: ["deploy", "apply", "provision_placed"],
+    enum: ["deploy", "apply", "provision_placed", "rollout"],
   }).notNull(),
   /**
    * The runner's attempt that holds the client, for a runner on Workerflow
