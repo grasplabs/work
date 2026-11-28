@@ -1,40 +1,47 @@
 /**
  * Whether Markdown text is within what a Markdown renderer takes in about a
- * second, decided in one pass over the text, cheap enough to run on every
- * streamed update; text past it shows as plain text. Untrusted text (a
- * model's answer, what someone typed) can otherwise freeze or crash the
- * page that shows it, for whoever opens it, and no parser the kit renders
- * with bounds its own work: marked (Streamdown's block splitter) has no
- * nesting limit and recurses per level, its nested emphasis is quadratic
- * (markedjs/marked#4286), and micromark has open quadratic cases.
+ * second, decided by counting characters in one pass, cheap enough to run
+ * on every streamed update; text past it shows as plain text. Untrusted
+ * text (a model's answer, what someone typed) can otherwise freeze or crash
+ * the page that shows it, for whoever opens it, and no parser the kit
+ * renders with bounds its own work: marked (Streamdown's block splitter)
+ * has no nesting limit and recurses per level, its nested emphasis is
+ * quadratic (markedjs/marked#4286), and micromark has open quadratic cases.
  *
- * - `characters`: the whole text, the first bound, as chat products cap a
- *   message's length. Past it, even ordinary Markdown takes more than a
- *   second: what it draws grows with it.
+ * The counts read no Markdown structure (no fence, block, paragraph or
+ * blank line), so no parser can read the text otherwise and slip past
+ * them: earlier versions that read structure were wrong four times, each
+ * time where a parser saw a line, a blank line or a fence differently.
+ *
+ * - `characters`: the whole text, as chat products cap a message's length.
+ *   Past it, even ordinary Markdown takes more than a second: what it
+ *   draws grows with it.
+ * - `delimiters`: everything in the text that can delimit inline Markdown:
+ *   `*`, `_`, `~` and `` ` ``, and each `](` (a link's address) and `[^`
+ *   (a footnote). A delimiter whose neighbours both are blanks (`2 * 3`, a
+ *   list's bullet) can't open or close anything, nor can a `_` inside a
+ *   word (`snake_case`): those don't count. Unclosed delimiters are
+ *   rescanned, in quadratic time, and nested ones overflow the stack.
+ * - `footnotes`: each `[^`, again on its own: footnote definitions over
+ *   indented lines are quadratic in micromark at a fraction of the
+ *   delimiters.
  * - `depth`: the levels a line opens before its text, each block quote
- *   `>` and list marker, and every four columns of indentation (a list
- *   nests in two, so a page can't nest past twice this). markdown-it
- *   stops at 20 levels in its CommonMark preset (`maxNesting`). About a
- *   thousand levels, two kilobytes of text, overflow marked's stack.
- * - `openers`: what can open emphasis or a link's address in one inline
- *   run, the text a parser reads inline at once: emphasis delimiters that
- *   can open (CommonMark's left-flanking `*` and `~`, and `_` not inside a
- *   word) and `](`. Nested emphasis overflows the stack at about a thousand
- *   levels, and unclosed emphasis or link addresses are rescanned, each
- *   in quadratic time, from one paragraph of a few kilobytes.
- *
- * A run ends at a blank line, a heading or a list item that starts a new
- * block in CommonMark and marked alike, and around a fenced code block
- * opened at a line's start, whose text no parser reads inline; one never
- * closed counts as text. Where a reading is uncertain (a list nested by
- * four columns or more, a block quote, a table row) the run goes on, so
- * the count only ever overstates a run.
+ *   `>` and list marker, and every four columns of indentation. A line is
+ *   split at every character any parser may end one at, so every line a
+ *   parser reads starts a line here too, and its levels are counted from
+ *   there. markdown-it stops at 20 levels in its CommonMark preset
+ *   (`maxNesting`). About a thousand levels, two kilobytes, overflow
+ *   marked's stack.
  */
 export const markdownLimits = {
   characters: 60_000,
+  delimiters: 3000,
+  footnotes: 500,
   depth: 20,
-  openers: 500,
 } as const;
+
+/** Every character a Markdown parser, or JavaScript, may end a line at. */
+const lineEnd = /\r\n|[\n\r\v\f\u0085\u2028\u2029]/u;
 
 /**
  * A level at a line's start, from `lastIndex` on: a block quote's `>`, or
@@ -58,103 +65,44 @@ const tooDeep = (line: string): boolean => {
   return depth > markdownLimits.depth;
 };
 
-/**
- * A line that starts a new inline run in CommonMark and marked alike: an
- * ATX heading, or a list item with text (a bullet, or `1.`, the only
- * number that may interrupt a paragraph).
- */
-const newRun = /^ {0,3}(?:#{1,6}(?:[ \t]|$)|(?:[*+-]|1[.)])[ \t]+\S)/u;
-
-/** A fenced code block's opening line at the line's start: its fence. */
-const fenceOpening = /^(?<fence>`{3,}(?=[^`]*$)|~{3,})/u;
-
-/**
- * Whether `line` closes a fence of `fence`'s character and length. Marked
- * closes on more lines than CommonMark (fence characters after the
- * fence), and closing early only counts more as text.
- */
-const closes = (line: string, fence: string): boolean => {
-  const match = /^ {0,3}(?<run>`+|~+)[`~ \t]*$/u.exec(line);
-  const run = match?.groups?.run ?? "";
-  return run.startsWith(fence.charAt(0)) && run.length >= fence.length;
-};
-
-const whitespace = /\s/u;
-const punctuation = /[\p{P}\p{S}]/u;
+const blank = /\s/u;
 const wordCharacter = /[\p{L}\p{N}]/u;
-
-/**
- * How many emphasis delimiters and link addresses `line` can open: each
- * left-flanking `*` or `~` (CommonMark 6.2, GFM's strikethrough), each
- * such `_` not inside a word, and each `](`.
- */
-const openersIn = (line: string): number => {
-  let openers = 0;
-  for (let index = 0; index < line.length; index += 1) {
-    const character = line.charAt(index);
-    if (character === "]" && line[index + 1] === "(") {
-      openers += 1;
-    }
-    if (character !== "*" && character !== "_" && character !== "~") {
-      continue;
-    }
-    let end = index;
-    while (line[end] === character) {
-      end += 1;
-    }
-    const before = line[index - 1] ?? " ";
-    const after = line[end] ?? " ";
-    const leftFlanking =
-      !whitespace.test(after) &&
-      (!punctuation.test(after) ||
-        whitespace.test(before) ||
-        punctuation.test(before));
-    if (leftFlanking && (character !== "_" || !wordCharacter.test(before))) {
-      openers += end - index;
-    }
-    index = end - 1;
-  }
-  return openers;
-};
 
 /** Whether `text` is within `markdownLimits`. */
 export const withinMarkdownLimits = (text: string): boolean => {
   if (text.length > markdownLimits.characters) {
     return false;
   }
-  // Every line ending CommonMark has, as a parser splits the lines.
-  const lines = text.split(/\r\n|\r|\n/u);
-  // Once a fence is never closed, its text and what follows count as text.
-  let fencesClose = true;
-  let openers = 0;
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index] ?? "";
-    const fence = fencesClose
-      ? fenceOpening.exec(line)?.groups?.fence
-      : undefined;
-    if (fence !== undefined) {
-      let closing = index + 1;
-      while (closing < lines.length && !closes(lines[closing] ?? "", fence)) {
-        closing += 1;
-      }
-      if (closing === lines.length) {
-        fencesClose = false;
-      } else {
-        index = closing;
-        openers = 0;
-        continue;
-      }
-    }
-    if (line.trim() === "" || newRun.test(line)) {
-      openers = 0;
-    }
-    if (tooDeep(line)) {
-      return false;
-    }
-    openers += openersIn(line);
-    if (openers > markdownLimits.openers) {
-      return false;
+  let delimiters = 0;
+  let footnotes = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text.charAt(index);
+    const before = text[index - 1] ?? " ";
+    const after = text[index + 1] ?? " ";
+    if (character === "[" && after === "^") {
+      footnotes += 1;
+      delimiters += 1;
+    } else if (character === "]" && after === "(") {
+      delimiters += 1;
+    } else if (character === "`") {
+      delimiters += 1;
+    } else if (
+      (character === "*" || character === "_" || character === "~") &&
+      !(blank.test(before) && blank.test(after)) &&
+      !(
+        character === "_" &&
+        wordCharacter.test(before) &&
+        wordCharacter.test(after)
+      )
+    ) {
+      delimiters += 1;
     }
   }
-  return true;
+  if (
+    delimiters > markdownLimits.delimiters ||
+    footnotes > markdownLimits.footnotes
+  ) {
+    return false;
+  }
+  return !text.split(lineEnd).some(tooDeep);
 };

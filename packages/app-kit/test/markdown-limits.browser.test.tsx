@@ -10,7 +10,8 @@ import { Markdown } from "../src/components/markdown.tsx";
 // shapes that freeze a renderer or overflow its stack, each split where
 // the guard and a parser could read a line or a block differently (every
 // line ending, blank-looking lines of other whitespace, list markers,
-// headings, fences, indentation), from a fixed seed. Whatever the guard
+// headings, fences, HTML blocks, footnotes, indentation), from a fixed
+// seed. Whatever the guard
 // lets through must render with the kit's Markdown (Streamdown, its block
 // splitter marked and its remark pipeline) without throwing and in time;
 // what the kit's own error boundary catches counts as a failure too.
@@ -64,6 +65,9 @@ const pairs = [
   ["[x](https://a ", ")"],
   ["a*b", ""],
   ["*\u00A0a ", " c*"],
+  ["[^a]:\n    ", ""],
+  ["[^a]: ", ""],
+  ["`a", ""],
 ] as const;
 /** What may, or only seems to, end a block or a line. */
 const separators = [
@@ -89,6 +93,12 @@ const separators = [
   "\n~~~\n",
   "\n``` `\n",
   "\n|a|\n",
+  "\n<div>\n",
+  "\n<!--\n",
+  "\n<pre>\n",
+  "\n\u2028\n",
+  "\n\v\n",
+  "\n\u0085\n",
 ] as const;
 
 /**
@@ -102,7 +112,7 @@ const generated = (): string => {
   let opened = 0;
   const segments = 1 + upTo(4);
   for (let segment = 0; segment < segments; segment += 1) {
-    const count = random() < 0.5 ? upTo(499) : 250 + upTo(249);
+    const count = random() < 0.5 ? upTo(499) : 250 + upTo(1500);
     text += pick(leading);
     // Now and then past the thousand levels that overflow marked's stack.
     text += pick(prefixes).repeat(random() < 0.3 ? upTo(1500) : upTo(30));

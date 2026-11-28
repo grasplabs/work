@@ -15,6 +15,7 @@ import { cn } from "cn";
 import { Component } from "react";
 import type { ComponentProps, ReactElement } from "react";
 import {
+  defaultComponents,
   defaultRehypePlugins,
   Streamdown,
   useIsCodeFenceIncomplete,
@@ -36,12 +37,12 @@ import type { ExtraProps, StreamdownProps } from "streamdown";
 //   of its App), so Streamdown's link, a button whose dialog opens or
 //   copies the address, would do nothing.
 // - Text past @grasp-os/shared's `markdownLimits` (very large or
-//   pathological: deep nesting, hundreds of unclosed emphasis or links in a paragraph)
+//   pathological: deep nesting, thousands of emphasis, code or link marks)
 //   shows as plain text, as does text Streamdown throws on: untrusted
 //   text must not freeze or crash the page for whoever opens it.
 // A page can't switch the first two off: the props that would replace or widen
 // the pipeline are the kit's (`PIPELINE`), and its link wins over a
-// page's `components`.
+// page's `components`, as does Streamdown's own image.
 // Upstream's `cn-markdown` class is left out: no style of the registry
 // gives it any CSS, and the lint refuses a class without any. An image
 // from another server stays an <img>, as upstream's: the frame's policy
@@ -260,8 +261,13 @@ function Markdown({
         data-slot="markdown"
         {...props}
         {...PIPELINE}
-        // A page's components restyle the elements; the kit's link wins.
-        components={{ ...components, a: MarkdownLink }}
+        // A page's components restyle the elements; the kit's link and
+        // image win, so no page turns an address in the text into a link.
+        components={{
+          ...components,
+          a: MarkdownLink,
+          img: defaultComponents.img,
+        }}
       >
         {children}
       </Streamdown>

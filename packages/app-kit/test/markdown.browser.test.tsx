@@ -336,6 +336,19 @@ describe("the kit's Markdown, in an App page's frame", () => {
   // of `*a` took 45 s, of `*_` 99 s; 20,000 unclosed links 75 s).
   it.each([
     ["nested quotes", `${"> ".repeat(10_000)}deep`],
+    [
+      "emphasis inside what looks like a fence in an HTML block",
+      `<div>\n\`\`\`\n\n${"*_".repeat(29_000)}\n\`\`\``,
+    ],
+    [
+      "emphasis in paragraphs split by lines that only look blank",
+      `${"*a".repeat(250)}\n\u00A0\n`.repeat(118),
+    ],
+    [
+      "footnote definitions over indented lines",
+      `${"[^a]:\n    ".repeat(2000)}x`,
+    ],
+    ["nested footnote definitions", "[^a]: [^b]: ".repeat(3000)],
     ["nested lists", `${"- ".repeat(10_000)}deep`],
     [
       "lists nested by indentation",
@@ -344,7 +357,7 @@ describe("the kit's Markdown, in an App page's frame", () => {
         (_, level) => `${"  ".repeat(level)}- x`
       ).join("\n"),
     ],
-    ["nested emphasis", `${"*a ".repeat(1500)}b${" c*".repeat(1500)}`],
+    ["nested emphasis", `${"*a ".repeat(2500)}b${" c*".repeat(2500)}`],
     ["emphasis", "*a".repeat(50_000)],
     ["mixed emphasis", "*_".repeat(50_000)],
     ["unclosed links", "[x](https://a".repeat(20_000)],
@@ -433,6 +446,18 @@ const overdue_items = invoices.filter((inv) => inv.due_date < today);
       80,
     ],
     [
+      "200 lines of C with pointers",
+      `\`\`\`c\n${Array.from({ length: 200 }, (_, line) => `static int copy_${line}(char *dst, const char *src, size_t n) { while (n-- && (*dst++ = *src++)) {} return *dst ? -1 : 0; }`).join("\n")}\n\`\`\``,
+      "[data-slot=code-block-line]",
+      200,
+    ],
+    [
+      "150 lines of regular expressions",
+      `\`\`\`js\n${Array.from({ length: 150 }, (_, line) => `const pattern_${line} = /^(?:[a-z_]\\w*|\\d+)\\s*(?:\\*\\*|[*+?])?.*?$/u;`).join("\n")}\n\`\`\``,
+      "[data-slot=code-block-line]",
+      150,
+    ],
+    [
       "arithmetic with many `*`",
       Array.from(
         { length: 100 },
@@ -459,15 +484,16 @@ const overdue_items = invoices.filter((inv) => inv.due_date < today);
         `${levels}: ${markdown().querySelectorAll("blockquote").length > 0 ? "markdown" : "text"}`
       );
     }
-    // A paragraph of emphasis growing past 500 delimiters, a step at a time.
+    // A paragraph of emphasis growing past 3,000 delimiters, a step at a time.
     const started = performance.now();
-    for (let end = 100; end <= 1200; end += 100) {
-      show("*a".repeat(end / 2), true);
+    for (let end = 2600; end <= 3400; end += 200) {
+      show("*a".repeat(end), true);
     }
     expect({
       seen,
-      fast: performance.now() - started < 1000,
-      last: markdown().querySelectorAll("[data-streamdown]").length,
+      fast: performance.now() - started < 2000,
+      // Plain text: the text alone, no element drawn.
+      last: markdown().children.length,
       errors,
     }).toStrictEqual({
       seen: [
@@ -559,11 +585,16 @@ const overdue_items = invoices.filter((inv) => inv.due_date < today);
         <Markdown
           components={{
             a: ({ href, children }) => <a href={href}>{children}</a>,
+            img: ({ src }) => (
+              <a href={typeof src === "string" ? src : ""}>image</a>
+            ),
             p: ({ children }) => <p data-page="">{children}</p>,
           }}
           {...widening}
         >
           {`See [the policy](https://example.com/policy).
+
+- ![scan](https://images.example.com/scan.png)
 
 <a href="https://evil.example">raw</a> <img src="x" onerror="alert(1)">`}
         </Markdown>
@@ -571,12 +602,17 @@ const overdue_items = invoices.filter((inv) => inv.due_date < today);
     });
 
     expect({
-      elements: markdown().querySelectorAll("a, img").length,
+      links: markdown().querySelectorAll("a").length,
+      // The kit's image, Streamdown's own, not the page's link.
+      images: [...markdown().querySelectorAll("img")].map((image) =>
+        image.getAttribute("src")
+      ),
       // The page's other components still restyle what they name.
       paragraphs: texts("p[data-page]"),
       errors,
     }).toStrictEqual({
-      elements: 0,
+      links: 0,
+      images: ["https://images.example.com/scan.png"],
       paragraphs: [
         "See the policy (https://example.com/policy).",
         '<a href="https://evil.example">raw</a> <img src="x" onerror="alert(1)">',
