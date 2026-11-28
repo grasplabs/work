@@ -43,7 +43,7 @@ import {
 } from "./placed.ts";
 import { racingDb } from "./racing-db.ts";
 import { onPi } from "./releases.ts";
-import { ended, followAdminRuns } from "./runs.ts";
+import { ended, followAdminRuns, wrapBindingOf } from "./runs.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 // Release channels, their rollouts and the rollout pass
@@ -173,13 +173,53 @@ const deploysStarted = async (clientId: string): Promise<number> =>
  * deploy started so far to end, and `converge` runs passes until nothing
  * is left to do.
  */
+/**
+ * Holds every batch each organization's run started from now on writes,
+ * before it lands, until `release`: none records its end meanwhile, so
+ * none refills a slot or counts toward a halt while a test reads what a
+ * pass started.
+ */
+const holdRollouts = () => {
+  const released = Promise.withResolvers<unknown>();
+  let holding = true;
+  const runs = followAdminRuns(async (stub, workflow) => {
+    if (holding && workflow === adminWorkflows.orgRollout) {
+      await wrapBindingOf(stub, "DB", (database) =>
+        // SAFETY: an object whose prototype is `database` is a database:
+        // it has every member, and the ones the run calls are kept.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+        Object.assign(Object.create(database) as D1Database, {
+          prepare: (query: string) => database.prepare(query),
+          exec: async (query: string) => await database.exec(query),
+          withSession: (
+            constraint?: Parameters<D1Database["withSession"]>[0]
+          ) => database.withSession(constraint),
+          batch: async <T>(statements: D1PreparedStatement[]) => {
+            await released.promise;
+            return await database.batch<T>(statements);
+          },
+        })
+      );
+    }
+  });
+  return {
+    release: () => {
+      holding = false;
+      released.resolve(true);
+    },
+    [Symbol.asyncDispose]: async () => {
+      await runs[Symbol.asyncDispose]();
+    },
+  };
+};
+
 const followRuns = () => {
   const runs = followAdminRuns();
   const settle = async (): Promise<void> => {
     await Promise.all(
       runs
-        .of(adminWorkflows.deploy)
-        .map(async (id) => await ended(adminWorkflows.deploy, id))
+        .of(adminWorkflows.orgRollout)
+        .map(async (id) => await ended(adminWorkflows.orgRollout, id))
     );
   };
   return {
@@ -189,12 +229,12 @@ const followRuns = () => {
     settle,
     converge: async (): Promise<void> => {
       for (let round = 0; round < 6; round += 1) {
-        const before = runs.of(adminWorkflows.deploy).length;
+        const before = runs.of(adminWorkflows.orgRollout).length;
         // oxlint-disable-next-line no-await-in-loop -- one pass at a time
         await rolloutPass(env);
         // oxlint-disable-next-line no-await-in-loop -- one pass at a time
         await settle();
-        if (runs.of(adminWorkflows.deploy).length === before) {
+        if (runs.of(adminWorkflows.orgRollout).length === before) {
           return;
         }
       }
@@ -963,13 +1003,21 @@ describe("release channels", () => {
       }))
     );
     await promoteTo("beta", release);
+    await using held = holdRollouts();
 
-    await rolloutPass(env);
-
-    expect({
-      edge: await startedOf(edge),
-      beta: await startedOf(beta),
-    }).toStrictEqual({ edge: 2, beta: 2 });
+    try {
+      await rolloutPass(env);
+      expect({
+        edge: await startedOf(edge),
+        beta: await startedOf(beta),
+      }).toStrictEqual({
+        // The slots the older admin's runs leave, one each in turn.
+        edge: (rolloutLimits.maxInFlight - busy.length) / 2,
+        beta: (rolloutLimits.maxInFlight - busy.length) / 2,
+      });
+    } finally {
+      held.release();
+    }
   });
 
   it("loses nothing when a pass is cut off mid-way: once its lease runs out, the next starts what it didn't, and no client twice", async () => {
@@ -1010,6 +1058,7 @@ describe("release channels", () => {
       },
     });
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    await using held = holdRollouts();
     try {
       const cut = rolloutPass({ ...env, DB: dying });
       await vi.waitFor(() => {
@@ -1038,6 +1087,7 @@ describe("release channels", () => {
       });
     } finally {
       killed.resolve(true);
+      held.release();
       errors.mockRestore();
     }
   });

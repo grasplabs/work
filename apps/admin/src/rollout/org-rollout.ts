@@ -27,11 +27,11 @@
  * rollback, restores the release before (`restore`, the rollback of
  * `install`): reconciled first, so a release that's live and passes its
  * probe after all is called done. Its migrations are never undone. However
- * it ends, the deploy's end is recorded on `client_deploys`, audited,
- * alerted and the claim given back (`endRun`): by `record`, by the
- * restore, or else by the rollback of `start`, which runs last. A run
- * that ends without any of them (terminated without rollback) is settled
- * by the fleet's pass.
+ * it ends, the deploy's end is recorded on `client_deploys`, audited and
+ * alerted, the claim given back, and the fleet's pass run to start the
+ * next (`endRun`): by `record`, by the restore, or else by the rollback
+ * of `start`, which runs last. A run that ends without any of them
+ * (terminated without rollback) is settled by the pass.
  */
 import "@tanstack/react-start/server-only";
 import { log } from "@grasp-os/shared/log";
@@ -75,6 +75,7 @@ import {
 import { recordApiUsage } from "./api-budget.ts";
 import { failureCodeOf, recordEnd } from "./deploy.ts";
 import type { DeployEnd } from "./deploy.ts";
+import { runRolloutPass } from "./scheduler.ts";
 import { runningRelease, targetClient } from "./targets.ts";
 
 /** What an organization's rollout is started with: identifiers only, as its journal keeps them. */
@@ -135,8 +136,8 @@ const retryDelay: WorkflowDelayFunction = ({ ctx, error }) =>
  * back (`observed`, about 31 s); `migrate` sends each database's
  * migrations and model files; `install` uploads connect and core, each
  * whole after a failed probe; `probe` waits out a new version and its
- * static files (about 80 s each) before the signed probe; `record`
- * leaves room for the fleet's pass, which its end may run.
+ * static files (about 80 s each) before the signed probe; `record` also
+ * runs the fleet's pass.
  */
 const timeouts: Readonly<Record<Step, WorkflowDuration>> = {
   start: "2 minutes",
@@ -225,8 +226,10 @@ const isDeploying = async (
 
 /**
  * Records `ending`'s deploy ended, `error` null when it worked
- * (`recordEnd`: audited, alerted, its claim given back). Only once: a
- * deploy recorded ended already is left as it is.
+ * (`recordEnd`: audited, alerted, its claim given back), then runs the
+ * fleet's pass to start the next at once (`runRolloutPass`, which never
+ * throws). Only once: a deploy recorded ended already is left as it is,
+ * and the pass run again finds nothing new.
  */
 const endRun = async (
   env: Env,
@@ -235,6 +238,7 @@ const endRun = async (
   end?: DeployEnd
 ): Promise<void> => {
   await recordEnd(adminDatabase(env.DB), ending, error, end);
+  await runRolloutPass(env);
 };
 
 /** Takes the client for `held`'s attempt, or stops: another attempt, or a later step, has it. */

@@ -184,7 +184,7 @@ describe("a release's runner crashing, and another action on the client after", 
     const hostname = `${clientId}.${domain}`;
     // Pinned to a later release: the rollout pass's next run deploys it.
     await pinClient(env, staff, { clientId, releaseId: later.releaseId });
-    using deploys = startsOf(adminWorkflows.deploy);
+    using deploys = startsOf(adminWorkflows.orgRollout);
     const [offboarded] = await Promise.all([
       codeOf(offboardPlacedClient(env, staff, clientId)),
       rolloutPass(env),
@@ -192,7 +192,7 @@ describe("a release's runner crashing, and another action on the client after", 
     const { started } = deploys;
     await Promise.all(
       started.map(async (id) => {
-        await ended(adminWorkflows.deploy, id);
+        await ended(adminWorkflows.orgRollout, id);
       })
     );
     const client = await db
@@ -222,7 +222,7 @@ describe("a release's runner crashing, and another action on the client after", 
       notes: "feat(core): later",
     });
     await pinClient(env, staff, { clientId, releaseId: later.releaseId });
-    using deploys = startsOf(adminWorkflows.deploy);
+    using deploys = startsOf(adminWorkflows.orgRollout);
     let ticked = false;
     const remove = env.ROUTER_HOSTS.delete.bind(env.ROUTER_HOSTS);
     const deleting = vi

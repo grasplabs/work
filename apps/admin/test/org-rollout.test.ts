@@ -14,6 +14,7 @@ import {
   clientRuns,
   clients,
   clientWorkers,
+  rollouts as rolloutRows,
 } from "../src/db/schema.ts";
 import { operationPhases } from "../src/hosting/operation.ts";
 import { rolloutPass } from "../src/rollout/scheduler.ts";
@@ -60,7 +61,8 @@ const live = async (releaseId: string): Promise<PlacedClient> =>
 /**
  * Starts client `clientId`'s rollout of `releaseId`, as the pass does:
  * claimed in place of a run that ended (none while one goes, as for any
- * runner), its deploy recorded, then the run created. Its id; undefined
+ * runner), its deploy recorded as the release's running rollout's, then
+ * the run created. Its id; undefined
  * when another runner has the client.
  */
 const startRollout = async (
@@ -82,6 +84,17 @@ const startRollout = async (
   if (runId === undefined) {
     return undefined;
   }
+  // Edge's rollout of the release, as the pass admits it to, when there's one.
+  const rollout = await db
+    .select({ id: rolloutRows.id })
+    .from(rolloutRows)
+    .where(
+      and(
+        eq(rolloutRows.releaseId, releaseId),
+        eq(rolloutRows.status, "running")
+      )
+    )
+    .get();
   const deploy = {
     releaseId,
     runId,
@@ -89,6 +102,7 @@ const startRollout = async (
     error: null,
     startedAt: new Date(),
     endedAt: null,
+    rolloutId: rollout?.id ?? null,
   };
   await db
     .insert(clientDeploys)
@@ -1146,70 +1160,92 @@ describe("an organization's rollout", () => {
     }
   });
 
-  it("never deploys an organization in a deploy run while its rollout has it, nor starts a rollout while a deploy has one, and the pass settles neither as gone", async () => {
+  it("lets an old admin's deploy run and the pass's rollouts claim organizations one at a time, and settles both", async () => {
     const before = await placedRelease("feat(core): before");
-    const rolling = await live(before);
-    const deploying = await live(before);
+    const old = await live(before);
+    const fresh = await live(before);
     const release = await placedRelease("feat(core): both runs");
-    const { core } = await scriptsOf(rolling.clientId);
+    const { core } = await scriptsOf(old.clientId);
     const held = heldAfter(
       (call) => call.method === "GET" && call.path.endsWith(`/scripts/${core}`)
     );
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     await using runs = followAdminRuns();
     try {
-      // The rollout has one organization, claimed long enough ago that
-      // the pass would settle a run it can't find as gone; then the pass,
-      // which starts deploy runs, runs with the release on Edge.
-      const runId = await rollOut(rolling.clientId, release);
+      // An older admin, mid-deploy of this one, starts a deploy run for one
+      // organization, as its reconciler did; the release is on Edge.
+      const oldRun = `deploy-${crypto.randomUUID().slice(0, 12)}`;
+      const claimed = await claimRun(
+        db,
+        "system",
+        old.clientId,
+        null,
+        { action: "deploy.start", clientId: old.clientId, target: release },
+        { kind: "deploy", runId: oldRun }
+      );
+      await db.insert(clientDeploys).values({
+        clientId: old.clientId,
+        releaseId: release,
+        runId: oldRun,
+        status: "deploying",
+        startedAt: new Date(),
+      });
+      await adminWorkflow(env, adminWorkflows.deploy).create({
+        id: oldRun,
+        params: { clientId: old.clientId, releaseId: release },
+      });
       await held.read();
+      // Claimed long enough ago that the pass would settle a run it can't
+      // find as gone.
       await db
         .update(clientDeploys)
         .set({ startedAt: new Date(Date.now() - 10 * 60 * 1000) })
-        .where(eq(clientDeploys.clientId, rolling.clientId));
+        .where(eq(clientDeploys.clientId, old.clientId));
       await releaseToEdge(env, [release]);
       await rolloutPass(env);
-      const oldRuns = runs.of(adminWorkflows.deploy);
-      const { deploy, runner } = await deployOf(rolling.clientId);
+      const { deploy, runner } = await deployOf(old.clientId);
       const whileOut = {
-        rollout: await startRollout(deploying.clientId, release),
-        oldRuns: oldRuns.length,
-        rollingRunner: runner?.runId,
-        rollingDeploy: deploy?.status,
+        claimed: claimed === oldRun,
+        rollouts: runs.of(rollouts).length,
+        oldRunner: runner?.runId,
+        oldDeploy: deploy?.status,
       };
       held.release();
-      await ended(rollouts, runId);
+      await ended(adminWorkflows.deploy, oldRun);
       await Promise.all(
-        oldRuns.map(async (id) => await ended(adminWorkflows.deploy, id))
+        runs.of(rollouts).map(async (id) => await hurriedToEnd(id))
       );
+      // The pass settles nothing more: each recorded its own end.
+      await rolloutPass(env);
 
       expect({
         whileOut,
-        rolling: await deployOf(rolling.clientId),
-        deploying: await deployOf(deploying.clientId),
+        old: await deployOf(old.clientId),
+        fresh: await deployOf(fresh.clientId),
         releases: {
-          rolling: await releasesOf(rolling.clientId),
-          deploying: await releasesOf(deploying.clientId),
+          old: await releasesOf(old.clientId),
+          fresh: await releasesOf(fresh.clientId),
         },
+        rollouts: runs.of(rollouts).length,
       }).toStrictEqual({
-        // The deploy run took only the organization the rollout didn't
-        // have, the rollout didn't start for the one the deploy run had,
-        // and the pass found the rollout's run out.
+        // The pass started a rollout only for the organization the old
+        // run didn't have, and found the old run out.
         whileOut: {
-          rollout: undefined,
-          oldRuns: 1,
-          rollingRunner: runId,
-          rollingDeploy: "deploying",
+          claimed: true,
+          rollouts: 1,
+          oldRunner: oldRun,
+          oldDeploy: "deploying",
         },
-        rolling: {
+        old: {
           deploy: { releaseId: release, status: "done", error: null },
           runner: null,
         },
-        deploying: {
+        fresh: {
           deploy: { releaseId: release, status: "done", error: null },
           runner: null,
         },
-        releases: { rolling: on(release), deploying: on(release) },
+        releases: { old: on(release), fresh: on(release) },
+        rollouts: 1,
       });
     } finally {
       held.release();
