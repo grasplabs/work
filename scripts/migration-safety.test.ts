@@ -484,8 +484,13 @@ describe(checkDatabase, () => {
         { idx: 0, tag: "0000_base", sql: base },
         { idx: 1, tag: "0001_next", sql: next },
       ],
-      { from, now: new Date("2026-11-28T12:00:00Z"), indexedBy: new Set() }
-    );
+      {
+        from,
+        added: from,
+        now: new Date("2026-11-28T12:00:00Z"),
+        indexedBy: new Set(),
+      }
+    ).errors;
   const dropPeople =
     "-- contract: drop table people: release 26.11.40 removed the last use";
   const dropTitle =

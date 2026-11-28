@@ -18,12 +18,17 @@
  * (scripts/migration-safety.ts). So each folder holds exactly its
  * journal's migrations (every `.sql` in it ships, and a Durable Object
  * applies what its `migrations.js` lists), and no cut-off of that check
- * covers a migration the branch adds.
+ * covers a migration the branch adds. What each migration the branch adds
+ * deletes or updates is judged by statement (scripts/migration-statements.ts)
+ * and what its rebuilds keep on generated rows (scripts/migration-data.ts);
+ * which tables take no row is printed and held to a recorded list,
+ * and what each contract marker covers is printed for the reviewer.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
+import { skippedErrors } from "./migration-data.ts";
 import {
   checkDatabase,
   cutOffErrors,
@@ -220,6 +225,12 @@ const indexedBy = new Set(
     .map((match) => match.replace(/^indexed by +/iu, "").toLowerCase())
 );
 
+/** How many migrations a database had where the branch left main. */
+const countAtBase = (dir: string): number => {
+  const atBase = fileAt(base, `${dir}/meta/_journal.json`);
+  return atBase === undefined ? 0 : readJournal(dir, atBase).entries.length;
+};
+
 const journals = git("ls-files", "*/migrations/meta/_journal.json")
   .split("\n")
   .filter(Boolean);
@@ -274,12 +285,25 @@ for (const file of journals) {
       tag,
       sql: readFileSync(`${dir}/${tag}.sql`, "utf-8"),
     }));
-    errors.push(
-      ...checkDatabase(dir, migrations, {
-        from: firstChecked[dir] ?? 0,
-        now: new Date(),
-        indexedBy,
-      })
+    const {
+      errors: found,
+      notes,
+      skipped,
+    } = checkDatabase(dir, migrations, {
+      from: firstChecked[dir] ?? 0,
+      now: new Date(),
+      indexedBy,
+      added: countAtBase(dir),
+    });
+    errors.push(...found, ...skippedErrors(dir, skipped));
+    if (notes.length > 0) {
+      console.info(notes.join("\n"));
+    }
+    console.info(
+      [
+        `${dir}: ${skipped.length} tables take no generated row`,
+        ...skipped.map(({ table, reason }) => `  ${table}: ${reason}`),
+      ].join("\n")
     );
   }
 }
@@ -311,15 +335,7 @@ errors.push(
   ...cutOffErrors(
     firstChecked,
     journalDirs,
-    new Map(
-      [...journalDirs].map((dir) => {
-        const atBase = fileAt(base, `${dir}/meta/_journal.json`);
-        return [
-          dir,
-          atBase === undefined ? 0 : readJournal(dir, atBase).entries.length,
-        ] as const;
-      })
-    )
+    new Map([...journalDirs].map((dir) => [dir, countAtBase(dir)] as const))
   )
 );
 
