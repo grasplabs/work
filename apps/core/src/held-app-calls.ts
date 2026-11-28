@@ -55,8 +55,9 @@ import type { HeldAppCallRow } from "./workspace.ts";
 //   confirmable after.
 // - A hold carrying what was erased since its chat read it: once anything
 //   the chat read is found erased, every hold still waiting there is
-//   withdrawn the same way (`chat.app_call.withdrawn`), as no rule finds
-//   what of a request quotes it. Listing and confirming check first, and
+//   withdrawn the same way, its function's name emptied too
+//   (`chat.app_call.withdrawn`), as no rule finds what of a request quotes
+//   it. Listing and confirming check first, and
 //   are refused while that can't be asked (Workspace `#dropErasedCopies`).
 // - Restricted mode (restricted.ts) is carried both ways, as on the
 //   agent's own call: a restricted chat restricts the App before the

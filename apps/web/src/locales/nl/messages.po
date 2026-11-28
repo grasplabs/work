@@ -18196,6 +18196,10 @@ msgstr "De workflowrun die dit vroeg, is afgelopen, dus deze beslissing is geslo
 msgid "The workflows couldn't be read."
 msgstr "De workflows konden niet worden gelezen."
 
+#: src/chat/held-writes.tsx
+msgid "The writes to Apps waiting here can't be shown right now."
+msgstr "De wijzigingen in apps die hier wachten, kunnen nu niet worden getoond."
+
 #: src/connections/chat-reads.tsx
 msgid "Their assistant reads in all of {label} for them. Anything it changes there waits for them to confirm it."
 msgstr "Hun assistent leest voor hen in heel {label}. Alles wat hij daar wijzigt, wacht op hun bevestiging."
@@ -18951,6 +18955,7 @@ msgstr "Proberen"
 #: src/brain/skills-page.tsx
 #: src/chat/builds.tsx
 #: src/chat/chat-body.tsx
+#: src/chat/held-writes.tsx
 #: src/chat/models-unavailable.tsx
 #: src/chat/thread.tsx
 #: src/connections/connect-dialog.tsx

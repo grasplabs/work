@@ -862,9 +862,10 @@ describe("what a chat shows of what it read from the Brain", () => {
         away,
         confirmed,
         listed,
-        exported: exported?.map(({ status, request }) => ({
+        exported: exported?.map(({ status, request, function: named }) => ({
           status,
           request,
+          named,
         })),
         heldAgain,
         written,
@@ -872,7 +873,9 @@ describe("what a chat shows of what it read from the Brain", () => {
           withdrawn: ofChat("chat.app_call.withdrawn"),
           confirmed: ofChat("chat.app_call.confirmed"),
         },
-        toldNext: sentNext.includes(`held ID ${held?.id}), was withdrawn`),
+        toldNext: sentNext.includes(
+          `The write to an App you asked for (held ID ${held?.id}) was withdrawn`
+        ),
         sentAgain: sentNext.includes(marker),
         kept: await objectHolds(chats.stub, marker),
         after: after?.request.includes(later),
@@ -883,7 +886,7 @@ describe("what a chat shows of what it read from the Brain", () => {
         away: ["agent.erasure_unchecked", "agent.erasure_unchecked"],
         confirmed: "agent.held_call_not_found",
         listed: [],
-        exported: [{ status: "withdrawn", request: null }],
+        exported: [{ status: "withdrawn", request: null, named: "" }],
         heldAgain: "agent.erasure_unchecked",
         written: [],
         events: { withdrawn: 1, confirmed: 0 },

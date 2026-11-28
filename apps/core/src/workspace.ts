@@ -5337,7 +5337,7 @@ export class Workspace extends DurableObject<Env> {
    *   (`keepRead`): holding less only refuses more of its writes
    *   (channels/stephen-rules.ts) until it reads again;
    * - every App write still held for its person, withdrawn unrun, its
-   *   request emptied and its end recorded (`chat.app_call.withdrawn`) in
+   *   request and function's name emptied and its end recorded (`chat.app_call.withdrawn`) in
    *   the same write, then its agent told to ask afresh: no rule finds what
    *   of a request quotes what was erased, and a request blanked is not the
    *   one they were shown.
@@ -5360,7 +5360,8 @@ export class Workspace extends DurableObject<Env> {
       this.ctx.storage.kv.delete(`${traceKeyPrefix}${chatId}`);
       const rows = this.#db
         .update(heldAppCalls)
-        .set({ status: "withdrawn", request: null })
+        // Its function's name too: the agent's own words, which may quote it.
+        .set({ status: "withdrawn", request: null, function: "" })
         .where(
           and(
             eq(heldAppCalls.chatId, chatId),
@@ -5394,17 +5395,20 @@ export class Workspace extends DurableObject<Env> {
     this.ctx.waitUntil(this.#noteWithdrawn(chatId, withdrawn));
   }
 
-  /** Tells the agent of chat `chatId` each held App write in `withdrawn` was withdrawn. */
+  /**
+   * Tells the agent of chat `chatId` each held App write in `withdrawn` was
+   * withdrawn, by its ID alone: nothing it named may quote what was erased.
+   */
   async #noteWithdrawn(
     chatId: ChatId,
-    withdrawn: readonly { id: string; function: string }[]
+    withdrawn: readonly { id: string }[]
   ): Promise<void> {
-    for (const { id, function: name } of withdrawn) {
+    for (const { id } of withdrawn) {
       try {
         // oxlint-disable-next-line no-await-in-loop -- one note each, in order
         await this.#note(
           chatId,
-          `The write to an App you asked for, "${name}" (held ID ${id}), was withdrawn before the person decided it: this chat can no longer read something it may have come from, so it was not carried out. Tell them, and if they still want it, ask for it afresh.`
+          `The write to an App you asked for (held ID ${id}) was withdrawn before the person decided it: this chat can no longer read something it may have come from, so it was not carried out. Tell them, and if they still want it, ask for it afresh.`
         );
       } catch (error) {
         // Withdrawn either way: the agent finds it no longer waits.

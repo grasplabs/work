@@ -18196,6 +18196,10 @@ msgstr "Der Workflow-Lauf, der dies gefragt hat, ist beendet, daher ist diese En
 msgid "The workflows couldn't be read."
 msgstr "Die Workflows konnten nicht gelesen werden."
 
+#: src/chat/held-writes.tsx
+msgid "The writes to Apps waiting here can't be shown right now."
+msgstr "Die hier wartenden Änderungen in Apps können gerade nicht angezeigt werden."
+
 #: src/connections/chat-reads.tsx
 msgid "Their assistant reads in all of {label} for them. Anything it changes there waits for them to confirm it."
 msgstr "Ihr Assistent liest für sie in ganz {label}. Alles, was er dort ändert, wartet auf ihre Bestätigung."
@@ -18951,6 +18955,7 @@ msgstr "Versuchen"
 #: src/brain/skills-page.tsx
 #: src/chat/builds.tsx
 #: src/chat/chat-body.tsx
+#: src/chat/held-writes.tsx
 #: src/chat/models-unavailable.tsx
 #: src/chat/thread.tsx
 #: src/connections/connect-dialog.tsx

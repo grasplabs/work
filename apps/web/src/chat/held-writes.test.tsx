@@ -1,3 +1,4 @@
+import { agentErrors } from "@grasp-os/shared/agent";
 // @vitest-environment happy-dom
 import { heldAppCallsPage } from "@grasp-os/shared/chat";
 import type { HeldAppCall } from "@grasp-os/shared/chat";
@@ -145,6 +146,8 @@ interface Held {
   running?: Record<string, Promise<unknown>>;
   /** The npm packages the chat's agent asked for, under the writes. */
   packages?: readonly DependencyRequest[];
+  /** While it holds an error, listing the App writes fails with it. */
+  listing?: { refusal?: Error };
 }
 
 /** The chats told to go on, one for each confirmation that went through. */
@@ -199,6 +202,7 @@ const shown = async ({
   waiting: slow = {},
   running = {},
   packages = [],
+  listing = {},
 }: Held = {}) => {
   const confirmed: { chatId: string; id: string; requestHash: string }[] = [];
   const declined: { chatId: string; id: string }[] = [];
@@ -236,6 +240,9 @@ const shown = async ({
         chatId: string,
         after?: string
       ): Promise<HeldAppCall[]> => {
+        if (listing.refusal !== undefined) {
+          throw listing.refusal;
+        }
         const waiting = (calls[chatId] ?? []).filter(
           ({ id }) => !decided.has(id)
         );
@@ -298,6 +305,9 @@ const shown = async ({
   await settled();
   return { confirmed, declined, approved };
 };
+
+/** All the page says. */
+const pageText = (): string => document.body.textContent ?? "";
 
 /** What the list says went wrong, if anything, as a screen reader hears it. */
 const alerted = (): string | null =>
@@ -588,6 +598,53 @@ describe("a write to an App held for the person", () => {
     expect({ confirmed, declined }).toStrictEqual({
       confirmed: [],
       declined: [{ chatId: "chat-1", id: "held-1" }],
+    });
+  });
+
+  it("keeps connect's writes shown and decidable while core can't list the App writes, says why, and shows them once read again", async () => {
+    const refusal = agentErrors.create("agent.erasure_unchecked");
+    const listing: { refusal?: Error } = { refusal };
+    const { declined } = await shown({
+      actions: [{ ...mail, id: "pending-2" }, mail],
+      listing,
+    });
+    const before = {
+      said: pageText().includes(
+        "The writes to Apps waiting here can't be shown right now."
+      ),
+      why: pageText().includes(refusal.message),
+      cards: cards(),
+    };
+    /** Clicks the button whose words or label are `label`. */
+    const click = async (label: string): Promise<void> => {
+      await act(async () => {
+        buttonOf(label)?.click();
+        await Promise.resolve();
+      });
+      await settled();
+    };
+    await click("Reject all");
+    const afterReject = pageText().includes("mail.send on Outlook");
+    listing.refusal = undefined;
+    await click("Try again");
+
+    expect({
+      before,
+      afterReject,
+      // Reject all declines connect's writes, which never reach `declined`.
+      declined,
+      cards: cards(),
+      said: pageText().includes("can't be shown right now"),
+    }).toStrictEqual({
+      before: {
+        said: true,
+        why: true,
+        cards: ["mail.send on Outlook", "mail.send on Outlook"],
+      },
+      afterReject: false,
+      declined: [],
+      cards: ["notes.create in Notes"],
+      said: false,
     });
   });
 
