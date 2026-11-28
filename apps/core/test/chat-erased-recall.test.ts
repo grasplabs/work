@@ -30,6 +30,7 @@ import {
   personalChatsOf,
   says,
   setObjectEnv,
+  testRunOpening,
 } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
@@ -897,7 +898,7 @@ describe("what a chat shows of what it read from the Brain", () => {
   );
 
   it(
-    "clears what a chat app's chat read that its writes are traced to once a source it read is erased: no longer handed over, kept or tracing a write",
+    "clears what a chat app's chat read that its writes are traced to once a source it read is erased: no longer handed over, kept or tracing a write, nor kept back by a read landing late",
     slow,
     async () => {
       const depot = word();
@@ -955,7 +956,8 @@ describe("what a chat shows of what it read from the Brain", () => {
         codeStep(
           `export default async (self, env) => { await env.brain.recall(${JSON.stringify(asked)}); await env.connections.call("MAIL", "MAIL_READ", { query: "gate" }); return "read"; };`
         ),
-        says("Noted.")
+        says("Noted."),
+        says("Ok.")
       );
       const stub = workspace(env, personalWorkspaceId(person.userId));
       const chat = await stub.createChat(
@@ -986,19 +988,46 @@ describe("what a chat shows of what it read from the Brain", () => {
         reason: "deleted",
       });
       const exported = await stub.exportTurnState(ref);
+      const chatId = chatIdSchema.parse(chat.id);
+      const check = { read: "mail", where: "mail" } as const;
+      /** What a read of a run under way keeps of `values`: whether it may. */
+      const readNow = async (values: string[]) => {
+        const run = await stub.openCodeRun(
+          chatId,
+          crypto.randomUUID(),
+          testRunOpening
+        );
+        const kept = await stub.keepRead(chatId, run, values, check);
+        await stub.closeCodeRun(chatId, run, "completed");
+        return kept;
+      };
+      // A read still under way that echoes the source, landing after the
+      // trace was dropped and before the model was kept from it.
+      const lateRead = await readNow([marker]);
+      const kept = await objectHolds(stub, marker);
+      // The next turn keeps the model from it: reads are kept again.
+      await stub.ask(chat.id, { text: "Thanks.", model });
+      const readAfter = await readNow(["Gate code"]);
+      const after = await stub.exportTurnState(ref);
 
       expect({
         before,
         handedOver: JSON.stringify(exported).includes(marker),
         trace: exported?.trace,
         refusal: await traced(),
-        kept: await objectHolds(stub, marker),
+        lateRead,
+        kept,
+        readAfter,
+        traceAfter: after?.trace,
       }).toStrictEqual({
         before: { handedOver: true, refusal: undefined },
         handedOver: false,
         trace: [],
         refusal: "agent.write_untraced",
+        lateRead: "revoked",
         kept: false,
+        readAfter: "open",
+        traceAfter: ["Gate code"],
       });
     }
   );

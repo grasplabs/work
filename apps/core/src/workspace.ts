@@ -845,14 +845,13 @@ export const stopReason = (chatId: ChatId, error: unknown): string => {
 const traceKeyPrefix = "trace:";
 
 /**
- * The runs of a chat found resting on what an erasure took, as
- * `erased:<chat>`, once what else the chat keeps that may quote them is
- * dropped (`#dropErasedCopies`): dropped once for each, never again for a
- * run already counted.
+ * The sources a chat read found erased, as `erased:<chat>`, once what else
+ * the chat keeps that may quote them is dropped (`#dropErasedCopies`):
+ * dropped once for each, never again for a source already counted.
  */
 const erasedKeyPrefix = "erased:";
 
-const erasedRunsSchema = z.array(z.string());
+const erasedKeptSchema = z.array(z.string());
 
 /**
  * That its person's erasure began (`erasePerson`), as `erasing`: kept in
@@ -4811,7 +4810,8 @@ export class Workspace extends DurableObject<Env> {
    * returned (`values`, its text values), that the chat's later writes are
    * traced to, and, while its turn is under way, what it read for the
    * turn's check line (`check`). Why not, and nothing kept, once the run
-   * has ended or a revocation closed it (`open` when kept).
+   * has ended or a revocation closed it, or while what an erasure found
+   * took is not yet kept from the model (`revoked`; `open` when kept).
    */
   keepRead(
     chatId: ChatId,
@@ -4822,6 +4822,12 @@ export class Workspace extends DurableObject<Env> {
     const { call } = this.admitFromCodeRun(chatId, runId);
     if (call !== "open") {
       return call;
+    }
+    // A read that may echo what an erasure found since took, as a run
+    // still under way may, is never kept back after the trace was dropped
+    // for it (`#dropErasedCopies`): refused until the model is kept from it.
+    if (this.#erasedUnwithheld(chatId)) {
+      return "revoked";
     }
     this.#turns.get(chatId)?.reads.push(check);
     const key = `${traceKeyPrefix}${chatId}`;
@@ -5233,7 +5239,7 @@ export class Workspace extends DurableObject<Env> {
     ];
     if (runs.length > 0 && !this.#isDeleting(chatId)) {
       this.#replaceResults(chatId, runs);
-      this.#dropErasedCopies(chatId, runs);
+      this.#dropErasedCopies(chatId, [...erased]);
     }
     return new Set();
   }
@@ -5289,12 +5295,44 @@ export class Workspace extends DurableObject<Env> {
     }
   }
 
+  /** The sources chat `chatId` read found erased so far (`erasedKeyPrefix`). */
+  #erasedKept(chatId: ChatId): string[] {
+    return (
+      erasedKeptSchema.safeParse(
+        this.ctx.storage.kv.get(`${erasedKeyPrefix}${chatId}`)
+      ).data ?? []
+    );
+  }
+
   /**
-   * Drops what else chat `chatId` keeps that may quote what its runs
-   * `runs` read, found erased (`#replaceErased`), the first time any of
-   * them is (`erasedKeyPrefix`): a later erasure drops again, a repeat
-   * nothing, so what the chat keeps after it is never dropped for it.
-   * Neither names the run it came from, so all of it goes:
+   * Whether chat `chatId`'s model may still have what an erasure found
+   * since took: a run's read of a source counted erased (`#erasedKept`)
+   * that no check before a model request withheld yet (`#withheldRuns`).
+   */
+  #erasedUnwithheld(chatId: ChatId): boolean {
+    const erased = this.#erasedKept(chatId);
+    return (
+      erased.length > 0 &&
+      this.#db
+        .select({ runId: chatRunSources.runId })
+        .from(chatRunSources)
+        .where(
+          and(
+            eq(chatRunSources.chatId, chatId),
+            isNull(chatRunSources.withheldAt),
+            inList(chatRunSources.sourceId, erased)
+          )
+        )
+        .get() !== undefined
+    );
+  }
+
+  /**
+   * Drops what else chat `chatId` keeps that may quote sources `erased` it
+   * read, found erased (`#replaceErased`), the first time any of them is
+   * (`erasedKeyPrefix`): a later erasure drops again, a repeat nothing, so
+   * what the chat keeps after it is never dropped for it. Neither names the
+   * run it came from, so all of it goes:
    * - what its connection reads returned that its writes are traced to
    *   (`keepRead`): holding less only refuses more of its writes
    *   (channels/stephen-rules.ts) until it reads again;
@@ -5304,12 +5342,11 @@ export class Workspace extends DurableObject<Env> {
    *   of a request quotes what was erased, and a request blanked is not the
    *   one they were shown.
    */
-  #dropErasedCopies(chatId: ChatId, runs: readonly string[]): void {
+  #dropErasedCopies(chatId: ChatId, erased: readonly string[]): void {
     const key = `${erasedKeyPrefix}${chatId}`;
     const withdrawn = this.ctx.storage.transactionSync(() => {
-      const counted =
-        erasedRunsSchema.safeParse(this.ctx.storage.kv.get(key)).data ?? [];
-      const fresh = runs.filter((run) => !counted.includes(run));
+      const counted = this.#erasedKept(chatId);
+      const fresh = erased.filter((source) => !counted.includes(source));
       const held = this.#db
         .select({ id: chats.id })
         .from(chats)
