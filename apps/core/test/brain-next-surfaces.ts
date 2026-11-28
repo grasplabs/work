@@ -113,6 +113,7 @@ import { noProducers } from "./no-producers.ts";
 import { person as orgMember } from "./sealed-apps.ts";
 import { holding, holdsNothing } from "./stored-skills.ts";
 import { newTeam } from "./teams.ts";
+import { stopIfEnded } from "./test-attempts.ts";
 
 /** The reader a probe calls as, and what they may not see. */
 export interface Probing {
@@ -346,6 +347,9 @@ const answer = async (
   like?: string
 ): Promise<Answer> => {
   const compared = like === undefined ? {} : { like };
+  // Never once the test that asked has ended: a pass its timeout cut off
+  // stops here, before it reaches the next test's stores.
+  stopIfEnded();
   try {
     return { call: callName, got: { value: await call() }, about, ...compared };
   } catch (error) {
