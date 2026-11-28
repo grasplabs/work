@@ -639,37 +639,40 @@ const restore = async (
     return;
   }
   const restoring = { context, held, cause, last, started: !onTarget };
+  let outcome: Awaited<ReturnType<typeof putBack>>;
   try {
     // Staff terminating the run asked for the release before: never
     // reconciled onto the one they stopped.
-    const outcome =
+    outcome =
       (!terminated && onTarget && (await runsWhole(db, clientId, releaseId))
         ? await reconciled(restoring)
         : undefined) ?? (await putBack(restoring));
-    if (outcome.code !== undefined) {
-      log.error(`deploy.${outcome.error ?? "restored"}`, {
-        clientId,
-        runId,
-        cause,
-        code: outcome.code,
-      });
-    }
-    // A restore that didn't put the release before back is recorded only
-    // while this try still holds the client: one that timed out records
-    // nothing over the try after it.
-    await endRun(
-      env,
-      ending,
-      outcome.error,
-      outcome.code === undefined ? outcome.end : { ...outcome.end, held }
-    );
   } finally {
+    // Before the run's end, which runs the fleet's pass: a block this try
+    // met is on record by then, and the pass starts no one into it.
     await recordApiUsage(
       db,
       { clientId, step: "restore" },
       context.api.usage()
     );
   }
+  if (outcome.code !== undefined) {
+    log.error(`deploy.${outcome.error ?? "restored"}`, {
+      clientId,
+      runId,
+      cause,
+      code: outcome.code,
+    });
+  }
+  // A restore that didn't put the release before back is recorded only
+  // while this try still holds the client: one that timed out records
+  // nothing over the try after it.
+  await endRun(
+    env,
+    ending,
+    outcome.error,
+    outcome.code === undefined ? outcome.end : { ...outcome.end, held }
+  );
 };
 
 /**
