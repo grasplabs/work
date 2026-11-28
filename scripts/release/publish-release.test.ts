@@ -40,7 +40,6 @@ const SCRIPT = path.join(import.meta.dirname, "publish-release.ts");
 const TRUST_TEST_KEY = path.join(import.meta.dirname, "trust-test-key.ts");
 const BUCKET = "grasp-releases-staging";
 const COMMIT = "1".repeat(40);
-const GITHUB_TOKEN = "github-token-for-the-run";
 const REQUEST_TOKEN = "id-token-request-token";
 const HTTP_OK = 200;
 const HTTP_BAD_REQUEST = 400;
@@ -103,6 +102,14 @@ interface Admin {
   takenAfterFinish?: Buffer;
   /** Whether its next answer is 503, as while GitHub's keys can't be fetched. */
   unavailableOnce: boolean;
+  /**
+   * A step whose first try's answer the network loses, the try taking so
+   * long that the GitHub token it carried has expired.
+   */
+  lostOnce?: string;
+  /** GitHub's tokens for the run, as issued; and those expired. */
+  tokens: string[];
+  expired: Set<string>;
   /** Each step it was asked, with the manifest's id. */
   asked: string[];
   /** The audiences GitHub's tokens were asked for. */
@@ -154,8 +161,19 @@ describe("publishing a release as CI does, through the staging admin", () => {
         .end("Couldn't answer now; try again");
       return;
     }
-    if (request.headers.authorization !== `Bearer ${GITHUB_TOKEN}`) {
+    const token = request.headers.authorization?.replace(/^Bearer /u, "");
+    if (
+      token === undefined ||
+      !admin.tokens.includes(token) ||
+      admin.expired.has(token)
+    ) {
       response.writeHead(HTTP_FORBIDDEN).end("Not CI's publish");
+      return;
+    }
+    if (admin.lostOnce === step) {
+      admin.lostOnce = undefined;
+      admin.expired.add(token);
+      request.socket.destroy();
       return;
     }
     admin.asked.push(
@@ -258,6 +276,8 @@ describe("publishing a release as CI does, through the staging admin", () => {
       given: [],
       missing: (keys) => keys,
       unavailableOnce: false,
+      tokens: [],
+      expired: new Set(),
       asked: [],
       audiences: [],
     };
@@ -272,9 +292,13 @@ describe("publishing a release as CI does, through the staging admin", () => {
           admin.audiences.push(url.searchParams.get("audience") ?? "");
           const fine =
             request.headers.authorization === `bearer ${REQUEST_TOKEN}`;
+          const token = `github-token-${admin.tokens.length + 1}`;
+          if (fine) {
+            admin.tokens.push(token);
+          }
           response
             .writeHead(fine ? HTTP_OK : HTTP_FORBIDDEN)
-            .end(fine ? JSON.stringify({ value: GITHUB_TOKEN }) : undefined);
+            .end(fine ? JSON.stringify({ value: token }) : undefined);
         } else if (url.pathname === "/release-publish") {
           await answerAdmin(request, response, url);
         } else {
@@ -420,6 +444,20 @@ describe("publishing a release as CI does, through the staging admin", () => {
     }).toStrictEqual({
       published: true,
       asked: ["start dev-build", `finish ${first}`],
+    });
+  });
+
+  it("tries a step again with a new GitHub token when its answer was lost after the token it carried expired, then publishes", async () => {
+    admin.lostOnce = "finish";
+    const stdout = await publish();
+    expect({
+      published: stdout.includes(`release ${first}`),
+      asked: admin.asked,
+      expired: admin.expired.size,
+    }).toStrictEqual({
+      published: true,
+      asked: ["start dev-build", `finish ${first}`],
+      expired: 1,
     });
   });
 

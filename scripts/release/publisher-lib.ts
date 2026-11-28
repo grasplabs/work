@@ -92,7 +92,11 @@ const accepted = async (step: string, answer: Response): Promise<unknown> => {
 export const releasePublisherFromEnv = () => {
   const publisher = requireEnv("RELEASE_PUBLISH_URL");
 
-  /** POSTs `manifestBytes` to `step`, with `headers`: the admin's answer, read whole. */
+  /**
+   * POSTs `manifestBytes` to `step`, with `headers`: the admin's answer,
+   * read whole. Each try with a token of its own: GitHub's live about 5
+   * minutes, and a try may wait 10 for its answer.
+   */
   const askOnce = async (
     step: string,
     manifestBytes: Buffer,
@@ -100,20 +104,20 @@ export const releasePublisherFromEnv = () => {
   ): Promise<Response> => {
     const url = new URL(publisher);
     url.searchParams.set("step", step);
-    const token = await githubToken(url.origin);
-    const init = {
-      method: "POST",
-      body: manifestBytes,
-      headers: {
-        ...headers,
-        authorization: `Bearer ${token}`,
-        "content-type": "application/json",
-      },
-    };
+    const init = { method: "POST", body: manifestBytes };
     return await sendWithRetries(
       `POST ${url.pathname}?step=${step}`,
       init,
-      async (signal) => await fetch(url, { ...init, signal }),
+      async (signal) =>
+        await fetch(url, {
+          ...init,
+          headers: {
+            ...headers,
+            authorization: `Bearer ${await githubToken(url.origin)}`,
+            "content-type": "application/json",
+          },
+          signal,
+        }),
       ANSWER_MS
     );
   };
