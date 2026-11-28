@@ -15,7 +15,6 @@ import type { FunctionResult } from "@grasp-os/shared/functions";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
-import { errorFields, log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -51,7 +50,6 @@ import {
   releaseOfEntry,
   requireApprovedPackages,
   sealOfSource,
-  sealedEntry,
 } from "./draft-seals.ts";
 import type { DraftSeal, DraftSource } from "./draft-seals.ts";
 import { changesAnything } from "./drafts.ts";
@@ -166,46 +164,13 @@ const keepSealed = (key: string, release: Release): void => {
 };
 
 /**
- * MIXED VERSIONS, FOR ONE RELEASE ONLY: delete this function and
- * `sealedHereWhileObjectsUpdate`, and their one use in `fromPreview`, in
- * the release after the one that added `AppPreview.seal`, once that runs
- * on every organisation.
- *
- * For the 15 minutes a deploy takes to reach every object, a Worker of
- * this release may reach an `AppPreview` of the release before, which has
- * no `seal` (workerd's refusal of a method an object lacks): the draft is
- * then sealed here, as that release sealed it, shared with no one and kept
- * nowhere. Any other failure is the object's to answer.
- */
-const lacksSeal = (error: unknown): boolean =>
-  error instanceof Error &&
-  error.message === 'The RPC receiver does not implement the method "seal".';
-
-/** See `lacksSeal`: the seal of the release before, in this request. */
-const sealedHereWhileObjectsUpdate = async (
-  env: Env,
-  seal: DraftSeal,
-  error: unknown
-): Promise<string> => {
-  log.warn("draft.sealed_here", { app: seal.app, ...errorFields(error) });
-  return await sealedEntry(env, seal);
-};
-
-/**
  * The entry of `seal` as the App's preview object answers it, kept or
  * sealed there (`AppPreview.seal`), asked again should the object restart
  * under the call (`callObject`). Throws as the seal does.
  */
 const fromPreview = async (env: Env, seal: DraftSeal): Promise<string> => {
   const { app, ...draft } = seal;
-  try {
-    return await callObject(async () => await appPreview(env, app).seal(draft));
-  } catch (error) {
-    if (!lacksSeal(error)) {
-      throw error;
-    }
-    return await sealedHereWhileObjectsUpdate(env, seal, error);
-  }
+  return await callObject(async () => await appPreview(env, app).seal(draft));
 };
 
 /** `seal`'s release from the App's preview object (`fromPreview`), by `until`. */

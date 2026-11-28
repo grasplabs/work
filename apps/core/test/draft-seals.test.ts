@@ -464,54 +464,6 @@ describe("a draft's seal", { timeout: 180_000 }, () => {
     });
   });
 
-  it("is sealed by its caller while the App's preview object is of the release before, which can't", async () => {
-    const { app, draft, key } = await notes();
-    const { APP_PREVIEWS: previews } = env;
-    // An object of the release before: it has no `seal`.
-    env.APP_PREVIEWS = new Proxy(previews, {
-      get: (target, property) => {
-        const value: unknown = Reflect.get(target, property);
-        if (property === "getByName" && typeof value === "function") {
-          return (name: string): unknown =>
-            new Proxy(Reflect.apply(value, target, [name]), {
-              get: (stub, method): unknown => {
-                const answered: unknown = Reflect.get(stub, method);
-                return method === "seal"
-                  ? async (): Promise<never> => {
-                      await Promise.resolve();
-                      throw new TypeError(
-                        'The RPC receiver does not implement the method "seal".'
-                      );
-                    }
-                  : answered;
-              },
-            });
-        }
-        return typeof value === "function"
-          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
-          : value;
-      },
-    });
-
-    let sealed: Awaited<ReturnType<typeof draftRelease>>;
-    let inspections: number;
-    try {
-      ({ sealed, inspections } = await withSandbox({}, async (sandbox) => ({
-        sealed: await draftRelease(env, app, draft),
-        inspections: sandbox.inspections(),
-      })));
-    } finally {
-      env.APP_PREVIEWS = previews;
-    }
-
-    expect({
-      app: sealed?.manifest.resourceId,
-      inspections,
-      // Kept nowhere: that release keeps no seal.
-      kept: await readCache(env, key),
-    }).toStrictEqual({ app, inspections: 1, kept: undefined });
-  });
-
   it("kept in R2 but changed is never run: it is sealed again in its place", async () => {
     const evil = "globalThis.changed = true;";
     /**
