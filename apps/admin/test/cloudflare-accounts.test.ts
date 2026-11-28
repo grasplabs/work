@@ -138,6 +138,69 @@ describe("retries", () => {
     ]);
   });
 
+  it("fails a rate-limited call at once for a caller that waits the block out, and keeps until when it said to wait", async () => {
+    const account = cloudflare.addAccount();
+    const fresh = cloudflareApi({
+      token,
+      retryDelayMs: 0,
+      failRateLimited: true,
+    });
+    cloudflare.failCall(1, { retryAfter: "7" });
+    const sentAt = Date.now();
+    await expect(
+      createD1Database(fresh, account.id, "grasp-os-core", "eu")
+    ).rejects.toMatchObject({ status: 429, codes: [971] });
+    const { blockedUntil } = fresh.usage();
+    expect({
+      sent: cloudflare.calls.map(({ method }) => method),
+      created: account.d1.length,
+      waitsAtLeast: (blockedUntil?.getTime() ?? 0) - sentAt >= 7000,
+    }).toStrictEqual({ sent: ["POST"], created: 0, waitsAtLeast: true });
+  });
+
+  it("counts a 429 that names no wait as Cloudflare's five-minute block", async () => {
+    const account = cloudflare.addAccount();
+    const fresh = cloudflareApi({
+      token,
+      retryDelayMs: 0,
+      failRateLimited: true,
+    });
+    cloudflare.failCall(1, 429);
+    const sentAt = Date.now();
+    await expect(getAccount(fresh, account.id)).rejects.toMatchObject({
+      status: 429,
+    });
+    expect(
+      (fresh.usage().blockedUntil?.getTime() ?? 0) - sentAt
+    ).toBeGreaterThanOrEqual(5 * 60_000);
+  });
+
+  it("keeps the last Ratelimit header an answer carried, and counts every call", async () => {
+    const account = cloudflare.addAccount("Acme");
+    const fresh = cloudflareApi({
+      token,
+      retryDelayMs: 0,
+      failRateLimited: true,
+    });
+    cloudflare.failCall(1, 503);
+    await getAccount(fresh, account.id);
+    await getAccount(fresh, account.id);
+    const usage = fresh.usage();
+    expect({
+      calls: usage.calls,
+      rated: usage.rated,
+      header: usage.header,
+      remaining: usage.limit?.remaining,
+      blockedUntil: usage.blockedUntil,
+    }).toStrictEqual({
+      calls: 3,
+      rated: 3,
+      header: `"default";r=${cloudflare.rateLimit.remaining};t=300`,
+      remaining: cloudflare.rateLimit.remaining,
+      blockedUntil: null,
+    });
+  });
+
   it("retries a read after a server error or no answer", async () => {
     const account = cloudflare.addAccount("Acme");
     cloudflare.failCall(1, 502);

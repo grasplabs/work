@@ -422,9 +422,18 @@ const hurryEveryMs = 50;
  * Records each run of any of the admin's workflows the engine creates
  * from now on, and keeps their retries and sleeps due at once (`hurry`),
  * until disposed: what a test of runs that start runs of their own (a
- * rollout's fleet clients) follows them by.
+ * rollout's fleet clients) follows them by. `beforeStart` gets each
+ * run's object, and the workflow it's a run of, before its start reaches
+ * it, as for `startsOf`.
  */
-export const followAdminRuns = (): FollowedRuns => {
+export const followAdminRuns = (
+  beforeStart: (
+    stub: RunStub,
+    workflow: string
+  ) => Promise<unknown> = async () => {
+    await Promise.resolve();
+  }
+): FollowedRuns => {
   const started: StartedRun[] = [];
   const done = new Set<string>();
   const namespace = env.ADMIN_RUNS;
@@ -435,6 +444,7 @@ export const followAdminRuns = (): FollowedRuns => {
       get: (target, property): unknown => {
         if (property === "start") {
           return async (command: StartCommand) => {
+            await beforeStart(stub, command.definition);
             const outcome = await target.start(command);
             if (outcome === "created") {
               started.push({

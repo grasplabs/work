@@ -619,7 +619,8 @@ const applyBatch = async (
 ): Promise<void> => {
   const send = async (migrations: readonly D1Migration[]) => {
     // Checked before each send of it, the API client's retries included: a
-    // 429 waited out must not let a runner that lost its client send it.
+    // retry after no answer must not let a runner that lost its client
+    // send it.
     await queryD1(
       api,
       accountId,

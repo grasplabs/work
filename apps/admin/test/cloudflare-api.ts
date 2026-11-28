@@ -995,6 +995,9 @@ export type Failure =
   | "statement-failed"
   | { retryAfter: string };
 
+/** Requests a token may make in five minutes (API limits). */
+const fullRateLimit = 1200;
+
 const lostConnection = (): never => {
   throw new TypeError("Network connection lost.");
 };
@@ -1076,6 +1079,14 @@ const composioApi = "https://backend.composio.dev/api/v3.1/";
 export const fakeCloudflareApi = (token: string) => {
   const accounts = new Map<string, AccountState>();
   const calls: ApiCall[] = [];
+  /**
+   * The token's rate limit as every answer reports it in its `Ratelimit`
+   * header: requests left in its five-minute window, one fewer each call;
+   * null for answers that carry no header.
+   */
+  const rateLimit: { remaining: number | null } = {
+    remaining: fullRateLimit,
+  };
   const planned = new Map<number, Failure>();
   /** Failures planned for the next call a test picks out, each once. */
   const matched: { matches: (call: ApiCall) => boolean; failure: Failure }[] =
@@ -1302,6 +1313,14 @@ export const fakeCloudflareApi = (token: string) => {
       response = await respond(request, call);
     } else {
       response = failed(failure);
+    }
+    if (rateLimit.remaining !== null) {
+      rateLimit.remaining = Math.max(0, rateLimit.remaining - 1);
+      response = new Response(response.body, response);
+      response.headers.set(
+        "ratelimit",
+        `"default";r=${rateLimit.remaining};t=300`
+      );
     }
     // Answered, a failure too: the caller holds what it got back.
     const after = answeredThen.findIndex(({ matches }) => matches(call));
@@ -1607,6 +1626,7 @@ export const fakeCloudflareApi = (token: string) => {
     coreLoad.aborted = 0;
     forgetDatabases();
     calls.length = 0;
+    rateLimit.remaining = fullRateLimit;
     planned.clear();
     matched.length = 0;
     interleaved.length = 0;
@@ -1640,6 +1660,8 @@ export const fakeCloudflareApi = (token: string) => {
     reset,
     /** Every call the fake got in this test, in order. */
     calls,
+    /** The token's rate limit its answers report: a test sets what's left, or null for no header. */
+    rateLimit,
     /** The most calls it was answering at once in this test. */
     peakConcurrency: () => load.peak,
     /** The most accounts it was answering calls for at once in this test. */
