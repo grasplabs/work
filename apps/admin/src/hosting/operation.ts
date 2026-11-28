@@ -3,36 +3,50 @@
  * operation per client, run by the runner that holds it (src/runners.ts),
  * through its steps in order:
  *
- * 1. `validated`: the release is imported, the destination can run
- *    every binding it uses, the client's secrets and core config can be
- *    made, and its resources are allocated in its inventory.
+ * 1. `validated`: the release is imported, the move to it is allowed by
+ *    what the client's scripts were observed at (`canMove`), the
+ *    destination can run every binding it uses, the client's secrets and
+ *    core config can be made, and its resources are allocated in its
+ *    inventory.
  * 2. `resources`: its databases and buckets exist, each id recorded
  *    (`ensureClientResources`).
- * 3. `migrations`: the release's D1 migrations, applied to the inventory's
+ * 3. `snapshot`: a D1 Time Travel bookmark of each database the release
+ *    has a migration for that it lacks, for a person to restore data
+ *    with (src/cloudflare/d1-bookmark.ts), before anything migrates.
+ * 4. `migrations`: the release's D1 migrations, applied to the inventory's
  *    databases, by their observed ids; and the model files it names, in
  *    the client's models bucket (src/deploy/model-files.ts).
- * 4. and 5. `connect`, then `core`: each Worker rendered onto the client's
+ * 5. and 6. `connect`, then `core`: each Worker rendered onto the client's
  *    inventory (`renderClientWorker`) and uploaded as its stable script,
  *    with its Durable Object migrations and its secrets (the client's
  *    derived and sealed ones, and the shared ones it needs), then
  *    observed.
- * 6. `probe`: core answers its health check as the version live, with the
- *    router secret the router will send (`smokeAnswering`), then the
- *    admin's signed probe (src/hosting/probe.ts): it runs as this
- *    client, each private binding the release gives core and connect
+ * 7. `probe`: core answers its health check as the version live, with the
+ *    router secret the router will send (`smokeAnswering`), serves its
+ *    frontend's files (`assetsReady`), then the admin's signed probe
+ *    (src/hosting/probe.ts): it runs as this client, on this release and
+ *    its schema, each private binding the release gives core and connect
  *    answers, and its clock and connect's are armed.
- * 7. `route`: the client's hostname in the router's map.
- * 8. `done`: the operation recorded complete, the client active and the
+ * 8. `route`: the client's hostname in the router's map.
+ * 9. `done`: the operation recorded complete, the client active and the
  *    runner's claim released, in one batch.
  *
- * Steps 4 and 5 are one upload per Worker: a script is created by its
+ * Steps 5 and 6 are one upload per Worker: a script is created by its
  * first upload, which carries its modules, Durable Object migrations and
  * secrets, and it goes live at once, one version with all of them. The
- * client stays unreachable until step 7.
+ * client stays unreachable until step 8.
+ *
+ * The steps run in phases (`operationPhases`), each of which can be run
+ * alone (`runOperationPhase`), as a run's own step: it reads the
+ * operation afresh, observes before it acts, does only what is missing,
+ * and records how it failed. A phase runs only once the one before it
+ * finished in this change (`phase_out_of_order`), so the router's map
+ * never names a core the probe didn't pass. What starts a change is
+ * `startClientRelease` (or `startClientProvision`), outside the phases.
  *
  * Every step can run again: a retry, by the same runner or one that took
- * the client over, runs the operation from its first step, and each step
- * finds what an earlier run did. Resources are found by their recorded
+ * the client over, runs the operation from its first step, or a phase
+ * again, and each step finds what an earlier run did. Resources are found by their recorded
  * names and ids; migrations skip what a database applied, and model
  * files what the bucket holds; the sending
  * domain's zone is found by its name, and sending turned on only where
@@ -98,7 +112,9 @@ import { teamsBotOf, teamsBotVars } from "../clients/teams-bot.ts";
 import { findD1Database } from "../cloudflare/accounts.ts";
 import { CloudflareApiError } from "../cloudflare/api.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
+import { d1Bookmark } from "../cloudflare/d1-bookmark.ts";
 import {
+  appliedMigrationNames,
   isUploadReplay,
   targetMigrationState,
   targetSettings,
@@ -117,11 +133,15 @@ import { derivedCoreConfig } from "../deploy/core-config.ts";
 import type { SignInApps } from "../deploy/core-config.ts";
 import { configuredCoreVars, mailSenderOf } from "../deploy/core-vars.ts";
 import { errorCode } from "../deploy/errors.ts";
-import { migrateDatabases } from "../deploy/migrations.ts";
+import { databaseMigrations, migrateDatabases } from "../deploy/migrations.ts";
 import { modelsBucketOf, syncModelFiles } from "../deploy/model-files.ts";
 import type { ModelFilesSynced } from "../deploy/model-files.ts";
 import { importedManifest } from "../deploy/release.ts";
-import { registerHostname, smokeAnswering } from "../deploy/router.ts";
+import {
+  assetsReady,
+  registerHostname,
+  smokeAnswering,
+} from "../deploy/router.ts";
 import type { RouterHosts, SmokeOptions } from "../deploy/router.ts";
 import { sealedWorkerSecrets } from "../deploy/sealed-secrets.ts";
 import {
@@ -144,6 +164,7 @@ import { holdsClient, releaseRun, stillHolds } from "../runners.ts";
 import type { HeldClient } from "../runners.ts";
 import {
   allocateClientResources,
+  clientInventory,
   destinationOf,
   InventoryError,
   placementOf,
@@ -197,6 +218,16 @@ export const provisionOperationErrorCodes = [
   "probe_binding_unanswered",
   /** Core's clock or connect's isn't armed with tasks after the probe. */
   "probe_clock_unarmed",
+  /** Core answered the probe as another release than the one deployed, or none. */
+  "probe_release_mismatch",
+  /** A database core binds is behind the release's last migration for it. */
+  "probe_schema_mismatch",
+  /** Core's frontend still answers Cloudflare's stub for static files not deployed yet. */
+  "probe_assets_not_ready",
+  /** Cloudflare gave no Time Travel bookmark of a database before its migration. */
+  "snapshot_unavailable",
+  /** A phase ran before the one it follows finished in this change. */
+  "phase_out_of_order",
   /**
    * A company that has to start closed for its onboarding is on a release
    * whose core starts open: its address isn't published.
@@ -274,6 +305,7 @@ export const operationErrorCode = (error: unknown): string =>
 export const provisionSteps = [
   "validated",
   "resources",
+  "snapshot",
   "migrations",
   "connect",
   "core",
@@ -282,6 +314,12 @@ export const provisionSteps = [
 ] as const;
 export type ProvisionStep = (typeof provisionSteps)[number];
 
+/** Where `step` is in the operation's order; -1 for none or one it doesn't have. */
+const stepIndexOf = (step: string | null): number => {
+  const steps: readonly (string | null)[] = provisionSteps;
+  return steps.indexOf(step);
+};
+
 /**
  * The step an operation left running stopped in: the one after the last
  * it finished (`step`, null before the first). A recorded step this
@@ -289,8 +327,7 @@ export type ProvisionStep = (typeof provisionSteps)[number];
  * recorded: where it stopped can't be told past it.
  */
 export const stepReached = (step: string | null): string => {
-  const steps: readonly (string | null)[] = provisionSteps;
-  const done = steps.indexOf(step);
+  const done = stepIndexOf(step);
   if (step !== null && done === -1) {
     return step;
   }
@@ -419,6 +456,20 @@ const progressSchema = z.object({
   /** The core origin the probe passed at. */
   origin: z.string().optional(),
   /**
+   * What core went live with in change `change`, as its upload step read
+   * the client: its secrets generation, and since when its company starts
+   * closed (ISO; null where it starts open). The probe, the route and the
+   * record hold the client to these, never to the client as it reads
+   * later: a rotation since is the next change's to deliver.
+   */
+  delivered: z
+    .object({
+      change: z.int(),
+      generation: z.int(),
+      closedFrom: z.string().nullable(),
+    })
+    .optional(),
+  /**
    * When the settings core last went live with were read (ISO): a change
    * to them after it waits for the next run (src/rollout/targets.ts).
    */
@@ -429,6 +480,23 @@ const progressSchema = z.object({
    * past, rather than what a release that never uploaded declared.
    */
   migrated: z.record(z.string(), z.string().nullable()).default({}),
+  /**
+   * Each database's last restore point, by its name in the release: the
+   * D1 Time Travel bookmark taken before the change `change` migrated it
+   * to release `release`, at `at` (ISO). For a person to restore its data
+   * with, never the admin (`snapshot`).
+   */
+  bookmarks: z
+    .record(
+      z.string(),
+      z.object({
+        bookmark: z.string(),
+        change: z.int(),
+        release: z.string(),
+        at: z.string(),
+      })
+    )
+    .default({}),
 });
 type Progress = z.infer<typeof progressSchema>;
 
@@ -635,6 +703,9 @@ const switchProvisionRelease = async (
       .set({
         releaseId,
         status: "running",
+        // Started again from its first step on the new release: no step of
+        // the release before counts for it (`runOperationPhase`).
+        step: null,
         error: null,
         runId: held.runId,
         startedBy: actorName(actor),
@@ -1616,6 +1687,26 @@ const load = async (
 };
 
 /**
+ * Throws unless the destination can run each of the release's Workers,
+ * and its vars and secrets, as `loaded` read them, can be bound: what
+ * step 1 checks, and the upload phase again, as it reads the settings
+ * afresh.
+ */
+const checkWorkers = async (
+  context: ProvisionContext,
+  loaded: Loaded
+): Promise<void> => {
+  const vars = coreVarsOf(context, loaded);
+  for (const app of appsOf(loaded.manifest)) {
+    const worker = workerOf(loaded.manifest, app);
+    assertRunnable(loaded, worker);
+    // oxlint-disable-next-line no-await-in-loop -- two Workers
+    const secrets = await secretsOf(context, loaded, app);
+    checkBindingNames(worker, varsOf(context, loaded, app, vars), secrets);
+  }
+};
+
+/**
  * Step 1: everything checked before the client's destination is changed,
  * then its resources allocated in its inventory.
  */
@@ -1626,14 +1717,7 @@ const validate = async (
   const { db } = context;
   const { manifest, held } = loaded;
   const order = appsOf(manifest);
-  const vars = coreVarsOf(context, loaded);
-  for (const app of order) {
-    const worker = workerOf(manifest, app);
-    assertRunnable(loaded, worker);
-    // oxlint-disable-next-line no-await-in-loop -- two Workers
-    const secrets = await secretsOf(context, loaded, app);
-    checkBindingNames(worker, varsOf(context, loaded, app, vars), secrets);
-  }
+  await checkWorkers(context, loaded);
   await assertHolds(db, held);
   await allocateClientResources(db, "system", {
     clientId: held.clientId,
@@ -1689,6 +1773,79 @@ const observedDatabases = async (
     databases.set(row.role.slice("d1:".length), row.providerId);
   }
   return databases;
+};
+
+/**
+ * Step 3: a restore point of each database the release migrates and that
+ * lacks one of its migrations, before any migration runs: its D1 Time
+ * Travel bookmark now (src/cloudflare/d1-bookmark.ts), kept in `progress`
+ * by database (`bookmarks`) with the change and release it was taken
+ * before. One kept for this change already stands: a retry after a
+ * migration partly ran keeps the one from before it. A client still
+ * being provisioned, and a database with no migration recorded yet, have
+ * nothing to keep: neither has served anyone. Cloudflare giving
+ * none stops the step (`snapshot_unavailable`), and so the migrations
+ * after it. It is for a person to restore data with, never the admin:
+ * migrations are expand only, and stay.
+ */
+const snapshot = async (
+  context: ProvisionContext,
+  loaded: Loaded,
+  inventory: readonly ClientResource[]
+): Promise<void> => {
+  const { api, db } = context;
+  const { operation } = loaded;
+  // Still being provisioned, it has served nobody: nothing to keep.
+  const databases = loaded.client.unpublished
+    ? new Map<string, string>()
+    : await observedDatabases(context, loaded, inventory);
+  const progress = await progressNow(db, operation.id);
+  for (const [name, files] of databaseMigrations(loaded.manifest)) {
+    const id = databases.get(name);
+    // None looked up, or one the inventory lacks, which the migration
+    // step refuses.
+    if (
+      id === undefined ||
+      progress.bookmarks[name]?.change === operation.change
+    ) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a few databases
+    const applied = await appliedMigrationNames(api, loaded.accountId, id);
+    if (applied.size === 0 || files.every((file) => applied.has(file.name))) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a few databases
+    const bookmark = await d1Bookmark(api, loaded.accountId, id);
+    if (bookmark === undefined) {
+      throw new ProvisionOperationError(
+        "snapshot_unavailable",
+        `Cloudflare gave no Time Travel bookmark of ${loaded.held.clientId}'s ${name}`
+      );
+    }
+    progress.bookmarks = {
+      ...progress.bookmarks,
+      [name]: {
+        bookmark,
+        change: operation.change,
+        release: operation.releaseId,
+        at: (context.now?.() ?? new Date()).toISOString(),
+      },
+    };
+    // oxlint-disable-next-line no-await-in-loop -- kept before the next
+    await recordProgress(db, loaded, progress);
+  }
+  // Every one kept for this change, an earlier attempt's too, and the
+  // bookmarks themselves: the audit log outlives the progress.
+  const kept = Object.entries(progress.bookmarks).filter(
+    ([, point]) => point.change === operation.change
+  );
+  await recordStep(db, loaded, "snapshot", {
+    bookmarks: kept.length,
+    ...Object.fromEntries(
+      kept.map(([name, { bookmark }]) => [`bookmark:${name}`, bookmark])
+    ),
+  });
 };
 
 /**
@@ -2150,7 +2307,28 @@ const sendOrResend = async (
 };
 
 /**
- * Steps 4 and 5 for Worker `app`: rendered onto the client's inventory and
+ * Records core live with the client as this run read it: what's pending
+ * is what changed after it started reading (`readAt`), sign-in included,
+ * and the later steps hold the client to what went live (`delivered`).
+ */
+const recordDelivered = async (
+  db: AdminDatabase,
+  loaded: Loaded
+): Promise<void> => {
+  const now = await progressNow(db, loaded.operation.id);
+  await recordProgress(db, loaded, {
+    ...now,
+    configuredAt: loaded.readAt.toISOString(),
+    delivered: {
+      change: loaded.operation.change,
+      generation: loaded.client.generation,
+      closedFrom: loaded.client.closedFrom?.toISOString() ?? null,
+    },
+  });
+};
+
+/**
+ * Steps 5 and 6 for Worker `app`: rendered onto the client's inventory and
  * uploaded as its script with its secrets, unless the script runs an
  * upload with the same fingerprint already (`uploadFingerprint`): one
  * recorded live (`uploads`), the script, its bindings and settings reading
@@ -2310,13 +2488,7 @@ const upload = async (
     });
   }
   if (app === "core") {
-    // Core live with the settings as this run read them: what's pending is
-    // what changed after it started reading (`readAt`), sign-in included.
-    const now = await progressNow(db, loaded.operation.id);
-    await recordProgress(db, loaded, {
-      ...now,
-      configuredAt: loaded.readAt.toISOString(),
-    });
+    await recordDelivered(db, loaded);
   }
   // What the client runs, as a deploy records it: only while the runner
   // holds the client, in the same statement.
@@ -2463,20 +2635,25 @@ const reachableCore = (
 
 /**
  * Step 7: core answers its health check, as the version live, to the
- * router secret the router will send, then the admin's signed probe as
- * this client at that version, each of its private bindings answering
- * and both clocks armed, reached as the router will reach it
- * (`reachableCore`). Returns the script the router's map entry names.
+ * router secret the router will send, and serves its frontend's files
+ * rather than Cloudflare's stub for them (`probe_assets_not_ready`);
+ * then the admin's signed probe as this client at that version, on the
+ * operation's release and its schema (a core from before it says neither,
+ * and is taken as it is), each of its private bindings answering and both
+ * clocks armed, reached as the router will reach it (`reachableCore`).
  */
 const probe = async (
   context: ProvisionContext,
   loaded: Loaded,
   inventory: readonly ClientResource[]
-): Promise<string> => {
+): Promise<void> => {
   const { db } = context;
   const { held } = loaded;
-  const target = targetOf(loaded, inventory, "core");
-  const { core, script } = reachableCore(context, loaded, target);
+  const { core } = reachableCore(
+    context,
+    loaded,
+    targetOf(loaded, inventory, "core")
+  );
   const { origin } = core;
   const routerSecret = await deriveRouterSecret(
     context.secrets.routerKey,
@@ -2493,6 +2670,12 @@ const probe = async (
     ...context.router.smoke,
     refuses: superseded.core,
   });
+  if (!(await assetsReady(core, routerSecret, context.router.smoke))) {
+    throw new ProvisionOperationError(
+      "probe_assets_not_ready",
+      `Core at ${origin} still answers Cloudflare's stub for its static files`
+    );
+  }
   const asking = {
     origin,
     routerSecret,
@@ -2514,6 +2697,7 @@ const probe = async (
   const fault = probeFault(answer, {
     clientId: held.clientId,
     version,
+    release: loaded.manifest,
     bindings: privateBindings(
       workerOf(loaded.manifest, "core"),
       workerOf(loaded.manifest, "connect")
@@ -2554,7 +2738,6 @@ const probe = async (
     connect === null ? { attempts, connectUnrecorded: 1 } : { attempts },
     { ...progress, origin }
   );
-  return script;
 };
 
 /**
@@ -2570,9 +2753,9 @@ const probeOrForget = async (
   context: ProvisionContext,
   loaded: Loaded,
   inventory: readonly ClientResource[]
-): Promise<string> => {
+): Promise<void> => {
   try {
-    return await probe(context, loaded, inventory);
+    await probe(context, loaded, inventory);
   } catch (error) {
     if (operationErrorCode(error) === "probe_unqualified") {
       throw error;
@@ -2594,14 +2777,23 @@ const probeOrForget = async (
   }
 };
 
-/** Step 8: the client's hostname in the router's map, only after the probe passed. */
+/**
+ * Step 8: the client's hostname in the router's map, naming its core's
+ * script as the probe reached it (`reachableCore`), only after the probe
+ * passed (`phase_out_of_order`).
+ */
 const route = async (
   context: ProvisionContext,
   loaded: Loaded,
-  script: string
+  inventory: readonly ClientResource[]
 ): Promise<void> => {
   const { held } = loaded;
   const { generation } = loaded.client;
+  const { script } = reachableCore(
+    context,
+    loaded,
+    targetOf(loaded, inventory, "core")
+  );
   // Only a script of this client's own placement (`deploymentPrefix`,
   // inventory.ts): a mis-recorded inventory never publishes another's.
   if (!script.startsWith(deploymentPrefix(loaded.placement.deploymentId))) {
@@ -2848,23 +3040,233 @@ export const lostAttemptOf = async (
 };
 
 /** Where a run of the operation stopped, recorded, and what stopped it. */
-interface Stopped {
+export interface Stopped {
   operation: Operation;
   step: ProvisionStep;
   code: string;
   error: unknown;
+  /**
+   * Whether it stopped before its phase did any of its own work: refused
+   * out of order, no longer held, or the client unreadable. Nothing of
+   * the release failed then, so nothing is rolled back for it.
+   */
+  unstarted: boolean;
 }
 
 /**
- * Runs client `held.clientId`'s operation once from its first step, as
- * runner `held`, and records it done; one done already is left as it is.
- * A failure is recorded (its step and code, audited) and answered.
+ * The operation's phases, in order, each a few of its steps: what a run
+ * takes as one step of its own. `preflight` checks and makes its
+ * resources (`validated`, `resources`), `snapshot` keeps a restore point
+ * of each database about to migrate, `migrate` migrates them, `install`
+ * uploads connect and then core, `probe`, `route` and `record` (`done`).
  */
-const runOperation = async (
+export const operationPhases = [
+  "preflight",
+  "snapshot",
+  "migrate",
+  "install",
+  "probe",
+  "route",
+  "record",
+] as const;
+export type OperationPhase = (typeof operationPhases)[number];
+
+/** Where a phase is: the step it works on, which a failure is recorded at. */
+interface Reached {
+  step: ProvisionStep;
+}
+
+/**
+ * The step each phase that follows another needs recorded, or one after
+ * it, before it runs: the last of the phase before. A step's record goes
+ * back when an earlier one runs again, and to none when a change starts,
+ * so this holds only once the phase before finished since.
+ */
+const follows: Readonly<Partial<Record<OperationPhase, ProvisionStep>>> = {
+  snapshot: "resources",
+  migrate: "snapshot",
+  install: "migrations",
+  probe: "core",
+  route: "probe",
+  record: "route",
+};
+
+/** The client's inventory, as the operation's `resources` step left it. */
+const inventoryOf = async (
   context: ProvisionContext,
-  held: HeldClient
+  loaded: Loaded
+): Promise<ClientResource[]> =>
+  await clientInventory(context.db, loaded.held.clientId);
+
+/**
+ * Throws unless the operation may take the client from the release it
+ * ran before to its own (`assertCanGo`), by what its scripts were
+ * observed at now: what its start checked, checked again by every run of
+ * it, as a run resumed later goes on from what's observed then. A first
+ * release goes from nothing; a run of the release it runs again goes on
+ * from the one it was released from, and checks that move again.
+ */
+const assertMovable = async (
+  db: AdminDatabase,
+  operation: Operation
+): Promise<void> => {
+  const from = operation.previousReleaseId;
+  if (from === null || from === operation.releaseId) {
+    return;
+  }
+  await assertCanGo(
+    db,
+    { releaseId: from, progress: operation.progress },
+    operation.releaseId,
+    false
+  );
+};
+
+/** The step each phase starts at: where a failure before its work is recorded. */
+const firstSteps: Readonly<Record<OperationPhase, ProvisionStep>> = {
+  preflight: "validated",
+  snapshot: "snapshot",
+  migrate: "migrations",
+  install: "connect",
+  probe: "probe",
+  route: "route",
+  record: "route",
+};
+
+/** What each phase does, on the operation as loaded, its step kept in `at`. */
+const phaseWork: Readonly<
+  Record<
+    OperationPhase,
+    (
+      context: ProvisionContext,
+      loaded: Loaded,
+      at: Reached,
+      inventory: readonly ClientResource[]
+    ) => Promise<void>
+  >
+> = {
+  preflight: async (context, loaded, at) => {
+    const { api, db } = context;
+    await assertMovable(db, loaded.operation);
+    await validate(context, loaded);
+    at.step = "resources";
+    const inventory = await ensureClientResources(
+      api,
+      db,
+      "system",
+      loaded.held
+    );
+    await recordStep(db, loaded, "resources", { resources: inventory.length });
+  },
+  snapshot: async (context, loaded, _at, inventory) => {
+    await snapshot(context, loaded, inventory);
+  },
+  migrate: async (context, loaded, _at, inventory) => {
+    await migrate(context, loaded, inventory);
+  },
+  install: async (context, loaded, at, inventory) => {
+    // The settings are read again here, for what goes live: checked as
+    // the first step checked them.
+    await checkWorkers(context, loaded);
+    // Rendered before either uploads, so a binding that can't be mapped
+    // onto the client's own resources stops it before anything is live.
+    const order = appsOf(loaded.manifest);
+    for (const app of order) {
+      renderClientWorker(
+        workerOf(loaded.manifest, app),
+        loaded.placement,
+        inventory,
+        renderOptionsOf(loaded)
+      );
+    }
+    for (const app of order) {
+      at.step = app;
+      // oxlint-disable-next-line no-await-in-loop -- connect, then core
+      await upload(context, loaded, inventory, app);
+    }
+  },
+  probe: async (context, loaded, _at, inventory) => {
+    await probeOrForget(context, loaded, inventory);
+  },
+  route: async (context, loaded, _at, inventory) => {
+    await route(context, loaded, inventory);
+  },
+  record: async (context, loaded) => {
+    await complete(context.db, loaded);
+  },
+};
+
+/** The phases after the upload: each holds the client to what it delivered (`asDelivered`). */
+const afterInstall: ReadonlySet<OperationPhase> = new Set([
+  "probe",
+  "route",
+  "record",
+]);
+
+/**
+ * `loaded` with the client as core went live with it in this change
+ * (`delivered`): its secrets generation and its closed start, which a
+ * rotation or a change of the start since doesn't move. Refused when
+ * nothing recorded it (`phase_out_of_order`).
+ */
+const asDelivered = async (
+  db: AdminDatabase,
+  loaded: Loaded
+): Promise<Loaded> => {
+  const { delivered } = await progressNow(db, loaded.operation.id);
+  if (delivered?.change !== loaded.operation.change) {
+    throw new ProvisionOperationError(
+      "phase_out_of_order",
+      `${loaded.held.clientId}'s core has no upload recorded in this change`
+    );
+  }
+  return {
+    ...loaded,
+    client: {
+      ...loaded.client,
+      generation: delivered.generation,
+      closedFrom:
+        delivered.closedFrom === null ? null : new Date(delivered.closedFrom),
+    },
+  };
+};
+
+/**
+ * Records the operation's last finished step back to `step` (none for
+ * null) when a later one is recorded, while `loaded.held` holds the
+ * client: a phase that starts again undoes nothing, but what it and the
+ * phases after it did counts again only once it finishes.
+ */
+const stepBack = async (
+  db: AdminDatabase,
+  { operation, held }: Loaded,
+  step: ProvisionStep | null
+): Promise<void> => {
+  if (stepIndexOf(operation.step) <= stepIndexOf(step)) {
+    return;
+  }
+  await db
+    .update(clientProvisions)
+    .set({ step })
+    .where(and(eq(clientProvisions.id, operation.id), stillHolds(held)));
+};
+
+/**
+ * Runs phase `phase` of client `held.clientId`'s operation, as runner
+ * `held`, on the operation as it is now: one done already is left as it
+ * is, and one whose phase before hasn't finished in this change is
+ * refused (`phase_out_of_order`), answered and left unrecorded. Any other
+ * failure is recorded (its step and code, audited) and answered, never
+ * thrown; so is one that stops it before it loads (`stage_unset`, a
+ * client no longer held or placed). Once admitted, its steps and those
+ * after it no longer count as done until it finishes again (`stepBack`).
+ */
+export const runOperationPhase = async (
+  context: ProvisionContext,
+  held: HeldClient,
+  phase: OperationPhase
 ): Promise<Stopped | undefined> => {
-  const { db, api } = context;
+  const { db } = context;
   const operation = await provisionOf(db, held.clientId);
   if (operation === undefined) {
     throw new Error(`${held.clientId} has no provisioning operation`);
@@ -2872,7 +3274,8 @@ const runOperation = async (
   if (operation.status === "done") {
     return undefined;
   }
-  let step: ProvisionStep = "validated";
+  const at: Reached = { step: firstSteps[phase] };
+  let unstarted = true;
   try {
     // Before anything is read or asked of Cloudflare: an admin whose
     // STAGE names no stage has no namespace of its own to hold a client
@@ -2887,42 +3290,27 @@ const runOperation = async (
       );
     }
     await assertHolds(db, held);
+    const after = follows[phase] ?? null;
+    if (stepIndexOf(operation.step) < stepIndexOf(after)) {
+      throw new ProvisionOperationError(
+        "phase_out_of_order",
+        `${held.clientId}'s ${phase} needs its ${after ?? "first"} step done in this change first`
+      );
+    }
     const loaded: Loaded = {
       ...(await load(db, held, operation)),
       ownNamespace,
     };
-    await validate(context, loaded);
-
-    step = "resources";
-    const inventory = await ensureClientResources(api, db, "system", held);
-    await recordStep(db, loaded, "resources", { resources: inventory.length });
-
-    step = "migrations";
-    await migrate(context, loaded, inventory);
-
-    // Rendered before either uploads, so a binding that can't be mapped
-    // onto the client's own resources stops it before anything is live.
-    const order = appsOf(loaded.manifest);
-    for (const app of order) {
-      renderClientWorker(
-        workerOf(loaded.manifest, app),
-        loaded.placement,
-        inventory,
-        renderOptionsOf(loaded)
-      );
-    }
-    for (const app of order) {
-      step = app;
-      // oxlint-disable-next-line no-await-in-loop -- connect, then core
-      await upload(context, loaded, inventory, app);
-    }
-
-    step = "probe";
-    const script = await probeOrForget(context, loaded, inventory);
-
-    step = "route";
-    await route(context, loaded, script);
-    await complete(db, loaded);
+    const working = afterInstall.has(phase)
+      ? await asDelivered(db, loaded)
+      : loaded;
+    const inventory = await inventoryOf(context, loaded);
+    // Its steps and the later ones no longer count as done, until it
+    // finishes again: a phase run again that fails never leaves a later
+    // phase admitted on what it did before.
+    await stepBack(db, loaded, after);
+    unstarted = false;
+    await phaseWork[phase](context, working, at, inventory);
     return undefined;
   } catch (error) {
     // Any failure, a resource outside the organization's jurisdiction
@@ -2932,12 +3320,35 @@ const runOperation = async (
     log.error("provision.failed", {
       operation: operation.id,
       clientId: held.clientId,
-      step,
+      step: at.step,
       error: code,
     });
-    await recordFailure(db, { operation, held }, step, code);
-    return { operation, step, code, error };
+    // A phase called out of order changed nothing: the operation keeps
+    // how it stands, and why it last stopped.
+    if (code !== "phase_out_of_order") {
+      await recordFailure(db, { operation, held }, at.step, code);
+    }
+    return { operation, step: at.step, code, error, unstarted };
   }
+};
+
+/**
+ * Runs client `held.clientId`'s operation once through every phase, as
+ * runner `held`, and records it done; one done already is left as it is.
+ * A failure is recorded (its step and code, audited) and answered.
+ */
+const runOperation = async (
+  context: ProvisionContext,
+  held: HeldClient
+): Promise<Stopped | undefined> => {
+  for (const phase of operationPhases) {
+    // oxlint-disable-next-line no-await-in-loop -- each after the one before
+    const stopped = await runOperationPhase(context, held, phase);
+    if (stopped !== undefined) {
+      return stopped;
+    }
+  }
+  return undefined;
 };
 
 /**
@@ -3037,8 +3448,12 @@ export const runClientProvision = async (
   if (stopped === undefined) {
     return;
   }
-  const { operation, step, code, error } = stopped;
-  if (rollBackOnProbe && (await rollsBack(context.db, operation, step, code))) {
+  const { operation, step, code, error, unstarted } = stopped;
+  if (
+    rollBackOnProbe &&
+    !unstarted &&
+    (await rollsBack(context.db, operation, step, code))
+  ) {
     await rollBackAfterProbe(context, held, operation, code);
     return;
   }

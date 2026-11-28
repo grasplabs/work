@@ -98,6 +98,7 @@ import {
   dispatchRoutes,
   forgetDatabase,
   forgetDatabases,
+  lastMigrationOf,
   workerRoutes,
 } from "./cloudflare-api-workers.ts";
 import {
@@ -215,9 +216,11 @@ const connectAnswering = (
  * core does (core's src/provision-probe.ts), once the signature checks
  * out with the key its live version's auth secret gives and the request
  * parses: the version answering, the `CLIENT_ID` its live version runs
- * with, each of its private bindings answering, and both clocks armed,
- * unless the account says otherwise (`coreProbe`). Anything else, and
- * any request to a core from before the probe, gets its frontend's page.
+ * with, the release its `PLATFORM_CHANGE` names, each of its databases'
+ * last migration as the account's database has it, each of its private
+ * bindings answering, and both clocks armed, unless the account says
+ * otherwise (`coreProbe`). Anything else, and any request to a core from
+ * before the probe, gets its frontend's page.
  */
 const answerProbe = async (
   { account, core }: CoreHost,
@@ -255,6 +258,24 @@ const answerProbe = async (
     )?.versions.at(-1)?.metadata.bindings ?? []
   );
   const clientId = bindings.find(({ name }) => name === "CLIENT_ID")?.json;
+  const change = z
+    .object({ release: z.string() })
+    .safeParse(bindings.find(({ name }) => name === "PLATFORM_CHANGE")?.json);
+  const named = change.success ? change.data.release : null;
+  const databases = bindingsSchema.element
+    .extend({ id: z.string() })
+    .array()
+    .parse(bindings.filter(({ type }) => type === "d1"));
+  const schema = Object.fromEntries(
+    await Promise.all(
+      databases.map(async ({ name, id }): Promise<[string, string | null]> => [
+        name,
+        account.d1.some(({ uuid }) => uuid === id)
+          ? await lastMigrationOf(id)
+          : null,
+      ])
+    )
+  );
   const down = new Set(probe.down);
   const clock = (name: "core" | "connect") =>
     probe.clocksDown?.includes(name) === true
@@ -267,6 +288,12 @@ const answerProbe = async (
       : { connectVersion: connectAnswering({ account, core }, live) }),
     clientId:
       probe.asClient ?? (typeof clientId === "string" ? clientId : null),
+    ...(probe.beforeRelease === true
+      ? {}
+      : {
+          release: probe.asRelease === undefined ? named : probe.asRelease,
+          schema: { ...schema, ...probe.schemaAt },
+        }),
     bindings: Object.fromEntries(
       [
         ...bindings.map((binding) => ({ ...binding, answers: binding.name })),
@@ -1338,6 +1365,16 @@ export const fakeCloudflareApi = (token: string) => {
       } finally {
         adminReads.now -= 1;
       }
+    }
+    if (url.pathname === "/" && request.method === "GET") {
+      if (core.assetsStub !== undefined && core.assetsStub > 0) {
+        core.assetsStub -= 1;
+        return new Response(
+          "Assets have not yet been deployed. Please try again shortly.",
+          { headers: { "content-type": "text/plain" } }
+        );
+      }
+      return frontendPage();
     }
     if (url.pathname !== "/health") {
       return new Response("Not found", { status: 404 });

@@ -1,9 +1,9 @@
 /**
  * The second half of provisioning's probe (spec 40.2 step 7): after core
  * answers its health check, the admin asks it, signed, whether it runs
- * as the client it was deployed for, whether each private binding the
- * release gives it and connect answers, and arms core's and connect's
- * durable clocks
+ * as the client it was deployed for, the release it was deployed with on
+ * the release's schema, whether each private binding the release gives
+ * it and connect answers, and arms core's and connect's durable clocks
  * (core's src/provision-probe.ts). What it finds either checks out or
  * names the first thing that doesn't, as a code; the hostname stays
  * unpublished until it checks out.
@@ -24,7 +24,8 @@ import type {
   ClockRegistration,
   ProvisionProbe,
 } from "@grasp-os/shared/provision-probe";
-import type { WorkerEntry } from "@grasp-os/shared/release";
+import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
+import { installMismatch } from "@grasp-os/shared/release-apply";
 import { routerSecretHeader } from "@grasp-os/shared/router";
 import { z } from "zod";
 
@@ -168,6 +169,8 @@ export const privateBindings = (
 export interface ProbeFault {
   code:
     | "probe_identity_mismatch"
+    | "probe_release_mismatch"
+    | "probe_schema_mismatch"
     | "probe_binding_unanswered"
     | "probe_clock_unarmed"
     | "probe_starts_open";
@@ -180,21 +183,25 @@ const isArmed = (clock: ClockRegistration | null): boolean =>
 
 /**
  * Checks core's `answer` against what the admin deployed: client
- * `clientId` at version `version`, each of `bindings` answering, both
- * clocks armed with tasks to run and, where the company has to start
- * closed (`startsClosed`), a core that says it does: one from a release
- * before that starts open to all its people. Null when it checks out.
+ * `clientId` at version `version`, running release `release` on its
+ * schema (`installMismatch`: what a core from before it doesn't say
+ * isn't held against it), each of `bindings` answering, both clocks
+ * armed with tasks to run and, where the company has to start closed
+ * (`startsClosed`), a core that says it does: one from a release before
+ * that starts open to all its people. Null when it checks out.
  */
 export const probeFault = (
   answer: ProvisionProbe,
   {
     clientId,
     version,
+    release,
     bindings,
     startsClosed,
   }: {
     clientId: string;
     version: string;
+    release: ReleaseManifest;
     bindings: readonly string[];
     startsClosed: boolean;
   }
@@ -203,6 +210,19 @@ export const probeFault = (
     return {
       code: "probe_identity_mismatch",
       message: `Core answered as ${answer.clientId ?? "no client"} at ${answer.version ?? "no version"}, not ${clientId} at ${version}`,
+    };
+  }
+  const installed = installMismatch(release, "core", answer);
+  if (installed?.reason === "release") {
+    return {
+      code: "probe_release_mismatch",
+      message: `Core answered as release ${answer.release ?? "none"}, not ${release.releaseId}`,
+    };
+  }
+  if (installed?.reason === "schema") {
+    return {
+      code: "probe_schema_mismatch",
+      message: `Core's ${installed.binding} is behind ${release.releaseId}'s last migration`,
     };
   }
   const unanswered = bindings.filter((name) => answer.bindings[name] !== true);

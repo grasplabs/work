@@ -189,7 +189,8 @@ describe("creating an organization", () => {
     );
     // In the tests' pool its attempt can't reach Cloudflare's dispatch
     // namespace: its first migration fails, so the attempt waits after
-    // its resources, and is ended there; its step then runs on, as the
+    // its resources and its restore point (none, as nothing ran on it
+    // yet), and is ended there; its step then runs on, as the
     // attempt would, with the fake namespace's dispatcher.
     cloudflare.failNext(
       (call) => call.path.endsWith("/query"),
@@ -220,7 +221,7 @@ describe("creating an organization", () => {
         .from(clientProvisions)
         .where(eq(clientProvisions.clientId, clientId))
         .get();
-      if (operation?.step !== "resources") {
+      if (operation?.step !== "snapshot") {
         throw new Error("Its attempt hasn't made its resources yet");
       }
     });

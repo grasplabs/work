@@ -85,12 +85,13 @@ export const cloudLines: readonly CloudLine[] = [
   },
   {
     id: "storage",
-    steps: ["resources", "migrations"],
+    steps: ["resources", "snapshot", "migrations"],
     label: () => "Creating its databases and file storage",
     details: ({ jurisdiction }) => [
       jurisdiction === "eu"
         ? "Created in Cloudflare's EU jurisdiction, and read back"
         : "Created in Cloudflare's network, in no jurisdiction",
+      "A restore point of each database kept before it's migrated",
       "Its databases brought to the release's schema",
     ],
   },
@@ -112,7 +113,7 @@ export const cloudLines: readonly CloudLine[] = [
       `Making sure ${hostname} is reachable and everything answers`,
     details: () => [
       "Its health check answers as the version just installed",
-      "It answers the admin's signed probe as this organization",
+      "It serves its pages, and answers the admin's signed probe as this organization, on this release and its schema",
       "Each of its databases, buckets and Durable Objects answers, and its clocks run",
     ],
   },

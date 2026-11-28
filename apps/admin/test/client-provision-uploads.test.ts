@@ -167,6 +167,8 @@ describe("provisioning a placed client", () => {
       },
       dispatched: [
         { script: core, path: "/health", host: `${clientId}.${domain}` },
+        // Its frontend, served rather than Cloudflare's stub for it.
+        { script: core, path: "/", host: `${clientId}.${domain}` },
         {
           script: core,
           path: provisionProbePath,

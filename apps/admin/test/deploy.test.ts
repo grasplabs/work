@@ -86,6 +86,16 @@ const heldAfter = (matches: (call: ApiCall) => boolean) => {
   };
 };
 
+/** A call for a database's Time Travel bookmark. */
+const isBookmark = ({ path }: ApiCall): boolean =>
+  path.endsWith("/time_travel/bookmark");
+
+/** A call that sends migration `0001_more.sql`, with its record. */
+const isMoreSent = ({ path, body }: ApiCall): boolean =>
+  path.endsWith("/query") &&
+  JSON.stringify(body).includes("INSERT INTO d1_migrations") &&
+  JSON.stringify(body).includes("0001_more");
+
 /** A live client on `releaseId`, following Edge. */
 const live = async (releaseId: string): Promise<PlacedClient> =>
   await livePlacedClient(cloudflare, releaseId, { channel: "edge" });
@@ -462,6 +472,66 @@ describe("a client's deploy", () => {
       for (const attempt of attempts) {
         attempt.release();
       }
+      await Promise.allSettled(takeovers);
+      errors.mockRestore();
+    }
+  });
+
+  it("cuts a deploy's attempt once it kept its restore point, as an admin redeploy would, and its retry keeps that one and migrates once", async () => {
+    const before = await placedRelease("feat(core): before");
+    const client = await live(before);
+    const release = await placedRelease("feat(core): a table more", {
+      migrations: {
+        "0000_init.sql": "CREATE TABLE a (id TEXT);",
+        "0001_more.sql": "CREATE TABLE b (id TEXT);",
+      },
+    });
+    const scripts = await scriptsOf(client.clientId);
+    const core = client.account.d1.find(
+      ({ name }) => name === `${scripts.core}-db`
+    );
+    // The attempt is held once its restore point is kept, as it reads
+    // which migrations core's database still needs: there the admin's
+    // redeploy cuts it, before anything migrated.
+    const first = heldAfter(
+      (call: ApiCall) =>
+        cloudflare.calls.some(isBookmark) &&
+        call.path.endsWith(`/d1/database/${core?.uuid ?? "none"}/query`) &&
+        JSON.stringify(call.body).includes("SELECT name FROM d1_migrations")
+    );
+    const takeovers: Promise<void>[] = [];
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    await using runs = followRuns();
+    try {
+      await releaseToEdge(env, [release]);
+      await runs.tick();
+      const runId = await runs.latest();
+      await first.read();
+      const cutAt = {
+        bookmarks: cloudflare.calls.filter(isBookmark).length,
+        sent: cloudflare.calls.filter(isMoreSent).length,
+      };
+      // Another activation takes the run over, as after the restart.
+      takeovers.push(deliverAlarm(adminWorkflows.deploy, runId));
+      const run = await ended(adminWorkflows.deploy, runId);
+
+      expect({
+        cutAt,
+        status: run.status,
+        deploy: await deployOf(client.clientId),
+        releases: await releasesOf(client.clientId),
+        bookmarks: cloudflare.calls.filter(isBookmark).length,
+        sent: cloudflare.calls.filter(isMoreSent).length,
+      }).toStrictEqual({
+        cutAt: { bookmarks: 1, sent: 0 },
+        status: "complete",
+        deploy: { releaseId: release, status: "done", error: null },
+        releases: on(release),
+        bookmarks: 1,
+        sent: 1,
+      });
+    } finally {
+      first.release();
       await Promise.allSettled(takeovers);
       errors.mockRestore();
     }

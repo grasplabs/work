@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { canMove } from "../src/release-apply.ts";
+import { canMove, installMismatch } from "../src/release-apply.ts";
 import { MANIFEST_VERSION } from "../src/release.ts";
 import type { ReleaseManifest, WorkerEntry } from "../src/release.ts";
 
-// Whether a deployment may move between two releases (`canMove`): pure,
-// on manifests. Its callers, the admin's operation and promotion, are
-// tried end to end in the admin's tests.
+// Whether a deployment may move between two releases (`canMove`), and
+// whether what it answers is a release installed (`installMismatch`):
+// pure, on manifests. Their callers, the admin's operation and promotion,
+// are tried end to end in the admin's tests.
 
 /** A Worker of a release, with its Durable Object migrations by tag. */
 const worker = (name: string, tags: readonly string[]): WorkerEntry => ({
@@ -106,6 +107,72 @@ describe("moving a deployment between releases", () => {
     expect(canMove(newer, older, { migrated: { core: "v2" } })).toStrictEqual({
       reason: "behind_migration",
       worker: "core",
+    });
+  });
+});
+
+/** A release whose core binds DB with `migrations`, by name. */
+const migrated = (migrations: readonly string[]): ReleaseManifest => {
+  const base = release(["v1"]);
+  const core = worker("grasp-os-core", ["v1"]);
+  return {
+    ...base,
+    workers: {
+      ...base.workers,
+      core: {
+        ...core,
+        d1Databases: [
+          {
+            binding: "DB",
+            databaseName: "grasp-os-core",
+            migrations: migrations.map((name) => ({
+              name,
+              r2Key: `migrations/${name}`,
+              sha256: "0".repeat(64),
+              size: 1,
+            })),
+          },
+        ],
+      },
+    },
+  };
+};
+
+describe("what a deployment answers it runs", () => {
+  const to = migrated(["0000_init.sql", "0001_more.sql"]);
+
+  it("takes the release on its last migration, a database ahead of it, and a core that says nothing", () => {
+    expect({
+      exact: installMismatch(to, "core", {
+        release: to.releaseId,
+        schema: { DB: "0001_more.sql" },
+      }),
+      // A later release's migration: a release that goes back runs on it.
+      ahead: installMismatch(to, "core", {
+        release: to.releaseId,
+        schema: { DB: "0002_later.sql" },
+      }),
+      // A core from before the probe said either.
+      silent: installMismatch(to, "core", {}),
+      // A release that migrates nothing holds no database to a name.
+      none: installMismatch(migrated([]), "core", { schema: { DB: null } }),
+    }).toStrictEqual({ exact: null, ahead: null, silent: null, none: null });
+  });
+
+  it("refuses another release or none, and a database behind the release's last migration", () => {
+    expect({
+      other: installMismatch(to, "core", { release: "26.11.0" }),
+      unnamed: installMismatch(to, "core", { release: null }),
+      behind: installMismatch(to, "core", { schema: { DB: "0000_init.sql" } }),
+      empty: installMismatch(to, "core", { schema: { DB: null } }),
+      // It answers for its databases, but not this one.
+      unanswered: installMismatch(to, "core", { schema: {} }),
+    }).toStrictEqual({
+      other: { reason: "release" },
+      unnamed: { reason: "release" },
+      behind: { reason: "schema", binding: "DB" },
+      empty: { reason: "schema", binding: "DB" },
+      unanswered: { reason: "schema", binding: "DB" },
     });
   });
 });
