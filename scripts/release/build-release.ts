@@ -20,8 +20,7 @@
  */
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
@@ -197,7 +196,16 @@ assertReleaseDir(out);
 // bundles go and the first failure is thrown: none is left running, still
 // writing into them or printing, behind a failed one.
 const buildWorkers = async (): Promise<WorkerBuild[]> => {
-  const bundleDir = mkdtempSync(path.join(tmpdir(), "grasp-os-release-"));
+  // The same directory every build, not a fresh temporary one: Wrangler
+  // writes a source map's `sourceRoot` as the directory it bundles into, so
+  // a fresh name made the source map, and so the bundle, of a Worker whose
+  // code didn't change differ from the release before. The admin uploads a
+  // Worker again only when what it sends changed (apps/admin's
+  // src/deploy/upload.ts, `uploadFingerprint`). Inside the checkout, so
+  // builds in other checkouts never share it; one build at a time in a
+  // checkout, as CI runs it.
+  const bundleDir = path.join(ROOT, "node_modules/.cache/grasp-os-release");
+  rmSync(bundleDir, { force: true, recursive: true });
   try {
     const builds = await Promise.allSettled(
       RELEASED_APPS.map(async (app) => {

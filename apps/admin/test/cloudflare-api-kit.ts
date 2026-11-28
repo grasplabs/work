@@ -53,6 +53,8 @@ export interface ScriptState {
   subdomain?: { enabled: boolean; previews_enabled: boolean };
   /** The last Durable Object migration a script upload ran. */
   migrationTag?: string;
+  /** When it was last changed, an upload or a secret (ISO, as the API's `modified_on`). */
+  modifiedOn?: string;
 }
 
 export interface AccountState {
@@ -94,6 +96,8 @@ export interface AccountState {
   sessions: Map<string, Set<string>>;
   /** Assets completion tokens it issued. */
   completions: Set<string>;
+  /** The completion tokens an upload took: each names one upload's files. */
+  spent: Set<string>;
   /**
    * Each script upload as it landed: the script, and the version each of
    * the account's scripts was live on at that moment.

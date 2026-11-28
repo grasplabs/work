@@ -1099,6 +1099,7 @@ export const fakeCloudflareApi = (token: string) => {
       assets: new Map(),
       sessions: new Map(),
       completions: new Set(),
+      spent: new Set(),
       scriptUploads: [],
     };
     accounts.set(account.id, account);
