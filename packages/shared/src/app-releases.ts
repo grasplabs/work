@@ -217,6 +217,8 @@ export const versionErrors = defineErrorFamily({
   "version.store_unbound":
     "This version declares tables, but no store is bound for it.",
   "version.seal_busy": "Sealing this version took too long. Publish it again.",
+  "version.seal_slow":
+    "This draft's server code is still being prepared. Try again in a moment.",
   "version.seal_conflict":
     "This version was already sealed with a different manifest.",
   "version.not_sealed": "This version hasn't been sealed.",

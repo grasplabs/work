@@ -783,6 +783,24 @@ describe("the session client and arguments JSON can't hold", () => {
   });
 });
 
+describe("the session client and a draft's seal under way", () => {
+  it("reads a query again until the draft's server code is sealed", async () => {
+    const { client, calls } = network(async (call) => {
+      await Promise.resolve();
+      return call === 1
+        ? failedWith("version.seal_slow")
+        : answered({ title: "Sealed" });
+    });
+
+    await expect(
+      client.query(api.notes.get, { id: noteId })
+    ).resolves.toStrictEqual({
+      title: "Sealed",
+    });
+    expect(calls()).toBe(2);
+  });
+});
+
 describe("the session client and an outcome it can't tell", () => {
   afterEach(() => {
     vi.useRealTimers();

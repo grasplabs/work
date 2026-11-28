@@ -138,11 +138,14 @@ const refreshAfterMs = 7 * 24 * 60 * 60 * 1000;
 /**
  * The text kept under `key`, if core kept it: undefined for a miss, for
  * an entry whose MAC doesn't hold (logged), and when R2 can't be read. An
- * entry read past {@link refreshAfterMs} is written again, its age reset.
+ * entry read past {@link refreshAfterMs} is written again, its age reset,
+ * unless `refresh` is false: for an entry that only its maker may write
+ * (a sealed draft, which its App's removal must leave none of).
  */
 export const readCache = async (
   env: CacheEnv,
-  key: string
+  key: string,
+  { refresh = true }: { refresh?: boolean } = {}
 ): Promise<string | undefined> => {
   let object: R2ObjectBody | null;
   let text: string;
@@ -161,7 +164,7 @@ export const readCache = async (
     log.error("build.cache_untrusted", { key });
     return undefined;
   }
-  if (Date.now() - object.uploaded.getTime() > refreshAfterMs) {
+  if (refresh && Date.now() - object.uploaded.getTime() > refreshAfterMs) {
     await writeCache(env, key, text);
   }
   return text;

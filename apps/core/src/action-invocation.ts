@@ -768,7 +768,7 @@ export class ActionInvocation extends DurableObject<Env> {
             : await invokeDraftAction(
                 this.env,
                 spec.by,
-                await draftRunOf(this.env, spec.by, spec.app),
+                await draftRunOf(this.env, spec.by, spec.app, deadline),
                 spec.call,
                 runs
               );

@@ -4,6 +4,7 @@ import type { ChatWork } from "@grasp-os/shared/chat";
 import { draftErrors } from "@grasp-os/shared/drafts";
 import type { Draft, DraftCheckpoint, Version } from "@grasp-os/shared/drafts";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { ChatId, ChatRef, WorkspaceId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -43,7 +44,7 @@ import {
   workflowResourceVersions,
 } from "./db/core/schema.ts";
 import { notNullFailed } from "./db/d1.ts";
-import { draftWatch } from "./durable-objects.ts";
+import { appPreview, draftWatch } from "./durable-objects.ts";
 
 // The draft of an App or a workflow (GRA-1665): one per subject, in core's
 // database, shared by everyone who builds it and by their chats' agents
@@ -449,11 +450,28 @@ const tellRevised = async (
 };
 
 /**
+ * Has App `id`'s preview seal its draft as it is now (app-preview.ts
+ * `prepare`), so whoever opens or calls it next finds it sealed: after
+ * any change of what decides its seal, its draft or its approved packages
+ * (packages/requests.ts). The seal is the object's work, which goes on
+ * after this request ends. Never thrown: a seal that isn't there is made
+ * by the next to need it.
+ */
+export const prepareSeal = async (env: Env, id: string): Promise<void> => {
+  try {
+    await appPreview(env, appIdSchema.parse(id)).prepare();
+  } catch (error) {
+    log.warn("draft.seal_unprepared", { app: id, ...errorFields(error) });
+  }
+};
+
+/**
  * Tells everyone who follows `subject`'s draft that it moved to
  * `revision` (draft-watch.ts), whoever moved it; read first when the
  * caller can't know it (a publish or roll back, whose batch may have
- * landed over a write since). Never waited for nor thrown for: the write
- * landed, and a follower reads the draft afresh at its next call anyway.
+ * landed over a write since). An App's draft is sealed for its preview
+ * too (`prepareSeal`). Never waited for nor thrown for: the write landed,
+ * and a follower reads the draft afresh at its next call anyway.
  */
 export const draftRevised = (
   env: Env,
@@ -461,6 +479,9 @@ export const draftRevised = (
   revision?: number
 ): void => {
   waitUntil(tellRevised(env, subject, revision));
+  if (subject.kind === "app") {
+    waitUntil(prepareSeal(env, subject.id));
+  }
 };
 
 /**

@@ -742,7 +742,7 @@ export const sealedSurfaces = async (
   }
 };
 
-/** A draft release as its keeper stores it (draft-runs.ts). */
+/** A draft release as its sealed entry keeps it (draft-seals.ts). */
 export interface StoredDraft {
   /** Its manifest's canonical text. */
   readonly manifest: string;
@@ -756,8 +756,8 @@ export interface StoredDraft {
  * shape and naming `key`, binding no store; then every artifact `read`
  * gives back against its hash and size, and the contracts against the
  * manifest. `version.manifest_corrupt` or `version.artifact_corrupt` for
- * one that no longer matches what was sealed. Its keeper loads it once
- * for each preview it starts, and keeps what loaded while that runs.
+ * one that no longer matches what was sealed. Every read of a sealed
+ * draft's entry loads it so (draft-seals.ts), its MAC held or not.
  */
 export const loadDraftRelease = async (
   key: { app: AppId; version: number },
@@ -1223,7 +1223,7 @@ export interface SealedDraft extends StoredDraft {
  * Seals `files` and `definition`, the draft of App `key.app`, as the
  * release of the version it would become (`key.version`), exactly as
  * `sealRelease` seals a version (see the header), but bound to no store
- * and stored nowhere: its keeper (draft-runs.ts) keeps what this answers,
+ * and stored nowhere: its keeper (draft-seals.ts) keeps what this answers,
  * and loads it back through `loadDraftRelease`. Stored nowhere a
  * version's release is, so nothing that runs a version (`loadRelease`)
  * ever finds it, even when it names a committed one (a read-only

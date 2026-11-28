@@ -41,6 +41,8 @@ export const nothingRanCodes: ReadonlySet<string> = new Set([
   "mutation.concurrent_change",
   "query.concurrent_change",
   "submission.superseded",
+  // A draft's server code still being sealed: nothing reached it.
+  "version.seal_slow",
 ]);
 
 /**

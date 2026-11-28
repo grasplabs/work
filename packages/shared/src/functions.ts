@@ -237,6 +237,8 @@ const retryableCodes: ReadonlySet<string> = new Set([
   "function.sandbox_unavailable",
   // Nothing was published; the build runs on, cached for the next try.
   "workflow.build_slow",
+  // Nothing ran; the draft's seal runs on, kept for the next try.
+  "version.seal_slow",
 ]);
 
 /** The category of platform error `code`: its own, or by its family. */
