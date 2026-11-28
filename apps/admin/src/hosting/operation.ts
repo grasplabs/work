@@ -98,6 +98,7 @@ import {
   stageOfNamespace,
 } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
+import type { ProvisionProbe } from "@grasp-os/shared/provision-probe";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { canMove } from "@grasp-os/shared/release-apply";
 import { deriveRouterSecret } from "@grasp-os/shared/router";
@@ -136,7 +137,7 @@ import { errorCode } from "../deploy/errors.ts";
 import { databaseMigrations, migrateDatabases } from "../deploy/migrations.ts";
 import { modelsBucketOf, syncModelFiles } from "../deploy/model-files.ts";
 import type { ModelFilesSynced } from "../deploy/model-files.ts";
-import { importedManifest } from "../deploy/release.ts";
+import { importedAfter, importedManifest } from "../deploy/release.ts";
 import {
   assetsReady,
   registerHostname,
@@ -2599,6 +2600,29 @@ const freshConnectVersion = async (
   return read.settled ? read.version : null;
 };
 
+/**
+ * The releases imported after `manifest`, when core's probe `answer`
+ * names a migration `manifest` doesn't list: what may show a database
+ * ahead of it (`installMismatch`). None, unread, when it names none.
+ */
+const laterOf = async (
+  db: AdminDatabase,
+  manifest: ReleaseManifest,
+  answer: ProvisionProbe
+): Promise<ReleaseManifest[]> => {
+  const listed = new Set(
+    Object.values(manifest.workers).flatMap((worker) =>
+      worker.d1Databases.flatMap(({ migrations }) =>
+        migrations.map(({ name }) => name)
+      )
+    )
+  );
+  const unlisted = Object.values(answer.schema ?? {}).some(
+    (name) => name !== null && !listed.has(name)
+  );
+  return unlisted ? await importedAfter(db, manifest.releaseId) : [];
+};
+
 /** How long core's signed probe may take, its body included. */
 const probeTimeoutMs = 10_000;
 
@@ -2698,6 +2722,7 @@ const probe = async (
     clientId: held.clientId,
     version,
     release: loaded.manifest,
+    later: await laterOf(db, loaded.manifest, answer),
     bindings: privateBindings(
       workerOf(loaded.manifest, "core"),
       workerOf(loaded.manifest, "connect")

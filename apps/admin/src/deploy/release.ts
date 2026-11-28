@@ -13,7 +13,7 @@ import {
   sha256OfBytes,
 } from "@grasp-os/shared/release";
 import type { Bytes, ReleaseManifest } from "@grasp-os/shared/release";
-import { eq } from "drizzle-orm";
+import { asc, eq, gt, sql } from "drizzle-orm";
 
 import type { AdminDatabase } from "../db/act.ts";
 import { releases } from "../db/schema.ts";
@@ -32,6 +32,29 @@ export const importedManifest = async (
   return row === undefined
     ? null
     : releaseManifestSchema.parse(JSON.parse(row.manifest));
+};
+
+/**
+ * The manifests of the releases imported that were built after release
+ * `id`, oldest first; none when it isn't imported.
+ */
+export const importedAfter = async (
+  db: AdminDatabase,
+  id: string
+): Promise<ReleaseManifest[]> => {
+  const rows = await db
+    .select({ manifest: releases.manifest })
+    .from(releases)
+    .where(
+      gt(
+        releases.builtAt,
+        sql`(SELECT ${releases.builtAt} FROM ${releases} WHERE ${releases.id} = ${id})`
+      )
+    )
+    .orderBy(asc(releases.builtAt));
+  return rows.map(({ manifest }) =>
+    releaseManifestSchema.parse(JSON.parse(manifest))
+  );
 };
 
 /** A blob the manifest names by its SHA-256: a module or a migration. */

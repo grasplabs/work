@@ -184,8 +184,9 @@ const isArmed = (clock: ClockRegistration | null): boolean =>
 /**
  * Checks core's `answer` against what the admin deployed: client
  * `clientId` at version `version`, running release `release` on its
- * schema (`installMismatch`: what a core from before it doesn't say
- * isn't held against it), each of `bindings` answering, both clocks
+ * schema, or one the releases imported after it (`later`) took it ahead
+ * to (`installMismatch`: what a core from before it doesn't say isn't
+ * held against it), each of `bindings` answering, both clocks
  * armed with tasks to run and, where the company has to start closed
  * (`startsClosed`), a core that says it does: one from a release before
  * that starts open to all its people. Null when it checks out.
@@ -196,12 +197,14 @@ export const probeFault = (
     clientId,
     version,
     release,
+    later,
     bindings,
     startsClosed,
   }: {
     clientId: string;
     version: string;
     release: ReleaseManifest;
+    later: readonly ReleaseManifest[];
     bindings: readonly string[];
     startsClosed: boolean;
   }
@@ -212,7 +215,7 @@ export const probeFault = (
       message: `Core answered as ${answer.clientId ?? "no client"} at ${answer.version ?? "no version"}, not ${clientId} at ${version}`,
     };
   }
-  const installed = installMismatch(release, "core", answer);
+  const installed = installMismatch(release, "core", answer, later);
   if (installed?.reason === "release") {
     return {
       code: "probe_release_mismatch",
@@ -222,7 +225,7 @@ export const probeFault = (
   if (installed?.reason === "schema") {
     return {
       code: "probe_schema_mismatch",
-      message: `Core's ${installed.binding} is behind ${release.releaseId}'s last migration`,
+      message: `Core's ${installed.binding} isn't at ${release.releaseId}'s last migration, nor one a later release takes it to`,
     };
   }
   const unanswered = bindings.filter((name) => answer.bindings[name] !== true);

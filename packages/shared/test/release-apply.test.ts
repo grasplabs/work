@@ -140,39 +140,65 @@ const migrated = (migrations: readonly string[]): ReleaseManifest => {
 
 describe("what a deployment answers it runs", () => {
   const to = migrated(["0000_init.sql", "0001_more.sql"]);
+  const later = migrated(["0000_init.sql", "0001_more.sql", "0002_later.sql"]);
 
-  it("takes the release on its last migration, a database ahead of it, and a core that says nothing", () => {
+  it("takes the release on its last migration, a database a later release took ahead of it, and a core that says nothing", () => {
     expect({
-      exact: installMismatch(to, "core", {
-        release: to.releaseId,
-        schema: { DB: "0001_more.sql" },
-      }),
+      exact: installMismatch(
+        to,
+        "core",
+        { release: to.releaseId, schema: { DB: "0001_more.sql" } },
+        []
+      ),
       // A later release's migration: a release that goes back runs on it.
-      ahead: installMismatch(to, "core", {
-        release: to.releaseId,
-        schema: { DB: "0002_later.sql" },
-      }),
+      ahead: installMismatch(
+        to,
+        "core",
+        { release: to.releaseId, schema: { DB: "0002_later.sql" } },
+        [later]
+      ),
       // A core from before the probe said either.
-      silent: installMismatch(to, "core", {}),
+      silent: installMismatch(to, "core", {}, []),
       // A release that migrates nothing holds no database to a name.
-      none: installMismatch(migrated([]), "core", { schema: { DB: null } }),
+      none: installMismatch(migrated([]), "core", { schema: { DB: null } }, []),
     }).toStrictEqual({ exact: null, ahead: null, silent: null, none: null });
   });
 
-  it("refuses another release or none, and a database behind the release's last migration", () => {
+  it("refuses another release or none, a database behind the release's last migration, and one at a migration no later release takes it to", () => {
+    const elsewhere = migrated(["0000_other.sql", "0001_unrelated.sql"]);
+    const schemaOff = { reason: "schema", binding: "DB" };
     expect({
-      other: installMismatch(to, "core", { release: "26.11.0" }),
-      unnamed: installMismatch(to, "core", { release: null }),
-      behind: installMismatch(to, "core", { schema: { DB: "0000_init.sql" } }),
-      empty: installMismatch(to, "core", { schema: { DB: null } }),
+      other: installMismatch(to, "core", { release: "26.11.0" }, []),
+      unnamed: installMismatch(to, "core", { release: null }, []),
+      behind: installMismatch(to, "core", { schema: { DB: "0000_init.sql" } }, [
+        later,
+      ]),
+      empty: installMismatch(to, "core", { schema: { DB: null } }, [later]),
       // It answers for its databases, but not this one.
-      unanswered: installMismatch(to, "core", { schema: {} }),
+      unanswered: installMismatch(to, "core", { schema: {} }, [later]),
+      // Ahead by no release the admin knows: another database.
+      unknown: installMismatch(
+        to,
+        "core",
+        { schema: { DB: "0002_later.sql" } },
+        []
+      ),
+      // Listed by a later release, but not after this one's last: a
+      // database of another lineage.
+      unrelated: installMismatch(
+        to,
+        "core",
+        { schema: { DB: "0001_unrelated.sql" } },
+        [elsewhere]
+      ),
     }).toStrictEqual({
       other: { reason: "release" },
       unnamed: { reason: "release" },
-      behind: { reason: "schema", binding: "DB" },
-      empty: { reason: "schema", binding: "DB" },
-      unanswered: { reason: "schema", binding: "DB" },
+      behind: schemaOff,
+      empty: schemaOff,
+      unanswered: schemaOff,
+      unknown: schemaOff,
+      unrelated: schemaOff,
     });
   });
 });
