@@ -1,3 +1,4 @@
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -5,6 +6,7 @@ import { terminateResourceRun } from "../src/workflows/resource-runs.ts";
 import { sweepRunDetails } from "../src/workflows/retention.ts";
 import { withCpuKills } from "./cpu-kills.ts";
 import { endLiveResourceRuns } from "./json-workflow-apps.ts";
+import { runObject } from "./runs.ts";
 import { moduleOf } from "./sealed-run-harness.ts";
 import { outcome } from "./sign-in.ts";
 import {
@@ -137,6 +139,76 @@ describe(
         ran: 3,
         settled: true,
       });
+    });
+
+    it("fails a step once its failed attempts reach the attempts a step may have, before the engine's retries run out", async () => {
+      const by = await builder();
+      const workflow = await published(by, greetThenCall);
+      const result = await withQuotas(
+        { workflowAttemptsPerStep: 2 },
+        async () =>
+          await withCpuKills(
+            "greet:enter",
+            () => true,
+            async () => {
+              const { runId } = await start(by, workflow.id);
+              return { run: await ended(by, workflow.id, runId), runId };
+            },
+            "end"
+          )
+      );
+      const receipts = await receiptsOf(result.runId);
+      expect({
+        status: result.run.status,
+        code: result.run.error?.code,
+        ran: new Set(receipts.map(({ attempt }) => attempt)).size,
+      }).toStrictEqual({
+        status: "failed",
+        code: "workflow.too_many_attempts",
+        ran: 2,
+      });
+    });
+
+    it("tries a step again at once after its attempt was cut off, which counts against none of the attempts a step may have", async () => {
+      const by = await builder();
+      const hanging = await published(by, definitionOf([deciding("finish")]));
+      await forgedModule(hanging.id, hangingModule);
+      const result = await withQuotas(
+        { workflowAttemptsPerStep: 1 },
+        async () => {
+          const { runId } = await start(by, hanging.id);
+          await vi.waitFor(
+            async () => {
+              await expect(heldBy(runId)).resolves.toBeDefined();
+            },
+            { timeout: 30_000, interval: 100 }
+          );
+          // Cut off as the engine's tests cut an attempt off: another
+          // activation takes the run over, as after a restart, while the
+          // first attempt is still out.
+          const takeover = runInDurableObject(
+            runObject(runId ?? ""),
+            async (run) => {
+              await run.alarm();
+            }
+          );
+          const ran = await vi.waitFor(
+            async () => {
+              const receipts = await receiptsOf(runId);
+              expect(receipts).toHaveLength(2);
+              return receipts.map(({ attempt }) => attempt);
+            },
+            { timeout: 30_000, interval: 100 }
+          );
+          await terminateResourceRun(env, by, hanging.id, runId);
+          const run = await ended(by, hanging.id, runId);
+          await takeover;
+          return { ran, status: run.status };
+        }
+      );
+      // The second admitted, though a step may have one attempt: the
+      // first failed nothing.
+      expect(result).toStrictEqual({ ran: [1, 2], status: "cancelled" });
     });
 
     it("refuses every attempt of a lineage past its age, evaluating none of its expressions", async () => {

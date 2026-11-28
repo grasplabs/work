@@ -211,7 +211,12 @@ const activationEngine = (
         const key = `key:${name}`;
         leases.add(`${attempt}:${key}`);
         try {
-          const value = await fn({ attempt, idempotencyKey: key });
+          // The attempts before it were evicted: cut off, none failed.
+          const value = await fn({
+            attempt,
+            failedAttempts: 0,
+            idempotencyKey: key,
+          });
           if (name === evictedAfter) {
             throw eviction();
           }

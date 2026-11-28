@@ -456,6 +456,15 @@ describe("an attempt whose activation was taken over", () => {
     });
     // Their late answers wrote nothing over how they ended.
     expect(journal.attempts).toStrictEqual(before.attempts);
+    // Each attempt told the failures before it: the timeout, not the
+    // cut-off.
+    expect(
+      taken.map(({ attempt, failedAttempts }) => [attempt, failedAttempts])
+    ).toStrictEqual([
+      [1, 0],
+      [2, 1],
+      [3, 1],
+    ]);
   });
 
   it("counts as timed out when its timeout ran out after it was taken over, and fails a step with no retry left", async () => {

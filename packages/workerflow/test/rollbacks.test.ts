@@ -99,6 +99,32 @@ describe("a definition that throws", () => {
     expect(only(id, "undo-ship").undoing).toMatchObject({ output: undefined });
   });
 
+  it("gives a rollback its step's context as the attempt that succeeded had it, the failure before it counted", async () => {
+    const id = newId();
+    await workflow("compensated").create({
+      id,
+      params: { fail: true, flakyReserve: true },
+    });
+    const status = await over(id);
+
+    expect(status).toMatchObject({ rollback: { status: "complete" } });
+    expect({
+      reserve: effectsOf(id, "reserve").map(({ attempt, failedAttempts }) => [
+        attempt,
+        failedAttempts,
+      ]),
+      undone: only(id, "undo-reserve").undoing?.failedAttempts,
+      chargeUndone: only(id, "undo-charge").undoing?.failedAttempts,
+    }).toStrictEqual({
+      reserve: [
+        [1, 0],
+        [2, 1],
+      ],
+      undone: 1,
+      chargeUndone: 0,
+    });
+  });
+
   it("ends its rolling back at the first rollback that fails, which its status shows apart from its error", async () => {
     const id = newId();
     await workflow("compensated").create({

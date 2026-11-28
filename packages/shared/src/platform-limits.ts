@@ -68,7 +68,10 @@ export const platformLimits = {
   // Workflows.
   /** Logical steps one run takes. */
   workflowSteps: 1000,
-  /** Attempts at one step, its first included: a hard ceiling. */
+  /**
+   * Failed attempts at one step: a hard ceiling. An attempt cut off by a
+   * restart isn't one; the engine bounds those itself (10 a step).
+   */
   workflowAttemptsPerStep: 5,
   /** Branches of one run running at once. */
   workflowBranches: 8,

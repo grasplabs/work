@@ -817,6 +817,7 @@ const discrepancyChecks: Record<DiscrepancyName, () => Promise<void>> = {
     expect(field(engine.output, "keys")).toStrictEqual([
       "attempt",
       "config",
+      "failedAttempts",
       "idempotencyKey",
       "step",
     ]);

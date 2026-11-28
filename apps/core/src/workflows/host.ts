@@ -143,6 +143,12 @@ export interface StepAttempt {
   leaseId: string;
   /** Its number, from 1, as the engine counts the step's attempts. */
   number: number;
+  /**
+   * Its step's attempts before it that failed, as the engine counts them
+   * (`ctx.failedAttempts`): what its retries and the quota's attempts per
+   * step count. One cut off (its activation died) isn't counted.
+   */
+  failedAttempts: number;
   /** Its step's place among the run's steps (`countedStep`), if counted. */
   ordinal?: number;
   /** Its step's idempotency key in the engine, which names its lease. */
@@ -752,13 +758,16 @@ const defaultRetryLimit = maxStepRetries;
  *
  * Its retries are always given too: what the step declared, at most
  * `maxStepRetries` (`doOptionsSchema`), or `defaultRetryLimit`. The
- * ceiling on its attempts (spec 18.1's five, all counted, or the
- * operator's lower one) is enforced as each attempt is admitted
- * (quotas.ts, `admitAttempt`), which refuses an attempt past it, and
- * `isLastAttempt` takes it into account. A step whose side effect is held
- * runs again in steps of core's own (`#waitBefore`), each with these
- * retries afresh: the ceiling is per round, and every round is still held
- * to its lineage's active time.
+ * ceiling on its failed attempts (spec 18.1's five, or the operator's
+ * lower one) is enforced as each attempt is admitted (quotas.ts,
+ * `admitAttempt`), which refuses an attempt past it, and `#admit` takes
+ * it into account for `StepAttempt.last`. An attempt cut off (its
+ * activation died) counts against neither, as it spends none of the
+ * engine's retries: the engine fails the step at its `maxCutOffs`th
+ * cut-off (10), or at its first when its retry limit is 0. A step whose
+ * side effect is held runs again in steps of core's own (`#waitBefore`),
+ * each with these retries afresh: the ceiling is per round, and every
+ * round is still held to its lineage's active time.
  */
 const stepConfig = (
   { retries: declared, timeout }: z.output<typeof doOptionsSchema>,
@@ -1024,6 +1033,8 @@ const rateLimitedWaitMs = 15_000;
 /** What core reads of the context the engine gives a step's attempt. */
 const attemptContextSchema = z.object({
   attempt: z.int().positive(),
+  /** Its step's attempts before it that failed: cut-offs aren't counted. */
+  failedAttempts: z.int().min(0),
   idempotencyKey: z.string().min(1),
   /** Its step's place among the run's steps, as `countedStep` counts them. */
   stepOrdinal: z.int().positive().optional(),
@@ -1035,23 +1046,19 @@ const attemptContextSchema = z.object({
 });
 
 /**
- * Whether an attempt has no retry after it: its number as the engine's
- * `context` says, else `tries`, the attempts this execution made (fewer,
- * if an earlier execution made some: never the last too soon), against
- * its retries as the engine says, else `configured`, else the default.
- * The attempts the quota limits admit are its admission's to say
- * (`RunHost.#admit`).
+ * Whether an attempt has no retry after it, should it fail: the step's
+ * failures before it, as the engine's context says, have used its
+ * retries, as the engine says them, else `configured`. Counted by
+ * failures, as the engine counts retries: an attempt cut off (its
+ * activation died) spends none, so it never makes a later one the last
+ * too soon. The attempts the quota limits admit are its admission's to
+ * say (`RunHost.#admit`).
  */
-const isLastAttempt = (
-  context: unknown,
-  tries: number,
-  configured: number | undefined
-): boolean => {
-  const told = attemptContextSchema.safeParse(context).data;
-  const retries =
-    told?.config?.retries?.limit ?? configured ?? defaultRetryLimit;
-  return (told?.attempt ?? tries) > retries;
-};
+export const isLastAttempt = (
+  told: z.output<typeof attemptContextSchema>,
+  configured: number
+): boolean =>
+  told.failedAttempts >= (told.config?.retries?.limit ?? configured);
 
 /**
  * The attempt's own timeout, as the engine ends an attempt that ran out of
@@ -2045,13 +2052,15 @@ export class RunHost extends RpcTarget {
         key: attempt.key,
         ...(waitedMs === undefined ? {} : { waitedMs }),
         number: attempt.number,
+        failedAttempts: attempt.failedAttempts,
         ...(attempt.ordinal === undefined ? {} : { ordinal: attempt.ordinal }),
         generation: attempt.generation,
         deadline: attempt.deadline,
         ...(attempt.collecting ? { collecting: true as const } : {}),
       });
-      // No attempt after it is admitted: it is the step's last.
-      if (attempt.number >= admission.attemptsAllowed) {
+      // No attempt after it is admitted should it fail: it is the step's
+      // last. One cut off is tried again whatever this says.
+      if (attempt.failedAttempts + 1 >= admission.attemptsAllowed) {
         attempt.last = true;
       }
       return admission;
@@ -2200,9 +2209,6 @@ export class RunHost extends RpcTarget {
       input = inputShape(parsed.input);
       const config = stepConfig(parsed, this.#kind.limitsOf?.(step));
       await this.#kind.requirePerson();
-      // The attempts of this `do` this execution made, for an engine that
-      // doesn't say which attempt it runs.
-      let tries = 0;
       // The step's wait for load since its last admission (`LoadWait`).
       let load = loadWaitStart;
       // The waits the step's calls named, over its rounds and its catch's
@@ -2214,7 +2220,6 @@ export class RunHost extends RpcTarget {
       let collecting = false;
       const attemptStep = async (context?: unknown): Promise<unknown> => {
         attempted = true;
-        tries += 1;
         // Only the last attempt's error counts: an earlier one was retried.
         failed = undefined;
         // Who this attempt is, as the engine claimed it: its number, its
@@ -2223,7 +2228,10 @@ export class RunHost extends RpcTarget {
         const attempt = this.#attemptOf(
           step,
           context,
-          isLastAttempt(context, tries, config.retries.limit),
+          isLastAttempt(
+            attemptContextSchema.parse(context),
+            config.retries.limit
+          ),
           collecting
         );
         // Admitted before its code runs, or failed with the refusal: a
@@ -2368,7 +2376,6 @@ export class RunHost extends RpcTarget {
       // the step again under the same key, in a step of its own each time,
       // its names `base`'s, so every execution replays the same steps.
       const rounds = async (base: string): Promise<unknown> => {
-        tries = 0;
         load = loadWaitStart;
         failed = undefined;
         collecting = false;
@@ -2431,7 +2438,6 @@ export class RunHost extends RpcTarget {
               );
               throw toStepError(waitedOut);
             }
-            tries = 0;
             // oxlint-disable-next-line no-await-in-loop -- one round at a time
             value = await this.#step.do(`${prefix}:run`, config, attemptStep);
             continue;
@@ -2448,7 +2454,6 @@ export class RunHost extends RpcTarget {
             },
             unknown
           );
-          tries = 0;
           collecting = marker.kind === "held";
           // oxlint-disable-next-line no-await-in-loop -- one round at a time
           value = await this.#step.do(`${prefix}:run`, config, attemptStep);
@@ -2543,6 +2548,7 @@ export class RunHost extends RpcTarget {
     return {
       leaseId: crypto.randomUUID(),
       number: told.attempt,
+      failedAttempts: told.failedAttempts,
       ...(told.stepOrdinal === undefined ? {} : { ordinal: told.stepOrdinal }),
       key: told.idempotencyKey,
       generation: lease.generation,

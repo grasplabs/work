@@ -49,9 +49,9 @@ export class ReferenceFlow extends WorkflowEntrypoint<
     }
     // SAFETY: Workerflow's step is a Cloudflare step (the step-context
     // family's type check), so this narrows it. What Workerflow's adds, the
-    // reference lacks: a context's idempotencyKey, which no fixture reads,
-    // and callbacks that answer synchronously or with any value, which the
-    // fixtures don't rely on.
+    // reference lacks: a context's idempotencyKey and failedAttempts, which
+    // no fixture reads, and callbacks that answer synchronously or with any
+    // value, which the fixtures don't rely on.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion
     const shared = step as WorkflowStep;
     // The reference's event as it is, its payload the fixture's params.

@@ -190,9 +190,16 @@ describe("a step that fails", () => {
           caught: { name: "FlakyError", message: `attempt ${last} failed` },
         },
       });
+      // Each attempt is told the failures before it, the cut-off not one.
       expect(
-        effectsOf(id, "flaky").map((effect) => effect.attempt)
-      ).toStrictEqual(Array.from({ length: last }, (_, index) => index + 1));
+        effectsOf(id, "flaky").map(({ attempt, failedAttempts }) => [
+          attempt,
+          failedAttempts,
+        ])
+      ).toStrictEqual([
+        [1, 0],
+        ...Array.from({ length: limit + 1 }, (_, index) => [index + 2, index]),
+      ]);
       expect(journal.attempts.map((attempt) => attempt.ended)).toStrictEqual([
         "superseded",
         ...Array.from({ length: limit + 1 }, () => "failed"),
@@ -596,11 +603,13 @@ describe("an attempt that runs past its timeout", () => {
       status: "complete",
       output: hung[1]?.receipt,
     });
-    // A new attempt number, under the step's one key.
+    // A new attempt number, under the step's one key, told the timeout
+    // before it as a failure.
     expect({
       attempts: hung.map((effect) => effect.attempt),
+      failedAttempts: hung.map((effect) => effect.failedAttempts),
       keys: new Set(hung.map((effect) => effect.key)).size,
-    }).toStrictEqual({ attempts: [1, 2], keys: 1 });
+    }).toStrictEqual({ attempts: [1, 2], failedAttempts: [0, 1], keys: 1 });
     await expect(journalOf("hung", id)).resolves.toMatchObject({
       steps: [{ name: "hung", state: "succeeded", attempt: 2 }],
       attempts: [

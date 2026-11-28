@@ -281,6 +281,8 @@ interface Claim {
   key: string;
   /** When the attempt's timeout ends it. */
   deadline: number;
+  /** The step's attempts before it that failed or timed out. */
+  failedAttempts: number;
 }
 
 /** A failed attempt whose retry waits for the step's delay function. */
@@ -629,6 +631,7 @@ const contextOf = (
 ): AnyWorkflowStepContext => ({
   step: { name: identity.name, count: identity.occurrence },
   attempt: claim.attempt,
+  failedAttempts: claim.failedAttempts,
   idempotencyKey: claim.key,
   // A copy each time: what one callback does to it, the next never sees.
   config: structuredClone(config.context),
@@ -1160,8 +1163,7 @@ export class Activation {
     config: StepConfig,
     failure: AttemptFailure
   ): Landing {
-    const failures =
-      readAttemptEnds(sql, claim.ordinal, claim.attempt).failed + 1;
+    const failures = claim.failedAttempts + 1;
     const retrying = failure.retryable && failures <= config.limit;
     let retryAt: number | null = null;
     let landing: Landing = { failed: failure.error };
@@ -1293,6 +1295,7 @@ export class Activation {
         attempt,
         key,
         deadline: now + config.timeoutMs,
+        failedAttempts: readAttemptEnds(sql, ordinal, attempt).failed,
       };
       sql.exec(
         "INSERT INTO attempts (ordinal, attempt, generation, started_at, deadline) VALUES (?, ?, ?, ?, ?)",
@@ -1381,7 +1384,8 @@ export class Activation {
     }
     const timedOut =
       latest.ended_at !== null && latest.ended_at >= latest.deadline;
-    const cutOffs = readAttemptEnds(sql, step.ordinal, step.attempt).cutOff + 1;
+    const before = readAttemptEnds(sql, step.ordinal, step.attempt);
+    const cutOffs = before.cutOff + 1;
     const noRetries = config.limit === 0;
     if (!timedOut && cutOffs < (noRetries ? 1 : maxCutOffs)) {
       return undefined;
@@ -1391,6 +1395,7 @@ export class Activation {
       attempt: step.attempt,
       key: step.idempotency_key,
       deadline: latest.deadline,
+      failedAttempts: before.failed,
     };
     const landing = this.#endFailedIn(
       sql,
@@ -2586,6 +2591,12 @@ export class Activation {
       );
     }
     if (row.has_rollback === 1 && call.rollback !== undefined) {
+      const ends = this.#write(() =>
+        readAttemptEnds(this.#storage.sql, row.ordinal, row.attempt)
+      );
+      if (ends === failed) {
+        return await this.#never();
+      }
       this.#registry.set(row.ordinal, {
         work: call.rollback.work,
         config: call.rollback.config,
@@ -2596,6 +2607,7 @@ export class Activation {
             attempt: row.attempt,
             key: row.idempotency_key,
             deadline: 0,
+            failedAttempts: ends.failed,
           },
           call.config
         ),

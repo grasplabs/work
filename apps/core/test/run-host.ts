@@ -17,7 +17,7 @@ export const engineOfTest = (): {
       const key = `key:${name}`;
       leases.add(key);
       try {
-        return await fn({ attempt: 1, idempotencyKey: key });
+        return await fn({ attempt: 1, failedAttempts: 0, idempotencyKey: key });
       } finally {
         leases.delete(key);
       }
