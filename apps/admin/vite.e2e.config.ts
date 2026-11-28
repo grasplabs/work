@@ -35,31 +35,35 @@ export default defineConfig(({ command }) => ({
     stylex(damskoStyles(command)),
     ...adminPlugins({
       persistState: { path: state },
-      config: (worker) => ({
-        entrypoint: "./test/e2e-worker.ts",
-        env: {
-          ...worker.env,
-          // Who every request comes from: the dev bypass (src/access.ts).
-          DEV_ACCESS_EMAIL: bindings.text("staff@grasp.test"),
-          // Where provisioned clients are served (src/deploy/context.ts).
-          CLIENT_DOMAIN: bindings.text("grasp.test"),
-          // Grasp's OAuth apps, which clients' sign-in names (src/deploy/core-config.ts).
-          ENTRA_CLIENT_ID: bindings.text("test-entra-app"),
-          GOOGLE_CLIENT_ID: bindings.text(
-            "test-google-app.apps.googleusercontent.com"
-          ),
-          // What the dev server runs with beyond wrangler.jsonc: no
-          // jurisdiction for the admin's runs on Workerflow, which workerd
-          // lacks. The e2e config sets its own vars, so it takes them here.
-          ...localEnv,
-          // Where the fake Cloudflare API runs client D1 queries
-          // (test/cloudflare-api-workers.ts), as in vite.test.config.ts.
-          ...Object.fromEntries(
-            Array.from({ length: clientDatabases }, (_, slot) => [
-              `CLIENT_D1_${slot}`,
-              bindings.d1({ name: `client-d1-${slot}` }),
-            ])
-          ),
+      config: (loaded) => ({
+        ...loaded,
+        worker: {
+          ...loaded.worker,
+          entrypoint: "./test/e2e-worker.ts",
+          env: {
+            ...loaded.worker.env,
+            // Who every request comes from: the dev bypass (src/access.ts).
+            DEV_ACCESS_EMAIL: bindings.text("staff@grasp.test"),
+            // Where provisioned clients are served (src/deploy/context.ts).
+            CLIENT_DOMAIN: bindings.text("grasp.test"),
+            // Grasp's OAuth apps, which clients' sign-in names (src/deploy/core-config.ts).
+            ENTRA_CLIENT_ID: bindings.text("test-entra-app"),
+            GOOGLE_CLIENT_ID: bindings.text(
+              "test-google-app.apps.googleusercontent.com"
+            ),
+            // What the dev server runs with beyond wrangler.jsonc: no
+            // jurisdiction for the admin's runs on Workerflow, which workerd
+            // lacks. The e2e config sets its own vars, so it takes them here.
+            ...localEnv,
+            // Where the fake Cloudflare API runs client D1 queries
+            // (test/cloudflare-api-workers.ts), as in vite.test.config.ts.
+            ...Object.fromEntries(
+              Array.from({ length: clientDatabases }, (_, slot) => [
+                `CLIENT_D1_${slot}`,
+                bindings.d1({ name: `client-d1-${slot}` }),
+              ])
+            ),
+          },
         },
       }),
     }),

@@ -1,3 +1,4 @@
+import type { WorkerConfig } from "@cloudflare/vite-plugin";
 import { bindings } from "cf/config";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -10,39 +11,50 @@ import { adminWorker } from "./vite.config.ts";
 // would keep its objects outside the EU. A local run also answers on
 // localhost instead of moving to production's own hostname.
 
-/** The bindings `command`'s Worker runs with, over `env` from cloudflare.config.ts. */
-const envOf = (
+/**
+ * The config `command`'s Worker runs with, from what cloudflare.config.ts
+ * loaded: its name and its `env`.
+ */
+const configOf = (
   command: "serve" | "build",
-  env: Record<string, unknown>
+  env: WorkerConfig["env"]
 ): unknown => {
+  const loaded = { worker: { name: "grasp-admin", env } };
   const { config } = adminWorker(command);
   if (config === undefined) {
-    return env;
+    return loaded;
   }
-  if (typeof config !== "function") {
-    return { ...env, ...config.env };
-  }
-  // SAFETY: the admin's customizer reads `env` alone of the config it's
-  // given (vite.config.ts, `adminWorker`).
+  // SAFETY: the admin's customizer reads the Worker's `env` alone of the
+  // config it's given and carries the rest over (vite.config.ts,
+  // `adminWorker`).
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const shown = { env } as Parameters<typeof config>[0];
-  return config(shown)?.env ?? env;
+  return config(loaded as Parameters<typeof config>[0]);
 };
 
 describe("the admin's Worker as Vite runs it", () => {
-  it("is reached outside any jurisdiction and on localhost locally, keeping the other vars, and never in a build", () => {
+  it("is reached outside any jurisdiction and on localhost locally, keeping the rest of its config, and never in a build", () => {
     const env = { CLIENT_DOMAIN: bindings.text("grasp.test") };
 
     expect({
-      serve: envOf("serve", env),
-      build: envOf("build", env),
+      serve: configOf("serve", env),
+      build: configOf("build", env),
     }).toStrictEqual({
       serve: {
-        CLIENT_DOMAIN: { type: "text", value: "grasp.test" },
-        DURABLE_OBJECT_JURISDICTION: { type: "text", value: "none" },
-        ADMIN_HOST: { type: "text", value: "" },
+        worker: {
+          name: "grasp-admin",
+          env: {
+            CLIENT_DOMAIN: { type: "text", value: "grasp.test" },
+            DURABLE_OBJECT_JURISDICTION: { type: "text", value: "none" },
+            ADMIN_HOST: { type: "text", value: "" },
+          },
+        },
       },
-      build: { CLIENT_DOMAIN: { type: "text", value: "grasp.test" } },
+      build: {
+        worker: {
+          name: "grasp-admin",
+          env: { CLIENT_DOMAIN: { type: "text", value: "grasp.test" } },
+        },
+      },
     });
   });
 });
