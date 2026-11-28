@@ -1,5 +1,6 @@
 import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
 import type { ChatMessage } from "@grasp-os/shared/chat";
+import { chatIdSchema } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
@@ -31,7 +32,7 @@ import { mockIdp } from "./idp.ts";
 import { answeringProvider, fakeProvider } from "./model-provider.ts";
 import type { FakeProvider, ProviderReply } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
-import { signedInApi, unique } from "./sign-in.ts";
+import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // What a chat keeps showing of what it read from the Brain (GRA-1807),
 // through a person's own chats as they ask and open them: the Workspace,
@@ -910,6 +911,54 @@ describe("what a chat shows of what it read from the Brain", () => {
       expect({ away, back }).toStrictEqual({
         away: { results: [withheldResult], held: true },
         back: { results: [withheldResult], held: false },
+      });
+    }
+  );
+
+  // A chat's own object takes the chat over from its Workspace
+  // (workspace.ts `exportMessages`): what an erasure took never goes with
+  // it, opened since or not, and nothing goes while that can't be asked.
+  it(
+    "hands a chat over to its own object with what an erasure took replaced, before anyone opened it, and nothing while the Brain can't be asked",
+    slow,
+    async () => {
+      const depot = word();
+      const marker = word();
+      const chats = await recallingChats(says("Noted."));
+      const source = await added(
+        `Depot ${depot} keeps code ${marker} at the gate`,
+        owner(chats.person.userId)
+      );
+      await chats.ask(`Where does depot ${depot} keep its code?`);
+      await eraseSource(env, {
+        source,
+        readers: owner(chats.person.userId),
+        reason: "deleted",
+      });
+      const ref = {
+        workspaceId: personalWorkspaceId(chats.person.userId),
+        chatId: chatIdSchema.parse(chats.chat.id),
+      };
+      const restore = await setObjectEnv(chats.stub, {
+        BRAIN_STORE: refusingErasedOf(env.BRAIN_STORE),
+      });
+      let away: string;
+      try {
+        away = await outcome(chats.stub.exportMessages(ref, 0, 200));
+      } finally {
+        await restore();
+      }
+      const handed = await chats.stub.exportMessages(ref, 0, 200);
+      const ran = await chats.stub.exportTurnState(ref);
+
+      expect({
+        away,
+        handed: (handed?.page.length ?? 0) > 0,
+        holds: JSON.stringify([handed, ran]).includes(marker),
+      }).toStrictEqual({
+        away: "agent.erasure_unchecked",
+        handed: true,
+        holds: false,
       });
     }
   );

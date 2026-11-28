@@ -62,6 +62,7 @@ import {
 } from "@grasp-os/shared/errors";
 import {
   chatIdSchema,
+  chatRefSchema,
   identifierSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
@@ -143,6 +144,13 @@ import {
   keepAudience,
 } from "./chat-audiences.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
+import type {
+  ExportedFile,
+  ExportedHeldCall,
+  ExportedMessage,
+  ExportedPage,
+  ExportedTurnState,
+} from "./chat-export.ts";
 import type {
   QueuedQuestion,
   TurnCapture,
@@ -938,6 +946,27 @@ const chatQueuedSchema = z.array(
  * is passed over, and answered as the first was (`keepTurnMessages`).
  */
 const copiedKeyPrefix = "copied:";
+
+/** Most messages one page of `exportMessages` hands over. */
+const exportPageMax = 200;
+
+/**
+ * Most bytes of messages one page of `exportMessages` hands over, past
+ * its first: far under the 32 MiB an object's RPC carries. One message is
+ * one row, at most the few MB the object's SQLite keeps in a row, so a
+ * page of one always fits.
+ */
+const exportPageBytes = 4 * 1024 * 1024;
+
+/** Where an export's page goes on after (a message's ID, 0 from the start), and how many it holds. */
+const exportAfterSchema = z.int().nonnegative();
+const exportLimitSchema = z.int().min(1).max(exportPageMax);
+
+/** One of a picture's parts an export hands over (`exportFilePart`). */
+const exportPartSchema = z.int().nonnegative();
+
+/** A time as an export hands it over: milliseconds. */
+const msOf = (date: Date): number => date.getTime();
 
 const copiedSchema = z.object({
   through: z.number(),
@@ -5858,6 +5887,272 @@ export class Workspace extends DurableObject<Env> {
       this.#watchers.delete(id);
     }
     this.#listChanged();
+  }
+
+  // What a chat's own object (chat-session.ts) takes over of the chat as
+  // kept here (chat-export.ts): nothing but what an erasure took changes
+  // (`exportMessages`), so a part asked for again answers the same, and a
+  // take-over cut short goes on. Each takes the chat's reference: the
+  // object's own name is all a chat's object knows of itself before it
+  // holds the chat, which it checks every caller against from then on.
+  // `undefined` for a chat this object isn't, or doesn't hold, or is
+  // deleting, and while its person is being erased.
+
+  /** Chat `ref`, when this object holds it and neither it nor its person is being deleted. */
+  #exported(ref: ChatRef): Chat | undefined {
+    const { workspaceId, chatId } = chatRefSchema.parse(ref);
+    if (
+      workspaceId !== this.ctx.id.name ||
+      this.#erasing ||
+      this.#isDeleting(chatId)
+    ) {
+      return undefined;
+    }
+    return this.#db.select().from(chats).where(eq(chats.id, chatId)).get();
+  }
+
+  /**
+   * A page of chat `ref`'s messages after the one with ID `after` (0 from
+   * the start), oldest first, at most `limit` (1 to
+   * {@link exportPageMax}) and {@link exportPageBytes} past the first,
+   * with what the chat is, the last pi entry its messages here hold
+   * (`copiedKeyPrefix`), and where the next page goes on. What an erasure
+   * took is replaced first, as before the chat is shown (`watch`):
+   * refused (`agent.erasure_unchecked`) while that can't be asked, for the
+   * take-over to ask again later.
+   */
+  async exportMessages(
+    ref: ChatRef,
+    after: unknown,
+    limit: unknown
+  ): Promise<ExportedPage | undefined> {
+    const since = exportAfterSchema.safeParse(after);
+    const most = exportLimitSchema.safeParse(limit);
+    if (!since.success || !most.success) {
+      throw agentErrors.create("agent.invalid_request");
+    }
+    const held = this.#exported(ref);
+    if (held === undefined) {
+      return undefined;
+    }
+    const masked = await this.#replaceErased(this.#scopeOf(held));
+    if (masked.size > 0) {
+      throw agentErrors.create("agent.erasure_unchecked");
+    }
+    // Read again after the await: the chat may have gone meanwhile.
+    const chat = this.#exported(ref);
+    if (chat === undefined) {
+      return undefined;
+    }
+    // One more than asked, to tell whether a page follows.
+    const rows = this.#db
+      .select({
+        id: chatMessages.id,
+        message: chatMessages.message,
+        createdAt: chatMessages.createdAt,
+        thinkingMs: chatMessages.thinkingMs,
+        built: chatMessages.built,
+        agentId: chatMessages.agentId,
+        rating: chatMessages.rating,
+        ratingReason: chatMessages.ratingReason,
+        requestKey: chatMessages.requestKey,
+        bytes: sql<number>`length(CAST(${chatMessages.message} AS BLOB))`,
+      })
+      .from(chatMessages)
+      .where(
+        and(eq(chatMessages.chatId, chat.id), gt(chatMessages.id, since.data))
+      )
+      .orderBy(asc(chatMessages.id))
+      .limit(most.data + 1)
+      .all();
+    const page: ExportedMessage[] = [];
+    let bytes = 0;
+    for (const { bytes: size, ...row } of rows) {
+      if (
+        page.length === most.data ||
+        (page.length > 0 && bytes + size > exportPageBytes)
+      ) {
+        break;
+      }
+      bytes += size;
+      page.push({ ...row, createdAt: msOf(row.createdAt) });
+    }
+    const copied = copiedSchema.safeParse(
+      this.ctx.storage.kv.get(`${copiedKeyPrefix}${chat.id}`)
+    );
+    const { personId, via, agentId, thread, restricted, privateRead } = chat;
+    return {
+      facts: { personId, via, agentId, thread, restricted, privateRead },
+      through: copied.success ? copied.data.through : null,
+      page,
+      next: page.length < rows.length ? (page.at(-1)?.id ?? null) : null,
+    };
+  }
+
+  /**
+   * Chat `ref`'s files, each one's record and how many parts its bytes
+   * are in (`exportFilePart`). Small whatever the chat: at most
+   * `chatFilesMax` records, and no file's bytes.
+   */
+  exportFiles(ref: ChatRef): ExportedFile[] | undefined {
+    const chat = this.#exported(ref);
+    if (chat === undefined) {
+      return undefined;
+    }
+    return this.#db
+      .select({
+        id: chatFiles.id,
+        messageId: chatFiles.messageId,
+        name: chatFiles.name,
+        type: chatFiles.type,
+        createdAt: chatFiles.createdAt,
+        bytes: chatFiles.bytes,
+        pictureParts: sql<number>`(select count(*) from ${chatFileParts} where ${chatFileParts.fileId} = ${chatFiles.id})`,
+      })
+      .from(chatFiles)
+      .where(eq(chatFiles.chatId, chat.id))
+      .orderBy(asc(chatFiles.createdAt), asc(chatFiles.id))
+      .all()
+      .map(({ pictureParts, ...row }) => ({
+        ...row,
+        createdAt: msOf(row.createdAt),
+        parts: isChatPictureType(row.type) ? pictureParts : 1,
+      }));
+  }
+
+  /**
+   * Part `part` of file `fileId` of chat `ref` (`exportFiles`): one of a
+   * picture's 1 MB parts, or a file's text whole (at most 1 MB) as its one.
+   */
+  exportFilePart(
+    ref: ChatRef,
+    fileId: string,
+    part: unknown
+  ): Uint8Array | undefined {
+    const at = exportPartSchema.safeParse(part);
+    if (!at.success) {
+      throw agentErrors.create("agent.invalid_request");
+    }
+    const chat = this.#exported(ref);
+    if (chat === undefined) {
+      return undefined;
+    }
+    const file = this.#db
+      .select({ type: chatFiles.type, text: chatFiles.text })
+      .from(chatFiles)
+      .where(and(eq(chatFiles.chatId, chat.id), eq(chatFiles.id, fileId)))
+      .get();
+    if (file === undefined) {
+      return undefined;
+    }
+    if (!isChatPictureType(file.type)) {
+      return at.data === 0
+        ? new TextEncoder().encode(file.text ?? "")
+        : undefined;
+    }
+    return this.#db
+      .select({ bytes: chatFileParts.bytes })
+      .from(chatFileParts)
+      .where(
+        and(eq(chatFileParts.fileId, fileId), eq(chatFileParts.part, at.data))
+      )
+      .get()?.bytes;
+  }
+
+  /**
+   * The App writes held in chat `ref`, whatever became of them. Small
+   * whatever the chat: a write keeps its request only while it waits, at
+   * most a day, and one decided or lapsed keeps none.
+   */
+  exportHeldAppCalls(ref: ChatRef): ExportedHeldCall[] | undefined {
+    const chat = this.#exported(ref);
+    if (chat === undefined) {
+      return undefined;
+    }
+    return this.#db
+      .select()
+      .from(heldAppCalls)
+      .where(eq(heldAppCalls.chatId, chat.id))
+      .all()
+      .map(({ chatId: _chat, heldAt, ...held }) => ({
+        ...held,
+        heldAt: msOf(heldAt),
+      }));
+  }
+
+  /**
+   * What chat `ref` read and ran: its sources, its runs' sources, its code
+   * runs' records, its tool calls as shown, what it read that its writes
+   * are traced to (`traceKeyPrefix`), and which of its calls a press took
+   * (`builtKeyPrefix`, `draftedKeyPrefix`, `changedKeyPrefix`,
+   * `draftMadeKeyPrefix`). IDs and records, never what was read, so no
+   * erasure touches it. Not paged: it is what this object reads whole
+   * before every model request of the chat (`turnGuard`, whose sources
+   * cross to the chat's object each time), with at most
+   * `chatToolEventsKept` events and `traceCharsMax` of trace beside it.
+   */
+  exportTurnState(ref: ChatRef): ExportedTurnState | undefined {
+    const chat = this.#exported(ref);
+    if (chat === undefined) {
+      return undefined;
+    }
+    const chatId = chat.id;
+    const takenOf = (prefix: string): string[] =>
+      builtSchema.safeParse(this.ctx.storage.kv.get(`${prefix}${chatId}`))
+        .data ?? [];
+    return {
+      sources: this.#db
+        .select()
+        .from(chatSources)
+        .where(eq(chatSources.chatId, chatId))
+        .all()
+        .map(({ sourceId, createdAt }) => ({
+          sourceId,
+          createdAt: msOf(createdAt),
+        })),
+      runSources: this.#db
+        .select()
+        .from(chatRunSources)
+        .where(eq(chatRunSources.chatId, chatId))
+        .all()
+        .map(({ runId, sourceId, withheldAt }) => ({
+          runId,
+          sourceId,
+          withheldAt: withheldAt === null ? null : msOf(withheldAt),
+        })),
+      codeRuns: this.#db
+        .select()
+        .from(chatCodeRuns)
+        .where(eq(chatCodeRuns.chatId, chatId))
+        .all()
+        .map(({ chatId: _chat, startedAt, endedAt, ...run }) => ({
+          ...run,
+          startedAt: msOf(startedAt),
+          endedAt: endedAt === null ? null : msOf(endedAt),
+        })),
+      toolEvents: this.#db
+        .select()
+        .from(chatToolEvents)
+        .where(eq(chatToolEvents.chatId, chatId))
+        .all()
+        .map(({ chatId: _chat, createdAt, ...event }) => ({
+          ...event,
+          createdAt: msOf(createdAt),
+        })),
+      trace:
+        traceSchema.safeParse(
+          this.ctx.storage.kv.get(`${traceKeyPrefix}${chatId}`)
+        ).data ?? [],
+      taken: {
+        proposePlan: takenOf(builtKeyPrefix),
+        draftAgent: takenOf(draftedKeyPrefix),
+        draftAgentChange: takenOf(changedKeyPrefix),
+      },
+      draftMade:
+        draftMadeSchema.safeParse(
+          this.ctx.storage.kv.get(`${draftMadeKeyPrefix}${chatId}`)
+        ).data ?? {},
+    };
   }
 
   /** Whether chat `chatId` is being deleted (`chatDeletes`). */
