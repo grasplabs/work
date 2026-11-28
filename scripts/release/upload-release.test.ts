@@ -8,9 +8,9 @@
  * there that holds something with 409. It can fail a request as a
  * network does: drop the connection unanswered, or answer 500, before or
  * after doing what was asked. CI's publish runs as its three jobs do:
- * --stage, then CI's signer (sign-manifest.ts) with the key the tests
- * trust (packages/shared/test), then the signed manifest published as
- * it is.
+ * --stage, then CI's signer (sign-manifest.ts, against KMS's stand-in
+ * signing with the key the tests trust: fake-google.ts), then the signed
+ * manifest published as it is, every script on one set clock.
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -48,17 +48,22 @@ import {
   signReleaseManifest,
   testReleaseSigningKey,
 } from "../../packages/shared/test/release-signing-keys.ts";
+import { clockAt, pushToMain, runSigner, TEST_NOW } from "./fake-google.ts";
 import { builds, fixtureModelFiles, info } from "./fixture-release.ts";
 import { generateManifest, writeRelease } from "./manifest-lib.ts";
 
 const TRUST_TEST_KEY = path.join(import.meta.dirname, "trust-test-key.ts");
 
 /**
- * Runs a script in Node, trusting the tests' signing key
+ * Runs a script in Node at `TEST_NOW`, trusting the tests' signing key
  * (trust-test-key.ts), resolving with its stdout; failing with its stderr.
  */
 const run = async (args: string[], env: NodeJS.ProcessEnv): Promise<string> => {
-  const child = spawn("node", ["--import", TRUST_TEST_KEY, ...args], { env });
+  const child = spawn(
+    "node",
+    ["--import", clockAt(TEST_NOW), "--import", TRUST_TEST_KEY, ...args],
+    { env }
+  );
   const closed = once(child, "close");
   const [stdout, stderr] = await Promise.all([
     text(child.stdout),
@@ -71,7 +76,6 @@ const run = async (args: string[], env: NodeJS.ProcessEnv): Promise<string> => {
   return stdout;
 };
 const SCRIPT = path.join(import.meta.dirname, "upload-release.ts");
-const SIGNER = path.join(import.meta.dirname, "sign-manifest.ts");
 
 /** How a run ended: "ok", or what it said on its way out. */
 const outcomeOf = async (running: Promise<unknown>): Promise<string> => {
@@ -740,13 +744,13 @@ describe("publishing a release", () => {
     if (!existsSync(stamped)) {
       return said;
     }
-    await run([SIGNER, staged], {
-      PATH: process.env.PATH,
-      GITHUB_EVENT_NAME: "push",
-      GITHUB_REF: "refs/heads/main",
-      GITHUB_SHA: commitOf(built),
-      RELEASE_SIGNING_KEY: JSON.stringify(testReleaseSigningKey),
+    const signed = await runSigner(staged, {
+      env: pushToMain(commitOf(built)),
+      key: testReleaseSigningKey,
     });
+    if (signed.code !== 0) {
+      throw new Error(signed.output);
+    }
     for (const file of ["manifest.json", RELEASE_SIGNATURE_FILE]) {
       copyFileSync(path.join(staged, file), path.join(built, file));
     }
@@ -773,7 +777,7 @@ describe("publishing a release", () => {
       });
 
   it("publishes under the month's next id, YY.MM.N, the next commit under the one after", async () => {
-    const month = releaseMonthPrefix(new Date());
+    const month = releaseMonthPrefix(new Date(TEST_NOW));
     await publish(buildOf("1".repeat(40)));
     await publish(buildOf("2".repeat(40)));
 
@@ -795,7 +799,7 @@ describe("publishing a release", () => {
   });
 
   it("has the manifest signed as published, under its id, and stores the signature right before it", async () => {
-    const id = `${releaseMonthPrefix(new Date())}1`;
+    const id = `${releaseMonthPrefix(new Date(TEST_NOW))}1`;
     await publish(buildOf("1".repeat(40)));
     const claim = `releases/${id}/manifest.json`;
     const signature = signatureKey(
@@ -818,7 +822,7 @@ describe("publishing a release", () => {
     "publishes nothing, and fails, when another publish claims its id between its stage and its publish ($lock)",
     async ({ locked }) => {
       bucket.locked = locked;
-      const month = releaseMonthPrefix(new Date());
+      const month = releaseMonthPrefix(new Date(TEST_NOW));
       const others = Buffer.from(
         JSON.stringify({ releaseId: `${month}1`, commit: "f".repeat(40) })
       );
@@ -872,7 +876,7 @@ describe("publishing a release", () => {
   });
 
   it("publishes a commit once when its earlier publish stopped after naming its id, before its manifest", async () => {
-    const month = releaseMonthPrefix(new Date());
+    const month = releaseMonthPrefix(new Date(TEST_NOW));
     const commit = "7".repeat(40);
     bucket.failingPuts.add(`releases/${month}1/manifest.json`);
     const stopped = await outcomeOf(publish(buildOf(commit)));
@@ -892,7 +896,7 @@ describe("publishing a release", () => {
   });
 
   it("publishes nothing again for a commit whose earlier publish stored its manifest but never heard back", async () => {
-    const month = releaseMonthPrefix(new Date());
+    const month = releaseMonthPrefix(new Date(TEST_NOW));
     const commit = "8".repeat(40);
     const claim = `releases/${month}1/manifest.json`;
     bucket.faults.set(
@@ -918,7 +922,7 @@ describe("publishing a release", () => {
   it.each(["drop", "500"] as const)(
     "takes a manifest it stored for its own when the answer is lost (%s), not for a failure or another id",
     async (answer) => {
-      const month = releaseMonthPrefix(new Date());
+      const month = releaseMonthPrefix(new Date(TEST_NOW));
       const commit = "9".repeat(40);
       const claim = `releases/${month}1/manifest.json`;
       bucket.faults.set(claim, [{ answer, after: true }]);
@@ -937,7 +941,7 @@ describe("publishing a release", () => {
   );
 
   it("leaves a manifest of its commit from another build, found at the id it claims, and a re-run finds the commit published", async () => {
-    const month = releaseMonthPrefix(new Date());
+    const month = releaseMonthPrefix(new Date(TEST_NOW));
     const commit = "e".repeat(40);
     const earlier = manifestOf(`${month}1`, commit);
     bucket.writtenAfterList.set(`releases/${month}1/manifest.json`, earlier);
@@ -971,7 +975,7 @@ describe("publishing a release", () => {
   });
 
   it("publishes under a new id when another commit took the id its marker named before the re-run", async () => {
-    const month = releaseMonthPrefix(new Date());
+    const month = releaseMonthPrefix(new Date(TEST_NOW));
     const commit = "4".repeat(40);
     const claim = `releases/${month}1/manifest.json`;
     bucket.failingPuts.add(claim);
@@ -991,7 +995,7 @@ describe("publishing a release", () => {
   });
 
   it("goes on to its claim when its marker write took but the answer was lost", async () => {
-    const month = releaseMonthPrefix(new Date());
+    const month = releaseMonthPrefix(new Date(TEST_NOW));
     const commit = "5".repeat(40);
     bucket.faults.set(commitKey(commit), [
       { answer: "drop", method: "PUT", after: true },
@@ -1038,7 +1042,7 @@ describe("publishing a release", () => {
   };
 
   it("publishes a commit once when another run of it names the same id and claims it first", async () => {
-    const month = releaseMonthPrefix(new Date());
+    const month = releaseMonthPrefix(new Date(TEST_NOW));
     const commit = "6".repeat(40);
     interleaveTwin(commit, `${month}1`, true);
     await outcomeOf(publish(buildOf(commit)));
@@ -1049,7 +1053,7 @@ describe("publishing a release", () => {
   });
 
   it("stops as published when another run of its commit published it under another id meanwhile", async () => {
-    const month = releaseMonthPrefix(new Date());
+    const month = releaseMonthPrefix(new Date(TEST_NOW));
     const commit = "7".repeat(40);
     interleaveTwin(commit, `${month}5`, true);
     const stdout = await publish(buildOf(commit));
@@ -1061,7 +1065,7 @@ describe("publishing a release", () => {
   });
 
   it("publishes nothing while another run of its commit holds the marker for an id it hasn't claimed yet", async () => {
-    const month = releaseMonthPrefix(new Date());
+    const month = releaseMonthPrefix(new Date(TEST_NOW));
     const commit = "8".repeat(40);
     interleaveTwin(commit, `${month}5`, false);
     const outcome = await outcomeOf(publish(buildOf(commit)));
@@ -1073,7 +1077,7 @@ describe("publishing a release", () => {
   });
 
   it("leaves another publish's manifest as it is when a retried claim finds the id taken, and publishes nothing", async () => {
-    const month = releaseMonthPrefix(new Date());
+    const month = releaseMonthPrefix(new Date(TEST_NOW));
     const claim = `releases/${month}1/manifest.json`;
     const others = Buffer.from(
       JSON.stringify({ releaseId: `${month}1`, commit: "f".repeat(40) })
@@ -1117,7 +1121,7 @@ describe("publishing a release", () => {
   });
 
   it("reads an answer again when the connection drops halfway through its body", async () => {
-    const month = releaseMonthPrefix(new Date());
+    const month = releaseMonthPrefix(new Date(TEST_NOW));
     const commit = "1".repeat(40);
     await publish(buildOf(commit));
     bucket.faults.set(`releases/${month}1/manifest.json`, [
@@ -1154,7 +1158,7 @@ describe("publishing a release", () => {
   });
 
   it("asks the same of the bucket however many releases it holds, but a listing page per 1,000 of the month's: none of their manifests is read", async () => {
-    const now = new Date();
+    const now = new Date(TEST_NOW);
     const month = releaseMonthPrefix(now);
     const before = releaseMonthPrefix(
       new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))

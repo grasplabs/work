@@ -66,6 +66,10 @@ export const toBase64 = (bytes: Uint8Array): string => {
   return btoa(binary);
 };
 
+/** Standard base64 as bytes; throws on anything else. */
+export const fromBase64 = (text: string): Uint8Array<ArrayBuffer> =>
+  Uint8Array.from(atob(text), (char) => char.codePointAt(0) ?? 0);
+
 /**
  * The integrity hash of `bytes` as npm writes one (Subresource
  * Integrity): `sha512-` and the SHA-512 digest in base64.

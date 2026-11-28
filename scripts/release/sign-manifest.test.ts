@@ -1,20 +1,25 @@
 /**
- * CI's release signer (sign-manifest.ts), run as sign-release runs it: in
- * a Node of its own, with the environment GitHub gives a job. What it
- * signs must verify with @grasp-os/shared/release-signature, which every
- * import, promotion and on-premises install uses.
+ * CI's release signer (sign-manifest.ts), run as sign-release runs it
+ * (fake-google.ts): in a Node of its own, with the environment GitHub
+ * gives a job, against stand-ins for GitHub's token service, Google's
+ * Security Token Service and Cloud KMS. What it signs must verify with the
+ * shared package's release-signature module, which every import,
+ * promotion and on-premises install uses.
  *
- * Threat model: the signing key is reachable by whatever runs in the job
- * that holds it, so that job must run nothing but GitHub's own actions,
- * pinned, and this one file, which imports nothing but Node's built-ins;
- * no other job may name the key's environment or the key; and the signer
- * must sign nothing but a manifest of its own run's commit, for a push to
- * main, under an id of this month (a far-off id would hold Edge for
- * good). The checks on the workflows catch mistakes; review of the paths
+ * Threat model: the key never leaves KMS, so what matters is who can get
+ * something signed. Google lets a token through only for this
+ * repository's ci.yml on main, a push, a GitHub-hosted runner and the
+ * `release-signing` environment, so the job that names that environment
+ * must run nothing but GitHub's own actions, pinned, and this one file,
+ * which imports nothing but Node's built-ins; no other job may name the
+ * environment, Google's provider or the key; and the signer must sign
+ * nothing but a manifest of its own run's commit, for a push to main,
+ * under an id of this month (a far-off id would hold Edge for good), and
+ * only what KMS says it signed with the key version asked for, intact.
+ * The checks on the workflows catch mistakes; review of the paths
  * .github/CODEOWNERS names is the control.
  */
-import { spawn } from "node:child_process";
-import { once } from "node:events";
+import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdtempSync,
@@ -25,11 +30,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { text } from "node:stream/consumers";
 
 import {
   RELEASE_SIGNATURE_FILE,
   releaseSignatureProblem,
+  releaseSignatureSchema,
 } from "@grasp-os/shared/release-signature";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { parse } from "yaml";
@@ -39,49 +44,24 @@ import {
   releaseSigningKeys,
   testReleaseSigningKey,
 } from "../../packages/shared/test/release-signing-keys.ts";
+import {
+  ACCESS_TOKEN,
+  crc32c,
+  GITHUB_TOKEN,
+  pushToMain,
+  runSigner,
+  TEST_NOW,
+  TEST_PROVIDER,
+  TOKEN_REQUEST_URL,
+} from "./fake-google.ts";
+import type { GoogleFault } from "./fake-google.ts";
 
 const ROOT = path.join(import.meta.dirname, "../..");
 const SIGNER = path.join(import.meta.dirname, "sign-manifest.ts");
 const COMMIT = "c".repeat(40);
 const ENVIRONMENT = "release-signing";
-const SECRET = "RELEASE_SIGNING_KEY";
 
-/** A push to main of `COMMIT`, as GitHub sets it, and the key the tests trust. */
-const pushToMain = {
-  PATH: process.env.PATH,
-  GITHUB_EVENT_NAME: "push",
-  GITHUB_REF: "refs/heads/main",
-  GITHUB_SHA: COMMIT,
-  [SECRET]: JSON.stringify(testReleaseSigningKey),
-};
-
-/** When the tests sign, unless said: mid-month, UTC. */
-const MID_NOVEMBER = "2026-11-15T12:00:00Z";
-
-/**
- * A module that sets Node's clock to `at` before the signer runs: the
- * signer reads the month from it, untouched.
- */
-const clockAt = (at: string): string =>
-  `data:text/javascript,${encodeURIComponent(
-    `const at = Date.parse(${JSON.stringify(at)}); const RealDate = Date; globalThis.Date = class extends RealDate { constructor(...args) { super(...(args.length > 0 ? args : [at])); } static now() { return at; } };`
-  )}`;
-
-/** Runs the signer on `dir` at `at`: its exit code and what it said. */
-const sign = async (
-  dir: string,
-  env: Record<string, string | undefined> = pushToMain,
-  at = MID_NOVEMBER
-): Promise<{ code: number | null; output: string }> => {
-  const child = spawn("node", ["--import", clockAt(at), SIGNER, dir], { env });
-  const closed = once(child, "close");
-  const [stdout, stderr] = await Promise.all([
-    text(child.stdout),
-    text(child.stderr),
-  ]);
-  await closed;
-  return { code: child.exitCode, output: stdout + stderr };
-};
+const key = testReleaseSigningKey;
 
 describe("signing a release's manifest in CI", () => {
   let dir = "";
@@ -95,6 +75,14 @@ describe("signing a release's manifest in CI", () => {
     return bytes;
   };
 
+  const sign = async (
+    env: Record<string, string> = pushToMain(COMMIT),
+    options: { at?: string; fault?: GoogleFault } = {}
+  ) => await runSigner(dir, { env, key, ...options });
+
+  const signed = (): boolean =>
+    existsSync(path.join(dir, RELEASE_SIGNATURE_FILE));
+
   beforeEach(() => {
     dir = mkdtempSync(path.join(tmpdir(), "grasp-os-sign-test-"));
   });
@@ -103,14 +91,22 @@ describe("signing a release's manifest in CI", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("signs a manifest of its run's commit so that every verifier takes it", async () => {
+  it("has KMS sign the release's id and manifest hash so that every verifier takes it, asking each service as its documentation says", async () => {
     const bytes = writeManifest("26.11.7");
-    const { code } = await sign(dir);
+    const { code, requests } = await sign();
     const signature = readFileSync(path.join(dir, RELEASE_SIGNATURE_FILE));
     const changed = Buffer.from(bytes.toString().replace("signed", "s1gned"));
+    const message = Buffer.from(
+      `grasp-release-manifest\n26.11.7\n${createHash("sha256").update(bytes).digest("hex")}`
+    );
+
+    const { signature: _signed, ...named } = releaseSignatureSchema.parse(
+      JSON.parse(signature.toString())
+    );
 
     expect({
       code,
+      named,
       problem: await releaseSignatureProblem(
         bytes,
         signature,
@@ -123,21 +119,59 @@ describe("signing a release's manifest in CI", () => {
         releaseSigningKeys,
         "26.11.7"
       ),
+      // The stand-in's CRC32C, by which KMS checks the message, is the
+      // standard one: its check value.
+      checkValue: crc32c(Buffer.from("123456789")).toString(16),
+      requests,
     }).toStrictEqual({
       code: 0,
+      named: { alg: "Ed25519", keyId: key.id },
       problem: undefined,
       changed: "has a signature that doesn't match it",
+      checkValue: "e3069283",
+      requests: [
+        {
+          method: "GET",
+          url: `${TOKEN_REQUEST_URL}&audience=${encodeURIComponent(`https://iam.googleapis.com/${TEST_PROVIDER}`)}`,
+          headers: { authorization: "bearer request-token" },
+        },
+        {
+          method: "POST",
+          url: "https://sts.googleapis.com/v1/token",
+          headers: { "content-type": "application/json" },
+          body: {
+            grantType: "urn:ietf:params:oauth:grant-type:token-exchange",
+            audience: `//iam.googleapis.com/${TEST_PROVIDER}`,
+            scope: "https://www.googleapis.com/auth/cloud-platform",
+            requestedTokenType: "urn:ietf:params:oauth:token-type:access_token",
+            subjectTokenType: "urn:ietf:params:oauth:token-type:jwt",
+            subjectToken: GITHUB_TOKEN,
+          },
+        },
+        {
+          method: "POST",
+          url: `https://cloudkms.googleapis.com/v1/${key.id}:asymmetricSign`,
+          headers: {
+            authorization: `Bearer ${ACCESS_TOKEN}`,
+            "content-type": "application/json",
+          },
+          body: {
+            data: message.toString("base64"),
+            dataCrc32c: String(crc32c(message)),
+          },
+        },
+      ],
     });
   });
 
   it("signs only an id of this month, or of the month before in the first hours of a new one, with N at most 99,999", async () => {
     const cases = {
-      thisMonth: { id: "26.11.7", at: MID_NOVEMBER, signs: true },
-      largestN: { id: "26.11.99999", at: MID_NOVEMBER, signs: true },
-      lastMonth: { id: "26.10.40", at: MID_NOVEMBER, signs: false },
-      nextMonth: { id: "26.12.1", at: MID_NOVEMBER, signs: false },
-      farOff: { id: "99.12.1", at: MID_NOVEMBER, signs: false },
-      tooLargeN: { id: "26.11.100000", at: MID_NOVEMBER, signs: false },
+      thisMonth: { id: "26.11.7", at: TEST_NOW, signs: true },
+      largestN: { id: "26.11.99999", at: TEST_NOW, signs: true },
+      lastMonth: { id: "26.10.40", at: TEST_NOW, signs: false },
+      nextMonth: { id: "26.12.1", at: TEST_NOW, signs: false },
+      farOff: { id: "99.12.1", at: TEST_NOW, signs: false },
+      tooLargeN: { id: "26.11.100000", at: TEST_NOW, signs: false },
       justAfterRollover: {
         id: "26.11.40",
         at: "2026-12-01T05:59:00Z",
@@ -150,110 +184,149 @@ describe("signing a release's manifest in CI", () => {
       },
       acrossTheYear: { id: "26.12.9", at: "2027-01-01T01:00:00Z", signs: true },
     };
-    const signed: Record<string, boolean> = {};
+    const outcomes: Record<string, boolean> = {};
     for (const [name, { id, at }] of Object.entries(cases)) {
       writeManifest(id);
       // oxlint-disable-next-line no-await-in-loop -- one directory, in turn
-      const { code } = await sign(dir, pushToMain, at);
-      signed[name] = code === 0;
+      const { code } = await sign(pushToMain(COMMIT), { at });
+      outcomes[name] = code === 0;
     }
 
-    expect(signed).toStrictEqual(
+    expect(outcomes).toStrictEqual(
       Object.fromEntries(
         Object.entries(cases).map(([name, { signs }]) => [name, signs])
       )
     );
   });
 
-  it("signs nothing for a pull request, the merge queue, another branch, another commit or a local build, nor with a key it can't use, and says why", async () => {
+  it("asks nothing of anyone for a pull request, the merge queue, another branch, another commit or a local build, and says why", async () => {
     const id = "26.11.7";
-    const cases: [string, string, () => Record<string, string | undefined>][] =
+    const cases: [string, string, () => Record<string, string>][] = [
       [
-        [
-          "pullRequest",
-          "Only a push signs",
-          () => {
-            writeManifest(id);
-            return { ...pushToMain, GITHUB_EVENT_NAME: "pull_request" };
-          },
-        ],
-        [
-          "mergeQueue",
-          "Only a push signs",
-          () => {
-            writeManifest(id);
-            return { ...pushToMain, GITHUB_EVENT_NAME: "merge_group" };
-          },
-        ],
-        [
-          "otherBranch",
-          "Only main signs",
-          () => {
-            writeManifest(id);
-            return { ...pushToMain, GITHUB_REF: "refs/heads/feat/x" };
-          },
-        ],
-        [
-          "otherCommit",
-          "this run is",
-          () => {
-            writeManifest(id, "d".repeat(40));
-            return pushToMain;
-          },
-        ],
-        [
-          "localBuild",
-          "isn't an id of this month's",
-          () => {
-            writeManifest("dev-abc");
-            return pushToMain;
-          },
-        ],
-        [
-          "notJson",
-          "isn't JSON",
-          () => {
-            writeFileSync(path.join(dir, "manifest.json"), "{ not json");
-            return pushToMain;
-          },
-        ],
-        [
-          "noKey",
-          "RELEASE_SIGNING_KEY isn't a JWK",
-          () => {
-            writeManifest(id);
-            return { ...pushToMain, [SECRET]: "" };
-          },
-        ],
-        [
-          "notEd25519",
-          "isn't an Ed25519 private key",
-          () => {
-            writeManifest(id);
-            return {
-              ...pushToMain,
-              [SECRET]: JSON.stringify({ kty: "oct", k: "c2VjcmV0" }),
-            };
-          },
-        ],
-      ];
+        "pullRequest",
+        "Only a push signs",
+        () => {
+          writeManifest(id);
+          return { ...pushToMain(COMMIT), GITHUB_EVENT_NAME: "pull_request" };
+        },
+      ],
+      [
+        "mergeQueue",
+        "Only a push signs",
+        () => {
+          writeManifest(id);
+          return { ...pushToMain(COMMIT), GITHUB_EVENT_NAME: "merge_group" };
+        },
+      ],
+      [
+        "otherBranch",
+        "Only main signs",
+        () => {
+          writeManifest(id);
+          return { ...pushToMain(COMMIT), GITHUB_REF: "refs/heads/feat/x" };
+        },
+      ],
+      [
+        "otherCommit",
+        "this run is",
+        () => {
+          writeManifest(id, "d".repeat(40));
+          return pushToMain(COMMIT);
+        },
+      ],
+      [
+        "localBuild",
+        "isn't an id of this month's",
+        () => {
+          writeManifest("dev-abc");
+          return pushToMain(COMMIT);
+        },
+      ],
+      [
+        "notJson",
+        "isn't JSON",
+        () => {
+          writeFileSync(path.join(dir, "manifest.json"), "{ not json");
+          return pushToMain(COMMIT);
+        },
+      ],
+    ];
 
     const outcomes: Record<string, unknown> = {};
     for (const [name, reason, arrange] of cases) {
       // oxlint-disable-next-line no-await-in-loop -- one directory, in turn
-      const { code, output } = await sign(dir, arrange());
+      const { code, output, requests } = await sign(arrange());
       outcomes[name] = {
         code,
         said: output.includes(reason),
-        signed: existsSync(path.join(dir, RELEASE_SIGNATURE_FILE)),
+        asked: requests.length,
+        signed: signed(),
       };
     }
 
     expect(outcomes).toStrictEqual(
       Object.fromEntries(
-        cases.map(([name]) => [name, { code: 1, said: true, signed: false }])
+        cases.map(([name]) => [
+          name,
+          { code: 1, said: true, asked: 0, signed: false },
+        ])
       )
     );
+  });
+
+  it("writes no signature when GitHub, Google's token service or KMS refuses, or KMS answers for another key version or with bytes that fail their CRC32C, and says why", async () => {
+    const cases: [GoogleFault | "noIdToken", string][] = [
+      ["noIdToken", "ACTIONS_ID_TOKEN_REQUEST_URL is required"],
+      ["githubRefuses", "GitHub's token service answered 500"],
+      [
+        "stsRefuses",
+        'Google\'s Security Token Service answered 400: {"error":"unauthorized_client"',
+      ],
+      ["kmsRefuses", "Cloud KMS answered 403"],
+      ["otherKeyVersion", `Cloud KMS signed with ${key.id}0, not ${key.id}`],
+      ["signatureCrc", "Cloud KMS's signature doesn't match its CRC32C"],
+      [
+        "dataCrcUnchecked",
+        "Cloud KMS didn't check the message against its CRC32C",
+      ],
+    ];
+
+    const outcomes: Record<string, unknown> = {};
+    for (const [fault, reason] of cases) {
+      writeManifest("26.11.7");
+      const { ACTIONS_ID_TOKEN_REQUEST_URL: _url, ...noIdToken } =
+        pushToMain(COMMIT);
+      // oxlint-disable-next-line no-await-in-loop -- one directory, in turn
+      const { code, output } = await (fault === "noIdToken"
+        ? sign(noIdToken)
+        : sign(pushToMain(COMMIT), { fault }));
+      outcomes[fault] = {
+        code,
+        said: output.includes(reason),
+        signed: signed(),
+      };
+    }
+
+    expect(outcomes).toStrictEqual(
+      Object.fromEntries(
+        cases.map(([fault]) => [fault, { code: 1, said: true, signed: false }])
+      )
+    );
+  });
+
+  it("asks nothing of anyone while its identifiers aren't filled in", async () => {
+    writeManifest("26.11.7");
+    const { code, output, requests } = await runSigner(dir, {
+      env: pushToMain(COMMIT),
+      key,
+      config: { workloadIdentityProvider: "", keyVersion: "" },
+    });
+    expect({
+      code,
+      said: output.includes("names no workload identity provider"),
+      asked: requests.length,
+      signed: signed(),
+    }).toStrictEqual({ code: 1, said: true, asked: 0, signed: false });
   });
 });
 
@@ -304,18 +377,35 @@ describe("the job that holds the signing key", () => {
   const ci = workflowSchema.parse(readYaml(".github/workflows/ci.yml"));
   const job = ci.jobs?.["sign-release"];
 
-  it("is the only one that names its environment or the key", () => {
+  it("is the only one that names its environment, Google's services, the provider or the key", () => {
+    // What a token Google takes would be asked for with, or what a job
+    // would sign with: none of it anywhere but in sign-release.
+    const identifiers = Object.values(
+      z
+        .record(z.string(), z.string())
+        .parse(
+          JSON.parse(
+            readFileSync(
+              path.join(import.meta.dirname, "release-signing.json"),
+              "utf-8"
+            )
+          )
+        )
+    ).filter((value) => value !== "");
+    const names = (value: unknown): boolean => {
+      const json = JSON.stringify(value);
+      return (
+        /release-signing|googleapis|workloadIdentityPools|cryptoKeyVersions/u.test(
+          json
+        ) || identifiers.some((identifier) => json.includes(identifier))
+      );
+    };
     const others = githubFiles().filter((file) => {
-      const workflow = readYaml(file);
       if (file === ".github/workflows/ci.yml") {
         const { "sign-release": _signing, ...rest } = ci.jobs ?? {};
-        return /release-signing|RELEASE_SIGNING_KEY/u.exec(
-          JSON.stringify({ ...ci, jobs: rest })
-        );
+        return names({ ...ci, jobs: rest });
       }
-      return /release-signing|RELEASE_SIGNING_KEY/u.exec(
-        JSON.stringify(workflow)
-      );
+      return names(readYaml(file));
     });
     expect({ environment: job?.environment, others }).toStrictEqual({
       environment: ENVIRONMENT,
@@ -379,7 +469,7 @@ describe("the job that holds the signing key", () => {
     }).toStrictEqual({ strays: [], deployByHand: DEPLOY_STAGES });
   });
 
-  it("runs only GitHub's own actions, at the commits reviewed, and the signer, on the runner's own Node, with no more than read access to the code", () => {
+  it("runs only GitHub's own actions, at the commits reviewed, and the signer, on the runner's own Node, with a token for its OIDC identity and no more than read access to the code", () => {
     // The job exactly, pins included: any other step, input, environment
     // variable, shell, container, permission or action commit changes
     // what runs beside the key, and fails here (a pin's bump included,
@@ -390,18 +480,19 @@ describe("the job that holds the signing key", () => {
     }).toStrictEqual({
       job: {
         name: "sign-release",
-        needs: ["stage-release", "signing-environment"],
+        needs: ["stage-release"],
         if: "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.stage-release.outputs.staged == 'true'",
         "runs-on": "ubuntu-latest",
         "timeout-minutes": 5,
         environment: ENVIRONMENT,
-        permissions: { contents: "read" },
+        permissions: { contents: "read", "id-token": "write" },
         steps: [
           {
             uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
             with: {
               "persist-credentials": false,
-              "sparse-checkout": "scripts/release/sign-manifest.ts",
+              "sparse-checkout":
+                "scripts/release/sign-manifest.ts\nscripts/release/release-signing.json\n",
               "sparse-checkout-cone-mode": false,
             },
           },
@@ -414,7 +505,6 @@ describe("the job that holds the signing key", () => {
           },
           {
             run: 'node scripts/release/sign-manifest.ts "$RUNNER_TEMP/release-manifest"',
-            env: { [SECRET]: `\${{ secrets.${SECRET} }}` },
           },
           {
             uses: "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",

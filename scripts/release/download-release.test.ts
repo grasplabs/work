@@ -33,9 +33,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   signReleaseManifest,
+  strangerSigningKey,
   testReleaseSigningKey,
 } from "../../packages/shared/test/release-signing-keys.ts";
-import type { ReleaseSigningJwk } from "../../packages/shared/test/release-signing-keys.ts";
+import type { TestSigningKey } from "../../packages/shared/test/release-signing-keys.ts";
 import { builds, fixtureModelFiles, info } from "./fixture-release.ts";
 import { generateManifest, writeRelease } from "./manifest-lib.ts";
 
@@ -289,14 +290,6 @@ describe("promoting a release from staging's bucket to production's", () => {
     expect(buckets.get(PRODUCTION)?.size).toBe(0);
   });
 
-  /** A key nobody trusts: an attacker's. */
-  const strangerKey: ReleaseSigningJwk = {
-    kty: "OKP",
-    crv: "Ed25519",
-    x: "A2VEuP3eHRFGIPqELZm-RDZnYWKhUXJLPFsDL5Y8xVY",
-    d: "7Bs1IAjNMwqAVTTNRQkEsTjYn2p3b4Vz3RhHn0GXi8o",
-  };
-
   /**
    * Puts release `id` straight in staging's bucket, as anyone holding its
    * key could: the fixture's manifest under that id, its notes `notes`,
@@ -311,7 +304,7 @@ describe("promoting a release from staging's bucket to production's", () => {
       signed,
     }: {
       notes?: string;
-      signedWith?: ReleaseSigningJwk | null;
+      signedWith?: TestSigningKey | null;
       signed?: Buffer;
     } = {}
   ): Promise<void> => {
@@ -364,7 +357,7 @@ describe("promoting a release from staging's bucket to production's", () => {
       notes: "feat(core): something else",
       signed: original,
     });
-    await putInStaging(stranger, { signedWith: strangerKey });
+    await putInStaging(stranger, { signedWith: strangerSigningKey });
     await putInStaging(oversized, { signedWith: null });
     const oversizedManifest = buckets.get(STAGING)?.get(manifestKey(oversized));
     buckets

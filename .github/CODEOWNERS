@@ -1,17 +1,15 @@
 # What release signing trusts: a change to any of these needs a code
 # owner's approval, given after its last push (.github/rulesets/main.json).
-# The workflows (the one job that holds the signing key among them) and
-# this file; the signer, its guard test and the environment check; the
-# script that applies these rules and the signing environment; the
-# verifier and the keys it trusts (adding a key is as good as having the
-# private one). Other paths need no approval: the merge queue lands a pull
-# request once `check` passes on top of main.
+# The workflows (the one job Google lets sign among them) and this file;
+# the signer, the identifiers of its key and identity, and its guard test;
+# the script that applies these rules; the verifier and the keys it trusts
+# (adding a key is as good as holding the private one). Other paths need
+# no approval: the merge queue lands a pull request once `check` passes on
+# top of main.
 /.github/ @nickruigrok @jkobgnther
 /scripts/github-setup.ts @nickruigrok @jkobgnther
 /scripts/release/sign-manifest.ts @nickruigrok @jkobgnther
+/scripts/release/release-signing.json @nickruigrok @jkobgnther
 /scripts/release/sign-manifest.test.ts @nickruigrok @jkobgnther
-/scripts/release/signing-environment.ts @nickruigrok @jkobgnther
-/scripts/release/signing-environment-lib.ts @nickruigrok @jkobgnther
-/scripts/release/signing-environment.test.ts @nickruigrok @jkobgnther
 /packages/shared/src/release-signature.ts @nickruigrok @jkobgnther
 /packages/shared/src/release-signing-keys.ts @nickruigrok @jkobgnther

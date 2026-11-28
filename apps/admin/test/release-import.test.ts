@@ -5,7 +5,10 @@ import {
   moduleKey,
   sha256OfBytes,
 } from "@grasp-os/shared/release";
-import { nextReleaseId as nextPublishedId } from "@grasp-os/shared/release-id";
+import {
+  nextReleaseId as nextPublishedId,
+  releaseMonthPrefix,
+} from "@grasp-os/shared/release-id";
 import { signatureKey } from "@grasp-os/shared/release-signature";
 import { createScheduledController } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -14,6 +17,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
   signReleaseManifest,
+  strangerSigningKey,
   testReleaseSigningKey,
 } from "../../../packages/shared/test/release-signing-keys.ts";
 import { alertEventSchema } from "../src/alerts/alert.ts";
@@ -36,6 +40,7 @@ import {
 import type { ImportStore } from "../src/releases/import.ts";
 import { channelReleases } from "../src/rollout/targets.ts";
 import worker from "../src/server.ts";
+import { testReleaseMonth } from "./release-clock.ts";
 import {
   buildRelease,
   nextReleaseId,
@@ -518,13 +523,10 @@ CREATE TABLE t (id TEXT);`,
   });
 
   it("takes the newest release by year, month and N as numbers, never as text", async () => {
-    // A month after every other release in the file's bucket.
-    const month = new Date(Date.UTC(2099, 11, 15));
-    const ids: string[] = [];
-    for (let n = 1; n <= 10; n += 1) {
-      ids.push(nextPublishedId(ids, month));
-    }
-    const [ninth = "", tenth = ""] = ids.slice(-2);
+    // Above every other N of the file's month: by text, the first is the
+    // newer.
+    const month = releaseMonthPrefix(testReleaseMonth);
+    const [ninth, tenth] = [`${month}99999`, `${month}100000`];
     for (const id of [ninth, tenth]) {
       // oxlint-disable-next-line no-await-in-loop -- in order, oldest first
       const release = await buildRelease({ notes: `feat(core): ${id}` }, id);
@@ -1033,12 +1035,10 @@ CREATE TABLE t (id TEXT);`,
     await env.RELEASES.put(manifestKey(changed.id), altered);
     await env.RELEASES.put(
       signatureKey(await sha256OfBytes(encoder.encode(stranger.manifestText))),
-      await signReleaseManifest(encoder.encode(stranger.manifestText), {
-        kty: "OKP",
-        crv: "Ed25519",
-        x: "A2VEuP3eHRFGIPqELZm-RDZnYWKhUXJLPFsDL5Y8xVY",
-        d: "7Bs1IAjNMwqAVTTNRQkEsTjYn2p3b4Vz3RhHn0GXi8o",
-      })
+      await signReleaseManifest(
+        encoder.encode(stranger.manifestText),
+        strangerSigningKey
+      )
     );
     await env.RELEASES.put(manifestKey(stranger.id), stranger.manifestText);
     const next = await publishRelease({ notes: "feat(core): signed after" });
@@ -1082,6 +1082,44 @@ CREATE TABLE t (id TEXT);`,
       failed: result.failed.includes(old),
       saved: await releaseRow(old),
     }).toStrictEqual({ failed: true, saved: undefined });
+  });
+
+  it("refuses a signed release under an id of a month still to come, alerting staff, as it would hold Edge until that month: and imports this month's", async () => {
+    const ahead = nextPublishedId(
+      [],
+      new Date(
+        Date.UTC(
+          testReleaseMonth.getUTCFullYear(),
+          testReleaseMonth.getUTCMonth() + 1,
+          1
+        )
+      )
+    );
+    const early = await buildRelease({ notes: "feat(core): early" }, ahead);
+    await putBlobs(early);
+    await putManifest(early);
+    const current = await publishRelease({ notes: "feat(core): this month" });
+
+    const result = await runImport();
+    const [alerted] = await db
+      .select()
+      .from(alerts)
+      .where(eq(alerts.key, `import:${ahead}`));
+    // Out of the file's bucket, which would otherwise try it again in
+    // every later test.
+    await env.RELEASES.delete(manifestKey(ahead));
+
+    expect({
+      failed: result.failed.includes(ahead),
+      imported: result.imported.includes(current.id),
+      saved: await releaseRow(ahead),
+      code: alertEventSchema.parse(JSON.parse(alerted?.event ?? "null")),
+    }).toMatchObject({
+      failed: true,
+      imported: true,
+      saved: undefined,
+      code: { code: "FutureReleaseError" },
+    });
   });
 
   it("reads the whole listing, a page at a time", async () => {

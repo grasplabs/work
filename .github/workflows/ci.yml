@@ -1007,7 +1007,7 @@ jobs:
   # to staging's clients. It publishes the release job's bundle, never a
   # build of its own, and deploys nothing. Production's admin never sees it
   # until someone promotes it, once staging ran it, with the Promote
-  # release workflow. Three jobs, as the signing key is in a job of its own
+  # release workflow. Three jobs, as signing is a job of its own
   # (sign-release) that runs none of the repo's dependencies:
   # stage-release uploads the blobs and stamps the manifest with the
   # month's next id (`YY.MM.N`, from the bucket;
@@ -1086,66 +1086,49 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # Checks, before sign-release reads the key, that the key's environment
-  # still lets main alone use it, with no admin bypass
-  # (scripts/release/signing-environment.ts): a rule removed by hand stops
-  # signing here, rather than going unnoticed. With the job's own token;
-  # no secret.
-  signing-environment:
-    name: signing-environment
-    needs: [stage-release]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.stage-release.outputs.staged == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          sparse-checkout: |
-            scripts/release/signing-environment.ts
-            scripts/release/signing-environment-lib.ts
-          sparse-checkout-cone-mode: false
-      - run: node scripts/release/signing-environment.ts check
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-
-  # Signs the staged manifest (scripts/release/sign-manifest.ts): the one
-  # job that holds the release signing key, a secret of the
-  # `release-signing` GitHub environment, whose deployment branch rule lets
-  # only main use it. It runs nothing but GitHub's own actions, pinned,
-  # and that one file, on the runner's own Node: no install, no setup, no
-  # other code of the repo's. The manifest is downloaded outside the
-  # checkout (`runner.temp`), so nothing in it lands beside the signer. No
-  # other job names that environment or the key, and this job is exactly
-  # as reviewed: scripts/release/sign-manifest.test.ts fails otherwise. A
-  # build or stage job that runs a bad dependency can still get its own
-  # output signed: a signature says CI on main built it from this commit,
-  # not that its dependencies were clean.
+  # Signs the staged manifest (scripts/release/sign-manifest.ts) with the
+  # release signing key, which is in Google Cloud KMS and never leaves it:
+  # the job holds no secret. GitHub's OIDC token for this job is exchanged
+  # at Google for a short-lived token that may sign with that key alone,
+  # and only while the token's claims meet the workload identity
+  # provider's condition: this repository (by id and name), main, a push,
+  # this workflow, a GitHub-hosted runner, and the `release-signing`
+  # environment. That environment holds nothing and needs no settings: its
+  # name is in the token, and it's what tells this job from the others of
+  # this workflow on main, which no other job names. The job runs nothing
+  # but GitHub's own actions, pinned, and that one file with the
+  # identifiers it reads (release-signing.json), on the runner's own Node:
+  # no install, no setup, no other code of the repo's. The manifest is
+  # downloaded outside the checkout (`runner.temp`), so nothing in it lands
+  # beside the signer. No other job names the environment, Google's
+  # provider or the key, and this job is exactly as reviewed:
+  # scripts/release/sign-manifest.test.ts fails otherwise. A build or stage
+  # job that runs a bad dependency can still get its own output signed: a
+  # signature says CI on main built it from this commit, not that its
+  # dependencies were clean.
   sign-release:
     name: sign-release
-    needs: [stage-release, signing-environment]
+    needs: [stage-release]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.stage-release.outputs.staged == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: release-signing
     permissions:
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: scripts/release/sign-manifest.ts
+          sparse-checkout: |
+            scripts/release/sign-manifest.ts
+            scripts/release/release-signing.json
           sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-manifest
           path: ${{ runner.temp }}/release-manifest
       - run: node scripts/release/sign-manifest.ts "$RUNNER_TEMP/release-manifest"
-        env:
-          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-signature
@@ -1225,7 +1208,6 @@ jobs:
       - release
       - deploy-platform
       - stage-release
-      - signing-environment
       - sign-release
       - publish-release
       - test-caches

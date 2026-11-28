@@ -7,19 +7,11 @@ import {
 import {
   releaseSigningKeys,
   signReleaseManifest,
+  strangerSigningKey,
   testReleaseSigningKey,
 } from "./release-signing-keys.ts";
-import type { ReleaseSigningJwk } from "./release-signing-keys.ts";
 
 const encoder = new TextEncoder();
-
-/** A key nobody trusts. */
-const stranger: ReleaseSigningJwk = {
-  kty: "OKP",
-  crv: "Ed25519",
-  x: "A2VEuP3eHRFGIPqELZm-RDZnYWKhUXJLPFsDL5Y8xVY",
-  d: "7Bs1IAjNMwqAVTTNRQkEsTjYn2p3b4Vz3RhHn0GXi8o",
-};
 
 const manifest = encoder.encode(
   `{"releaseId":"26.12.1","commit":"${"a".repeat(40)}"}\n`
@@ -31,6 +23,20 @@ const problem = async (bytes: Uint8Array, signature?: Uint8Array) =>
     signature,
     releaseSigningKeys,
     "26.12.1"
+  );
+
+/** `signature` (a signature file) with `fields` in place of its own. */
+const withFields = (
+  signature: Uint8Array,
+  fields: Record<string, unknown>
+): Uint8Array =>
+  encoder.encode(
+    JSON.stringify({
+      ...releaseSignatureSchema.parse(
+        JSON.parse(new TextDecoder().decode(signature))
+      ),
+      ...fields,
+    })
   );
 
 describe("a release's signature", () => {
@@ -58,34 +64,39 @@ describe("a release's signature", () => {
     );
   });
 
-  it("fails a signature by a key it doesn't trust, or one that isn't a signature", async () => {
-    const strangers = await signReleaseManifest(manifest, stranger);
-    const parsed = releaseSignatureSchema.parse(
-      JSON.parse(new TextDecoder().decode(strangers))
-    );
-    const forged = encoder.encode(
-      JSON.stringify({
-        key: testReleaseSigningKey.x,
-        signature: parsed.signature,
-      })
+  it("fails a key it doesn't trust, a stranger's signature under a trusted key's id, another algorithm, and a file that isn't one", async () => {
+    const strangers = await signReleaseManifest(manifest, strangerSigningKey);
+    const signature = await signReleaseManifest(
+      manifest,
+      testReleaseSigningKey
     );
     expect({
       stranger: await problem(manifest, strangers),
-      forged: await problem(manifest, forged),
-      garbage: await problem(manifest, encoder.encode("{ no")),
-      extra: await problem(
+      forged: await problem(
         manifest,
-        encoder.encode(JSON.stringify({ ...parsed, note: "x" }))
+        withFields(strangers, { keyId: testReleaseSigningKey.id })
+      ),
+      otherAlgorithm: await problem(
+        manifest,
+        withFields(signature, { alg: "ES256" })
+      ),
+      garbage: await problem(manifest, encoder.encode("{ no")),
+      extra: await problem(manifest, withFields(signature, { note: "x" })),
+      notBase64Url: await problem(
+        manifest,
+        withFields(signature, { signature: "not base64url!" })
       ),
     }).toStrictEqual({
       stranger: "is signed with a key Grasp doesn't trust",
       forged: "has a signature that doesn't match it",
+      otherAlgorithm: "is signed with ES256, not its key's Ed25519",
       garbage: "has a signature file that isn't one",
       extra: "has a signature file that isn't one",
+      notBase64Url: "has a signature that doesn't match it",
     });
   });
 
-  it("fails a signed manifest taken for another release's, or bytes naming none, so no verifier can forget to compare the id", async () => {
+  it("fails a signed manifest taken for another release's, one signed as another release's, or bytes naming none, so no verifier can forget to compare the id", async () => {
     const signature = await signReleaseManifest(
       manifest,
       testReleaseSigningKey
@@ -98,14 +109,19 @@ describe("a release's signature", () => {
         releaseSigningKeys,
         "26.12.2"
       ),
+      signedAsAnother: await problem(
+        manifest,
+        await signReleaseManifest(manifest, testReleaseSigningKey, "26.12.2")
+      ),
       noId: await releaseSignatureProblem(
         notJson,
-        await signReleaseManifest(notJson, testReleaseSigningKey),
+        await signReleaseManifest(notJson, testReleaseSigningKey, "26.12.1"),
         releaseSigningKeys,
         "26.12.1"
       ),
     }).toStrictEqual({
       otherId: "has a manifest of release 26.12.1, not 26.12.2",
+      signedAsAnother: "has a signature that doesn't match it",
       noId: "has a manifest of release (none), not 26.12.1",
     });
   });

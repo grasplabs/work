@@ -1,33 +1,42 @@
 /**
  * Signs a release's manifest, as CI's `sign-release` job does with each
- * merge (.github/workflows/ci.yml): the one place the private key is
- * used. The job holds it as a secret of the `release-signing` GitHub
- * environment, which only main may use, and runs nothing but GitHub's own
- * actions and this file, on the runner's own Node: no install, no
- * dependency, nothing of the repo's but this. So it imports nothing but
- * Node's built-ins (scripts/release/sign-manifest.test.ts holds it to
- * that, and to the job's shape).
+ * merge (.github/workflows/ci.yml). The key is in Google Cloud KMS, which
+ * never lets it out; this job holds no secret. It proves who it is with
+ * GitHub's OIDC token for the job, which Google's Security Token Service
+ * exchanges for a short-lived access token only when the token's claims
+ * meet the workload identity provider's condition (this repository by id
+ * and name, main, a push, ci.yml, a GitHub-hosted runner, the
+ * `release-signing` environment, which no other job names); the key's
+ * IAM policy lets that identity alone sign with it. The job runs nothing
+ * but GitHub's own actions and this file, on the runner's own Node: no
+ * install, no dependency, nothing of the repo's but this and the
+ * identifiers it reads (release-signing.json, beside it). So it imports
+ * nothing but Node's built-ins (scripts/release/sign-manifest.test.ts
+ * holds it to that, and to the job's shape).
  *
  * What it signs, it checks first: the run is a push to main, and the
  * manifest is a release manifest of this very commit (`GITHUB_SHA`),
  * under an id of this month (`YY.MM.N`), as the publish's stage job
- * stamped it. Its contents it can't check: what the run's
- * build and stage jobs made is what's signed. The signature proves "CI
- * built this from that commit on main", not that its dependencies were
- * clean.
+ * stamped it. Its contents it can't check: what the run's build and
+ * stage jobs made is what's signed. The signature proves "CI built this
+ * from that commit on main", not that its dependencies were clean.
  *
- * It writes the signature file beside the manifest
- * (`manifest.signature.json`): an Ed25519 signature over
- * "grasp-release-manifest\n" and the manifest's exact bytes, with the
- * public key, both base64url. Every verifier reads it with the shared
- * package's release-signature module, which builds the same bytes; this
- * file's tests verify what it signs there.
+ * KMS signs, with Ed25519, "grasp-release-manifest\n", the id, "\n" and
+ * the manifest's SHA-256 (hex), the bytes every verifier rebuilds with
+ * the shared package's release-signature module; this file's tests verify
+ * what it signs there. Both ways the bytes are checked against CRC32C as
+ * KMS asks, and the answer must name the key version asked for. It writes
+ * the signature file beside the manifest (`manifest.signature.json`):
+ * the algorithm, the key version (the key's id in the trusted list) and
+ * the signature, base64url. A failure fails the job; the next merge, or
+ * a re-run, signs again.
  *
- * Env: RELEASE_SIGNING_KEY (the Ed25519 private key, as a JWK), and
- *      GITHUB_EVENT_NAME, GITHUB_REF and GITHUB_SHA, which GitHub sets
+ * Env: ACTIONS_ID_TOKEN_REQUEST_URL and ACTIONS_ID_TOKEN_REQUEST_TOKEN
+ *      (GitHub sets them for a job with `id-token: write`), and
+ *      GITHUB_EVENT_NAME, GITHUB_REF and GITHUB_SHA
  * Usage: node scripts/release/sign-manifest.ts <dir holding manifest.json>
  */
-import { createPrivateKey, createPublicKey, sign } from "node:crypto";
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -52,6 +61,73 @@ const parsed = (text: string, reason: string): unknown => {
     return fail(reason);
   }
 };
+
+/** `name` of `value`, a string matching `pattern`, or the end with `reason`. */
+const stringOf = (
+  value: unknown,
+  name: string,
+  pattern: RegExp,
+  reason: string
+): string => {
+  const field = fieldOf(value, name);
+  return typeof field === "string" && pattern.test(field)
+    ? field
+    : fail(reason);
+};
+
+/* oxlint-disable no-bitwise -- CRC32C is 32-bit arithmetic */
+/** CRC32C (Castagnoli) of `bytes`, as KMS checks what it's sent and sent back. */
+const crc32c = (bytes: Uint8Array): number => {
+  let crc = 0xff_ff_ff_ff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = crc & 1 ? (crc >>> 1) ^ 0x82_f6_3b_78 : crc >>> 1;
+    }
+  }
+  return (crc ^ 0xff_ff_ff_ff) >>> 0;
+};
+/* oxlint-enable no-bitwise */
+
+/** The JSON `what` answers to `init` at `url`, or the end, with what it said. */
+const ask = async (
+  what: string,
+  url: string,
+  init: RequestInit
+): Promise<unknown> => {
+  let response: Response;
+  try {
+    response = await fetch(url, init);
+  } catch (error) {
+    return fail(`${what} couldn't be reached (${String(error)})`);
+  }
+  const body = await response.text();
+  if (!response.ok) {
+    return fail(`${what} answered ${response.status}: ${body.slice(0, 2000)}`);
+  }
+  return parsed(body, `${what} answered with something that isn't JSON`);
+};
+
+// The identifiers Google gave the key and the identity, which aren't
+// secrets: the workload identity provider
+// (`projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>`)
+// and the key version that signs.
+const config = parsed(
+  readFileSync(path.join(import.meta.dirname, "release-signing.json"), "utf-8"),
+  "release-signing.json isn't JSON"
+);
+const provider = stringOf(
+  config,
+  "workloadIdentityProvider",
+  /^projects\/\d+\/locations\/global\/workloadIdentityPools\/[a-z0-9-]+\/providers\/[a-z0-9-]+$/u,
+  "release-signing.json names no workload identity provider"
+);
+const keyVersion = stringOf(
+  config,
+  "keyVersion",
+  /^projects\/[a-z0-9-]+\/locations\/[a-z0-9-]+\/keyRings\/[\w-]+\/cryptoKeys\/[\w-]+\/cryptoKeyVersions\/\d+$/u,
+  "release-signing.json names no key version"
+);
 
 const dir = process.argv[2] ?? fail("Usage: sign-manifest.ts <release dir>");
 
@@ -97,6 +173,7 @@ const parts =
     ? /^(?<month>\d{2}\.\d{2}\.)(?<n>[1-9]\d{0,4})$/u.exec(releaseId)?.groups
     : undefined;
 if (
+  typeof releaseId !== "string" ||
   parts?.month === undefined ||
   !months.has(parts.month) ||
   Number(parts.n) > MAX_RELEASE_N
@@ -106,37 +183,97 @@ if (
   );
 }
 
-// An Ed25519 key, whatever else the JWK says; its public half as the
-// private one makes it, never as the JWK says.
-const jwk = parsed(
-  env("RELEASE_SIGNING_KEY"),
-  "RELEASE_SIGNING_KEY isn't a JWK"
+const message = Buffer.from(
+  `grasp-release-manifest\n${String(releaseId)}\n${createHash("sha256").update(manifestBytes).digest("hex")}`
 );
-const privateKey = (() => {
-  const d = fieldOf(jwk, "d");
-  const x = fieldOf(jwk, "x");
-  const notKey = "RELEASE_SIGNING_KEY isn't an Ed25519 private key as a JWK";
-  if (typeof d !== "string" || typeof x !== "string") {
-    return fail(notKey);
-  }
-  try {
-    return createPrivateKey({
-      key: { kty: "OKP", crv: "Ed25519", d, x },
-      format: "jwk",
-    });
-  } catch {
-    return fail(notKey);
-  }
-})();
-const publicKey = createPublicKey(privateKey).export({ format: "jwk" }).x;
 
-const signature = sign(
-  null,
-  Buffer.concat([Buffer.from("grasp-release-manifest\n"), manifestBytes]),
-  privateKey
+// 1. GitHub's OIDC token for this job, for the provider's default
+// audience.
+const idToken = fieldOf(
+  await ask(
+    "GitHub's token service",
+    `${env("ACTIONS_ID_TOKEN_REQUEST_URL")}&audience=${encodeURIComponent(`https://iam.googleapis.com/${provider}`)}`,
+    {
+      headers: {
+        authorization: `bearer ${env("ACTIONS_ID_TOKEN_REQUEST_TOKEN")}`,
+      },
+    }
+  ),
+  "value"
 );
+if (typeof idToken !== "string") {
+  fail("GitHub's token service gave no token");
+}
+
+// 2. Google's federated access token for it, with no service account:
+// the key's IAM policy names the federated identity itself.
+const accessToken = fieldOf(
+  await ask(
+    "Google's Security Token Service",
+    "https://sts.googleapis.com/v1/token",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        grantType: "urn:ietf:params:oauth:grant-type:token-exchange",
+        audience: `//iam.googleapis.com/${provider}`,
+        scope: "https://www.googleapis.com/auth/cloud-platform",
+        requestedTokenType: "urn:ietf:params:oauth:token-type:access_token",
+        subjectTokenType: "urn:ietf:params:oauth:token-type:jwt",
+        subjectToken: idToken,
+      }),
+    }
+  ),
+  "access_token"
+);
+if (typeof accessToken !== "string") {
+  fail("Google's Security Token Service gave no access token");
+}
+
+// 3. The signature, by the key version named, over exactly the message.
+const signed = await ask(
+  "Cloud KMS",
+  `https://cloudkms.googleapis.com/v1/${keyVersion}:asymmetricSign`,
+  {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${String(accessToken)}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      data: message.toString("base64"),
+      dataCrc32c: String(crc32c(message)),
+    }),
+  }
+);
+if (fieldOf(signed, "name") !== keyVersion) {
+  fail(
+    `Cloud KMS signed with ${String(fieldOf(signed, "name"))}, not ${keyVersion}`
+  );
+}
+if (fieldOf(signed, "verifiedDataCrc32c") !== true) {
+  fail("Cloud KMS didn't check the message against its CRC32C");
+}
+const encoded = fieldOf(signed, "signature");
+const signature = Buffer.from(
+  typeof encoded === "string" ? encoded : "",
+  "base64"
+);
+if (
+  signature.length === 0 ||
+  fieldOf(signed, "signatureCrc32c") !== String(crc32c(signature))
+) {
+  fail("Cloud KMS's signature doesn't match its CRC32C");
+}
+
 writeFileSync(
   path.join(dir, "manifest.signature.json"),
-  JSON.stringify({ key: publicKey, signature: signature.toString("base64url") })
+  JSON.stringify({
+    alg: "Ed25519",
+    keyId: keyVersion,
+    signature: signature.toString("base64url"),
+  })
 );
-console.info(`Signed release ${String(releaseId)} of ${String(commit)}`);
+console.info(
+  `Signed release ${String(releaseId)} of ${String(commit)} with ${keyVersion}`
+);

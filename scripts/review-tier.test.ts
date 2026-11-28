@@ -95,7 +95,7 @@ describe("the Security floor", () => {
       ".github/rulesets/main.json",
       ".github/CODEOWNERS",
       "scripts/release/sign-manifest.ts",
-      "scripts/release/signing-environment.ts",
+      "scripts/release/release-signing.json",
       "packages/shared/src/release-signing-keys.ts",
       "packages/shared/src/release-signature.ts",
       "scripts/github-setup.ts",

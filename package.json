@@ -39,7 +39,6 @@
     "e2e:durations": "node scripts/e2e-durations.ts",
     "release:build": "node scripts/release/build-release.ts",
     "release:upload": "node scripts/release/upload-release.ts",
-    "release:signing-key": "node scripts/release/signing-environment.ts key",
     "release:download": "node scripts/release/download-release.ts",
     "release:model-files": "node scripts/release/upload-model-files.ts",
     "model-files": "node scripts/model-files.ts",

@@ -12,9 +12,10 @@
  * manifest exists. A new one is checked against its manifest, then
  * recorded with its audit event:
  *
- * - its manifest: signed by a key Grasp trusts, at the signature file
- *   CI stored before it (@grasp-os/shared/release-signature); its id the
- *   one its key names, every blob at its content address, every static
+ * - its manifest: of this month or one before (`isOfMonthToCome`); signed
+ *   by a key Grasp trusts, at the signature file CI stored before it
+ *   (@grasp-os/shared/release-signature); its id the one its key names,
+ *   every blob at its content address, every static
  *   file it indexes one a Worker serves (`blobsOf`);
  * - each blob the newest imported release whose bundle is kept checked
  *   the same way (the same key, size and, for a static file, extension:
@@ -83,6 +84,7 @@ import type {
 } from "@grasp-os/shared/release";
 import {
   compareReleaseIds,
+  parsePublishedReleaseId,
   releaseIdSchema,
 } from "@grasp-os/shared/release-id";
 import {
@@ -104,6 +106,7 @@ import {
 } from "../db/schema.ts";
 import { toEdge } from "../rollout/channels.ts";
 import { recordBlobs } from "./blobs.ts";
+import { releaseNow } from "./release-clock.ts";
 
 /**
  * The releases bucket, as the import uses it: reading only, so the import
@@ -533,6 +536,23 @@ const checkSignature = async (
   }
 };
 
+/**
+ * Whether release `id` is of a month after `now`'s (UTC). The admin moves
+ * Edge only to a newer id, so one of a month to come would hold Edge
+ * until that month and beyond; CI's signer signs no such id
+ * (scripts/release/sign-manifest.ts), so one is refused, with an alert,
+ * before anything of it is read.
+ */
+const isOfMonthToCome = (id: string, now: Date): boolean => {
+  const parts = parsePublishedReleaseId(id);
+  const MONTHS = 12;
+  return (
+    parts !== undefined &&
+    parts.year * MONTHS + parts.month >
+      (now.getUTCFullYear() % 100) * MONTHS + now.getUTCMonth() + 1
+  );
+};
+
 /** How many of release `id`'s blobs an earlier attempt checked, for this very manifest. */
 const resumeAt = async (
   db: AdminDatabase,
@@ -587,6 +607,11 @@ const importRelease = async (
   db: AdminDatabase,
   id: string
 ): Promise<"imported" | "absent" | "deferred"> => {
+  if (isOfMonthToCome(id, releaseNow())) {
+    const error = new Error(`Release ${id} is of a month still to come`);
+    error.name = "FutureReleaseError";
+    throw error;
+  }
   const manifestBytes = await reader.read(
     manifestKey(id),
     (size) => size <= MAX_MANIFEST_BYTES,
