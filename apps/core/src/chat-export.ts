@@ -42,17 +42,20 @@ export interface ExportedPage {
   /** The last pi entry its messages hold; `null` for none. */
   through: number | null;
   page: ExportedMessage[];
+  /** The ID the next page goes on after; `null` once this page is the last. */
+  next: number | null;
 }
 
-/** One of a chat's files: a file's text, or how many parts a picture's bytes are in. */
+/** One of a chat's files, its bytes handed over in parts (`exportFilePart`). */
 export interface ExportedFile {
   id: string;
   messageId: number | null;
   name: string;
   type: ChatFileType | ChatPictureType;
   createdAt: number;
-  /** A file's text; `null` for a picture, whose bytes are in parts. */
-  text: string | null;
+  /** Its size as it was attached: a file's text, all that is kept of it, may be smaller. */
+  bytes: number;
+  /** How many parts its bytes are in: a picture's, or one, a file's text. */
   parts: number;
 }
 
@@ -70,7 +73,10 @@ export interface ExportedHeldCall {
   status: "waiting" | "confirmed" | "declined" | "lapsed";
 }
 
-/** What a chat read and ran: its sources, its runs' sources and records, its calls, its trace. */
+/**
+ * What a chat read and ran: its sources, its runs' sources and records,
+ * its calls, its trace; and which of its calls a press took.
+ */
 export interface ExportedTurnState {
   sources: { sourceId: string; createdAt: number }[];
   runSources: { runId: string; sourceId: string; withheldAt: number | null }[];
@@ -96,4 +102,11 @@ export interface ExportedTurnState {
     createdAt: number;
   }[];
   trace: string[];
+  /**
+   * The calls a person's press took (chats-rpc.ts: Build it a plan, Make
+   * it a drafted agent, Change it a change), by tool, so none is taken twice.
+   */
+  taken: Record<"proposePlan" | "draftAgent" | "draftAgentChange", string[]>;
+  /** The agent Make it made of a draft whose instructions it couldn't save, by the draft's call. */
+  draftMade: Record<string, string>;
 }

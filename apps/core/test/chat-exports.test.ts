@@ -8,7 +8,7 @@ import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { chatFilePartBytes } from "../src/workspace.ts";
 import { chatOf, says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
-import { signedInWithRole } from "./sign-in.ts";
+import { outcome, signedInWithRole } from "./sign-in.ts";
 
 // What a person's Workspace hands a chat's own object to take the chat
 // over (workspace.ts `export*`, chat-export.ts): read only, for the chat
@@ -25,6 +25,15 @@ const chatFor = async () => {
   };
   return { ...made, userId, ref };
 };
+
+/** The text of the first of `files`, as its one part hands it over. */
+const textOf = async (
+  chat: Awaited<ReturnType<typeof chatFor>>,
+  files: readonly { id: string }[] | undefined
+): Promise<string> =>
+  new TextDecoder().decode(
+    await chat.stub.exportFilePart(chat.ref, files?.[0]?.id ?? "", 0)
+  );
 
 describe("a chat's export from its Workspace", () => {
   it("hands over its messages a page at a time, what it is, its files, held writes and runs, the same each time", async () => {
@@ -51,12 +60,12 @@ describe("a chat's export from its Workspace", () => {
       Date.now()
     );
 
-    const all = await chat.stub.exportMessages(chat.ref, 0, 1000);
+    const all = await chat.stub.exportMessages(chat.ref, 0, 200);
     const first = await chat.stub.exportMessages(chat.ref, 0, 2);
     const next = await chat.stub.exportMessages(
       chat.ref,
-      first?.page.at(-1)?.id ?? 0,
-      1000
+      first?.next ?? 0,
+      200
     );
     const files = await chat.stub.exportFiles(chat.ref);
     const held = await chat.stub.exportHeldAppCalls(chat.ref);
@@ -76,13 +85,14 @@ describe("a chat's export from its Workspace", () => {
       ).length,
       files: files?.map((file) => ({
         name: file.name,
-        text: file.text,
+        bytes: file.bytes,
         parts: file.parts,
       })),
+      text: await textOf(chat, files),
       held: held?.map(({ request, status }) => ({ request, status })),
       // Each turn's recall is a run of its own.
       runs: ran?.codeRuns.length,
-      again: await chat.stub.exportMessages(chat.ref, 0, 1000),
+      again: await chat.stub.exportMessages(chat.ref, 0, 200),
     }).toStrictEqual({
       facts: {
         personId: chat.userId,
@@ -96,7 +106,8 @@ describe("a chat's export from its Workspace", () => {
       paged: all?.page.map(({ id }) => id),
       firstPage: 2,
       questions: 2,
-      files: [{ name: "notes.txt", text: "hello", parts: 0 }],
+      files: [{ name: "notes.txt", bytes: 5, parts: 1 }],
+      text: "hello",
       held: [{ request: "held", status: "waiting" }],
       runs: 2,
       again: all,
@@ -128,12 +139,12 @@ describe("a chat's export from its Workspace", () => {
     );
 
     expect({
-      text: shown?.text,
+      bytes: shown?.bytes,
       parts: parts.length,
       whole:
         joined.length === picture.byteLength &&
         joined.every((byte, at) => byte === picture[at]),
-    }).toStrictEqual({ text: null, parts: 2, whole: true });
+    }).toStrictEqual({ bytes: picture.byteLength, parts: 2, whole: true });
   });
 
   it("hands over nothing for a reference naming another Workspace, a chat it doesn't hold, or one being deleted", async () => {
@@ -174,5 +185,93 @@ describe("a chat's export from its Workspace", () => {
       unheld: none,
       deleting: none,
     });
+  });
+
+  it("hands over nothing of a chat once its person's erasure began, before it wiped anything", async () => {
+    const chat = await chatFor();
+    await chat.ask("A question.");
+    const during = await runInDurableObject(chat.stub, async (instance) => {
+      // Asked as the erasure begins: it has marked itself, and wiped nothing.
+      const erased = instance.erasePerson(chat.userId);
+      const messages = instance.exportMessages(chat.ref, 0, 10);
+      const rest = [
+        instance.exportFiles(chat.ref),
+        instance.exportFilePart(chat.ref, crypto.randomUUID(), 0),
+        instance.exportHeldAppCalls(chat.ref),
+        instance.exportTurnState(chat.ref),
+      ];
+      await erased;
+      return [await messages, ...rest];
+    });
+
+    expect(during).toStrictEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it("refuses a page or part asked for past its bounds: a cursor, size or part that isn't a whole number in range", async () => {
+    const chat = await chatFor();
+    await chat.ask("A question.");
+    const page = async (after: unknown, limit: unknown) =>
+      await outcome(chat.stub.exportMessages(chat.ref, after, limit));
+    const part = async (at: unknown) =>
+      await outcome(
+        chat.stub.exportFilePart(chat.ref, crypto.randomUUID(), at)
+      );
+
+    expect({
+      limits: await Promise.all(
+        [Number.NaN, 0, -1, 1.5, 201, Number.POSITIVE_INFINITY, "2"].map(
+          async (limit) => await page(0, limit)
+        )
+      ),
+      afters: await Promise.all(
+        [-1, 1.5, Number.NaN, "0"].map(async (after) => await page(after, 10))
+      ),
+      parts: await Promise.all(
+        [-1, 0.5, Number.NaN].map(async (at) => await part(at))
+      ),
+      bounds: [await page(0, 1), await page(0, 200)],
+    }).toStrictEqual({
+      limits: Array.from({ length: 7 }, () => "agent.invalid_request"),
+      afters: Array.from({ length: 4 }, () => "agent.invalid_request"),
+      parts: Array.from({ length: 3 }, () => "agent.invalid_request"),
+      bounds: ["ok", "ok"],
+    });
+  });
+
+  it("hands over a page of messages up to its bytes, the first however large, and says where the next goes on", async () => {
+    const chat = await chatFor();
+    // Three messages of millions of characters, kept as a long chat keeps
+    // them: past a page's bytes together, and the first alone.
+    const sizes = [5_000_000, 2_500_000, 2_500_000];
+    await runInDurableObject(chat.stub, (_instance, state) => {
+      for (const size of sizes) {
+        state.storage.sql.exec(
+          "INSERT INTO chat_messages (chat_id, message, created_at) VALUES (?, ?, ?)",
+          chat.chat.id,
+          JSON.stringify({
+            role: "user",
+            content: "x".repeat(size),
+            timestamp: Date.now(),
+          }),
+          Date.now()
+        );
+      }
+    });
+    const pages: number[][] = [];
+    let after: number | null = 0;
+    while (after !== null) {
+      // oxlint-disable-next-line no-await-in-loop -- a page after the other
+      const handed = await chat.stub.exportMessages(chat.ref, after, 200);
+      pages.push((handed?.page ?? []).map(({ message }) => message.length));
+      after = handed?.next ?? null;
+    }
+
+    expect(pages.map((page) => page.length)).toStrictEqual([1, 1, 1]);
   });
 });
