@@ -50,6 +50,11 @@ const securityPaths: readonly RegExp[] = [
   /^apps\/core\/src\/auth\//u,
   /^\.github\/(?:workflows|rulesets)\/|^\.github\/CODEOWNERS$/u,
   /^\.secretlintrc\.json$/u,
+  // How releases are signed and which keys are trusted, and the script
+  // that applies the repository's rules and the signing environment.
+  /^scripts\/release\/(?:sign-manifest|signing-environment)/u,
+  /^packages\/shared\/src\/release-(?:signing-keys|signature)\.ts$/u,
+  /^scripts\/github-setup\.ts$/u,
   // What's installed, and what may run while installing (`allowBuilds`).
   /^(?:pnpm-workspace\.yaml|pnpm-lock\.yaml|\.npmrc)$/u,
   // This classifier: a PR that weakens it is classified by main's copy,

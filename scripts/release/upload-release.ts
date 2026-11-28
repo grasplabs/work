@@ -352,7 +352,8 @@ const verifiedSignature = async (): Promise<Buffer> => {
   const problem = await releaseSignatureProblem(
     manifestBytes,
     signature,
-    releaseSigningKeys
+    releaseSigningKeys,
+    manifest.releaseId
   );
   if (problem !== undefined || signature === undefined) {
     throw new Error(

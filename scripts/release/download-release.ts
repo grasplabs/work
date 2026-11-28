@@ -116,7 +116,8 @@ const signature = await readSignature();
 const problem = await releaseSignatureProblem(
   manifestBytes,
   signature,
-  releaseSigningKeys
+  releaseSigningKeys,
+  releaseId
 );
 if (problem !== undefined) {
   throw new Error(`Release ${releaseId} ${problem}; nothing promoted`);

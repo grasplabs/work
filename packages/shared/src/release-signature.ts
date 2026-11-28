@@ -95,17 +95,42 @@ const parsedSignature = (
 };
 
 /**
- * Why a manifest, `manifestBytes` as published, doesn't verify with
- * `signatureBytes` (its signature file, undefined when there's none)
- * against `trusted` keys (the caller's
- * `@grasp-os/shared/release-signing-keys`); undefined when it does. An
- * empty `trusted` verifies nothing.
+ * The release id a manifest's bytes name, or undefined when they aren't
+ * a JSON object naming one.
+ */
+const namedReleaseId = (manifestBytes: Uint8Array): string | undefined => {
+  try {
+    const named = z
+      .looseObject({ releaseId: z.string() })
+      .safeParse(
+        JSON.parse(
+          new TextDecoder("utf-8", { fatal: true }).decode(manifestBytes)
+        )
+      );
+    return named.success ? named.data.releaseId : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Why a manifest, `manifestBytes` as published, isn't release
+ * `releaseId`'s, signed: it doesn't name that id (so a signed manifest
+ * never passes under another), or doesn't verify with `signatureBytes`
+ * (its signature file, undefined when there's none) against `trusted`
+ * keys (the caller's `@grasp-os/shared/release-signing-keys`); undefined
+ * when it is. An empty `trusted` verifies nothing.
  */
 export const releaseSignatureProblem = async (
   manifestBytes: Uint8Array,
   signatureBytes: Uint8Array | undefined,
-  trusted: readonly string[]
+  trusted: readonly string[],
+  releaseId: string
 ): Promise<string | undefined> => {
+  const named = namedReleaseId(manifestBytes);
+  if (named !== releaseId) {
+    return `has a manifest of release ${named ?? "(none)"}, not ${releaseId}`;
+  }
   if (signatureBytes === undefined) {
     return "isn't signed";
   }

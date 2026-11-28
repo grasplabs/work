@@ -26,7 +26,12 @@ const manifest = encoder.encode(
 );
 
 const problem = async (bytes: Uint8Array, signature?: Uint8Array) =>
-  await releaseSignatureProblem(bytes, signature, releaseSigningKeys);
+  await releaseSignatureProblem(
+    bytes,
+    signature,
+    releaseSigningKeys,
+    "26.12.1"
+  );
 
 describe("a release's signature", () => {
   it("verifies the manifest it was made for, and the same signature every time", async () => {
@@ -46,7 +51,8 @@ describe("a release's signature", () => {
       testReleaseSigningKey
     );
     const changed = Uint8Array.from(manifest);
-    changed[changed.length - 2] = "?".codePointAt(0) ?? 0;
+    // The last character of the commit, still a manifest of 26.12.1.
+    changed[changed.length - 4] = "b".codePointAt(0) ?? 0;
     await expect(problem(changed, signature)).resolves.toBe(
       "has a signature that doesn't match it"
     );
@@ -79,6 +85,31 @@ describe("a release's signature", () => {
     });
   });
 
+  it("fails a signed manifest taken for another release's, or bytes naming none, so no verifier can forget to compare the id", async () => {
+    const signature = await signReleaseManifest(
+      manifest,
+      testReleaseSigningKey
+    );
+    const notJson = encoder.encode("not json");
+    expect({
+      otherId: await releaseSignatureProblem(
+        manifest,
+        signature,
+        releaseSigningKeys,
+        "26.12.2"
+      ),
+      noId: await releaseSignatureProblem(
+        notJson,
+        await signReleaseManifest(notJson, testReleaseSigningKey),
+        releaseSigningKeys,
+        "26.12.1"
+      ),
+    }).toStrictEqual({
+      otherId: "has a manifest of release 26.12.1, not 26.12.2",
+      noId: "has a manifest of release (none), not 26.12.1",
+    });
+  });
+
   it("is refused when it's missing, whatever the release", async () => {
     await expect(problem(manifest)).resolves.toBe("isn't signed");
   });
@@ -89,7 +120,7 @@ describe("a release's signature", () => {
       testReleaseSigningKey
     );
     await expect(
-      releaseSignatureProblem(manifest, signature, [])
+      releaseSignatureProblem(manifest, signature, [], "26.12.1")
     ).resolves.toBe("is signed with a key Grasp doesn't trust");
   });
 });

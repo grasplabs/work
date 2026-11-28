@@ -476,7 +476,8 @@ describe("publishing a release", () => {
     return await releaseSignatureProblem(
       bytes,
       bucket.objects.get(signatureKey(sha256Hex(bytes))),
-      releaseSigningKeys
+      releaseSigningKeys,
+      id
     );
   };
 

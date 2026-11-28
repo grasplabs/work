@@ -10,8 +10,8 @@
  *
  * What it signs, it checks first: the run is a push to main, and the
  * manifest is a release manifest of this very commit (`GITHUB_SHA`),
- * under a published id (`YY.MM.N`), as the publish's stage job stamped
- * it. Its contents it can't check: what the run's
+ * under an id of this month (`YY.MM.N`), as the publish's stage job
+ * stamped it. Its contents it can't check: what the run's
  * build and stage jobs made is what's signed. The signature proves "CI
  * built this from that commit on main", not that its dependencies were
  * clean.
@@ -74,14 +74,36 @@ if (commit !== env("GITHUB_SHA")) {
     `The manifest is commit ${String(commit)}'s; this run is ${env("GITHUB_SHA")}'s`
   );
 }
-// A published id (`YY.MM.N`, @grasp-os/shared/release-id), never a local
-// build's: the stage job stamped it.
+// An id of this month (`YY.MM.N`, UTC, @grasp-os/shared/release-id), as
+// the stage job stamps it: the admin moves Edge only to a newer id, and
+// published manifests can't be rewritten, so a signed id far ahead would
+// hold Edge for good. Of this month, such an id holds it until the month
+// ends at most. The month before passes for `ROLLOVER_HOURS` into a new
+// month, so a release staged before midnight is still signed after it;
+// its ids sort below the new month's anyway. N stays within
+// `MAX_RELEASE_N`, far above any month's releases (a few hundred).
+const ROLLOVER_HOURS = 6;
+const MAX_RELEASE_N = 99_999;
+const monthOf = (at: Date): string =>
+  `${String(at.getUTCFullYear() % 100).padStart(2, "0")}.${String(at.getUTCMonth() + 1).padStart(2, "0")}.`;
+const now = new Date();
+const months = new Set([
+  monthOf(now),
+  monthOf(new Date(now.getTime() - ROLLOVER_HOURS * 60 * 60 * 1000)),
+]);
 const releaseId = fieldOf(manifest, "releaseId");
+const parts =
+  typeof releaseId === "string"
+    ? /^(?<month>\d{2}\.\d{2}\.)(?<n>[1-9]\d{0,4})$/u.exec(releaseId)?.groups
+    : undefined;
 if (
-  typeof releaseId !== "string" ||
-  !/^\d{2}\.(?:0[1-9]|1[0-2])\.[1-9]\d{0,8}$/u.test(releaseId)
+  parts?.month === undefined ||
+  !months.has(parts.month) ||
+  Number(parts.n) > MAX_RELEASE_N
 ) {
-  fail(`Release ${String(releaseId)} isn't a published release's id`);
+  fail(
+    `Release ${String(releaseId)} isn't an id of this month's (${[...months].join(" or ")}N, N at most ${MAX_RELEASE_N})`
+  );
 }
 
 // An Ed25519 key, whatever else the JWK says; its public half as the

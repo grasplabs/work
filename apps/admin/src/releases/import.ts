@@ -523,7 +523,8 @@ const checkSignature = async (
   const problem = await releaseSignatureProblem(
     manifestBytes,
     signature,
-    releaseSigningKeys
+    releaseSigningKeys,
+    id
   );
   if (problem !== undefined) {
     const error = new Error(`Release ${id} ${problem}`);

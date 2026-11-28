@@ -1,12 +1,21 @@
 /**
- * Applies the repository settings and branch rulesets in `.github/rulesets`
- * to GitHub, so they are versioned and reviewed like code. Re-run after any
- * change: existing rulesets are updated by name. Needs `gh` signed in as an
- * admin of the repository.
+ * Applies the repository settings, the branch rulesets in
+ * `.github/rulesets` and the release signing key's environment
+ * (scripts/release/signing-environment-lib.ts) to GitHub, so they are
+ * versioned and reviewed like code. Re-run after any change: existing
+ * rulesets are updated by name, and the environment is read back and
+ * checked. Needs `gh` signed in as an admin of the repository.
  */
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+
+import {
+  applySigningEnvironment,
+  githubApi,
+  SIGNING_ENVIRONMENT,
+  signingEnvironmentProblem,
+} from "./release/signing-environment-lib.ts";
 
 const RULESETS_DIR = path.join(import.meta.dirname, "../.github/rulesets");
 
@@ -73,3 +82,11 @@ for (const file of readdirSync(RULESETS_DIR)) {
   gh(["api", "--method", method, endpoint, "--input", "-"], body);
   console.info(`${id === undefined ? "Created" : "Updated"} ruleset ${name}`);
 }
+
+const api = githubApi(gh(["auth", "token"]).trim());
+await applySigningEnvironment(api, repo);
+const problem = await signingEnvironmentProblem(api, repo);
+if (problem !== undefined) {
+  throw new Error(`${problem}, read back after setting it`);
+}
+console.info(`Set environment ${SIGNING_ENVIRONMENT}: main alone may use it`);
