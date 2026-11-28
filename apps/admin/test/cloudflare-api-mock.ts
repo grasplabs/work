@@ -40,9 +40,12 @@ export const mockCloudflareApi = (
     );
   });
   afterEach(async () => {
-    await settleRuns();
-    vi.restoreAllMocks();
-    fake.reset();
+    try {
+      await settleRuns();
+    } finally {
+      vi.restoreAllMocks();
+      fake.reset();
+    }
   }, settleTimeoutMs + 10_000);
   return fake;
 };

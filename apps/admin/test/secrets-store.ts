@@ -52,10 +52,13 @@ export const useStoreSecrets = (tokens: { deployer: string }): void => {
   });
   afterEach(async () => {
     // A run the test started reads these: settled first.
-    await settleRuns();
-    for (const { admin, id } of stored.splice(0)) {
-      // oxlint-disable-next-line no-await-in-loop -- a few, in order
-      await admin.delete(id);
+    try {
+      await settleRuns();
+    } finally {
+      for (const { admin, id } of stored.splice(0)) {
+        // oxlint-disable-next-line no-await-in-loop -- a few, in order
+        await admin.delete(id);
+      }
     }
   }, settleTimeoutMs + 10_000);
 };
