@@ -30,8 +30,15 @@ import { alerts, clients } from "../db/schema.ts";
 import { alertChannelIds } from "./alert-channels.ts";
 import type { AlertChannel } from "./alert-channels.ts";
 import { onChannels, switchedOn } from "./channels.ts";
-import { messageFor } from "./senders.ts";
-import type { AlertMessage, AlertSender } from "./senders.ts";
+import type { AlertOrganization } from "./message.ts";
+import { factsOf, messageOf } from "./message.ts";
+import type { AlertSender } from "./senders.ts";
+
+/**
+ * When a recovery's failure was recorded, in epoch milliseconds: set by
+ * `alert` from the failure's row, never by its callers.
+ */
+const failedAtSchema = z.number().int().optional();
 
 /**
  * What changed: a release that failed to import, or imported after that;
@@ -45,7 +52,11 @@ export const alertEventSchema = z.discriminatedUnion("kind", [
     code: z.string(),
     attempt: z.number().int(),
   }),
-  z.object({ kind: z.literal("imported"), releaseId: z.string() }),
+  z.object({
+    kind: z.literal("imported"),
+    releaseId: z.string(),
+    failedAt: failedAtSchema,
+  }),
   z.object({
     kind: z.literal("deploy_failed"),
     clientId: z.string(),
@@ -56,6 +67,7 @@ export const alertEventSchema = z.discriminatedUnion("kind", [
     kind: z.literal("deployed"),
     clientId: z.string(),
     releaseId: z.string(),
+    failedAt: failedAtSchema,
   }),
 ]);
 export type AlertEvent = z.infer<typeof alertEventSchema>;
@@ -136,7 +148,8 @@ export const alert = async (
         .update(alerts)
         .set({
           failing,
-          event: JSON.stringify(event),
+          // With when it failed, which the recovery tells.
+          event: sql`json_set(${JSON.stringify(event)}, '$.failedAt', ${alerts.changedAt})`,
           changedAt: now,
           pending: sql`${alerts.told}`,
           attempts: 0,
@@ -150,46 +163,6 @@ export const alert = async (
       error: error instanceof Error ? error.name : "unknown",
     });
   }
-};
-
-/**
- * `event` as a message: what happened, to which release and organization,
- * its code, and where in the admin to look.
- */
-export const messageOf = (
-  env: Env,
-  event: AlertEvent,
-  name: string | null
-): AlertMessage => {
-  const releases = "/platform/releases";
-  if (event.kind === "import_failed") {
-    return messageFor(env, {
-      subject: `Release ${event.releaseId} didn't import`,
-      text: `The admin couldn't import release ${event.releaseId} (${event.code}, attempt ${event.attempt}). It tries again by itself, waiting longer each time; it reaches no channel until it imports.`,
-      path: releases,
-    });
-  }
-  if (event.kind === "imported") {
-    return messageFor(env, {
-      subject: `Release ${event.releaseId} imported`,
-      text: `Release ${event.releaseId} imported after failing before.`,
-      path: releases,
-    });
-  }
-  const organization =
-    name === null ? event.clientId : `${name} (${event.clientId})`;
-  const setup = `/organizations/${encodeURIComponent(event.clientId)}/setup`;
-  return event.kind === "deploy_failed"
-    ? messageFor(env, {
-        subject: `${organization}: deploy of ${event.releaseId} failed`,
-        text: `The deploy of release ${event.releaseId} to ${organization} failed (${event.code}). Retry it on its Setup once what stopped it is fixed.`,
-        path: setup,
-      })
-    : messageFor(env, {
-        subject: `${organization} deployed ${event.releaseId}`,
-        text: `${organization} runs release ${event.releaseId} now, after a failed deploy.`,
-        path: setup,
-      });
 };
 
 const pendingSchema = z.array(z.enum(alertChannelIds));
@@ -216,19 +189,23 @@ const readStored = (
   }
 };
 
-/** Organization `clientId`'s name as the admin keeps it; null for a release, or one it doesn't hold. */
-const nameOf = async (
+/** The organization `event` is about, as the admin keeps it; null for a release, or one it doesn't hold. */
+const organizationOf = async (
   db: AdminDatabase,
   event: AlertEvent
-): Promise<string | null> => {
+): Promise<AlertOrganization | null> => {
   if (!("clientId" in event)) {
     return null;
   }
-  const [client] = await db
-    .select({ name: clients.name })
+  const [organization] = await db
+    .select({
+      name: clients.name,
+      channel: clients.channel,
+      pinnedReleaseId: clients.pinnedReleaseId,
+    })
     .from(clients)
     .where(eq(clients.id, event.clientId));
-  return client?.name ?? null;
+  return organization ?? null;
 };
 
 /**
@@ -275,7 +252,14 @@ const deliverOne = async (
   const message =
     stored === null
       ? null
-      : messageOf(env, stored.event, await nameOf(db, stored.event));
+      : messageOf(
+          env,
+          factsOf(env, {
+            event: stored.event,
+            organization: await organizationOf(db, stored.event),
+            at: row.changedAt,
+          })
+        );
   for (const channel of stored?.pending ?? []) {
     const send = senders.get(channel);
     if (send === undefined || message === null) {
