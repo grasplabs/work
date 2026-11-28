@@ -3,6 +3,7 @@
  * each run's own object (Workerflow, src/workflow-runs.ts), as time
  * passing, a crash or a duplicate delivery would.
  */
+import { Workflow } from "@grasp-os/workerflow/binding";
 import { decode } from "@grasp-os/workerflow/codec";
 import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
 import { runObjectName } from "@grasp-os/workerflow/identity";
@@ -544,3 +545,68 @@ export const stepResult = async (
     },
     { ...waitFor, timeout: 30_000 }
   );
+
+/** How long `settleRuns` waits for a run's code to finish. */
+export const settleTimeoutMs = 60_000;
+
+/**
+ * The runs started since `trackRuns`, for `settleRuns`: each by its
+ * workflow and id, as an instance is bound to the request that made it.
+ */
+const tracked: { workflow: Workflow; id: string }[] = [];
+
+/**
+ * Notes each run the admin creates from now on (`Workflow.create`), for
+ * `settleRuns` to settle before the test's stand-ins go.
+ */
+export const trackRuns = (): void => {
+  // oxlint-disable-next-line typescript/unbound-method -- called on its own `this` below
+  const { create } = Workflow.prototype;
+  vi.spyOn(Workflow.prototype, "create").mockImplementation(
+    async function track(this: Workflow, options) {
+      const instance = await create.call(this, options);
+      tracked.push({ workflow: this, id: instance.id });
+      return instance;
+    }
+  );
+};
+
+/** Statuses of a run whose code may still be under way. */
+const busyStatuses: ReadonlySet<string> = new Set([
+  "queued",
+  "running",
+  "waitingForPause",
+  "rollingBack",
+]);
+
+/**
+ * Settles every run noted since `trackRuns`: once none has code under way
+ * (each ended, or waiting, paused, with nothing out), one that hasn't
+ * ended is terminated, so it starts nothing more. A run left going after
+ * its test reached the bindings the test had stood in for once they were
+ * gone (the dispatch namespace, the fake Cloudflare API) and failed outside
+ * any test, as an unhandled rejection that failed the whole file.
+ */
+export const settleRuns = async (): Promise<void> => {
+  const runs = tracked.splice(0);
+  await Promise.all(
+    runs.map(async ({ workflow, id }) => {
+      const instance = await workflow.get(id);
+      const { status } = await vi.waitFor(
+        async () => {
+          const now = await instance.status();
+          if (busyStatuses.has(now.status)) {
+            throw new Error(
+              `Run ${instance.id} is still ${now.status} after its test`
+            );
+          }
+          return now;
+        },
+        { interval: 50, timeout: settleTimeoutMs }
+      );
+      if (!endedStatuses.has(status)) {
+        await instance.terminate();
+      }
+    })
+  );
+};
