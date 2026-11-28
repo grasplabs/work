@@ -46,8 +46,8 @@
  * hand and never in 1Password or CI (scripts/optional-secrets.ts,
  * `handKeptSecrets`). Only staging's admin has it; production's answers
  * 404, as CI publishes to staging alone. The admin signs nothing: the
- * signing key is in no Cloudflare account (scripts/release/
- * sign-manifest.ts).
+ * signing key is in Google Cloud KMS, and only CI's sign-release may use
+ * it (scripts/release/sign-manifest.ts).
  *
  * What it gives a manifest's link for, it checks first: a release
  * manifest of the very commit GitHub says the run is building, under the
@@ -113,6 +113,7 @@ import {
   MAX_MANIFEST_BYTES,
   READ_BYTES_AT_ONCE,
 } from "./import.ts";
+import { releaseNow } from "./release-clock.ts";
 
 /** Where CI publishes. */
 export const releasePublishPath = "/release-publish";
@@ -485,7 +486,7 @@ const start = async (env: Env, ask: Ask): Promise<Response> => {
   if (marked?.published === true) {
     return json({ publishedAs: marked.id });
   }
-  const now = new Date();
+  const now = releaseNow();
   const held = await mapConcurrently(
     blobsOf(manifest),
     HEADS_AT_ONCE,
@@ -553,7 +554,7 @@ const finish = async (env: Env, ask: Ask): Promise<Response> => {
   if (marked.published) {
     return json({ publishedAs: marked.id });
   }
-  if (!isThisMonths(manifest.releaseId, new Date())) {
+  if (!isThisMonths(manifest.releaseId, releaseNow())) {
     return answer(
       409,
       `Release ${manifest.releaseId} isn't this month's: publish again`

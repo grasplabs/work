@@ -1,7 +1,7 @@
 /**
  * publish-release.ts run as CI's jobs run it, holding no key to the
- * bucket: `stage`, then CI's signer (sign-manifest.ts, with the tests'
- * key), then `finish`; against stand-ins for the outside systems it asks:
+ * bucket: `stage`, then CI's signer (sign-manifest.ts, against KMS's
+ * stand-in signing with the tests' key: fake-google.ts), then `finish`; against stand-ins for the outside systems it asks:
  * GitHub's token service; the staging admin's publish (apps/admin/src/
  * releases/publish.ts, tested in the admin), which gives the ids and the
  * links it is told to, and the manifest's only for a signature that
@@ -27,15 +27,16 @@ import { z } from "zod";
 
 import {
   releaseSigningKeys,
+  strangerSigningKey,
   testReleaseSigningKey,
 } from "../../packages/shared/test/release-signing-keys.ts";
-import type { ReleaseSigningJwk } from "../../packages/shared/test/release-signing-keys.ts";
+import type { TestSigningKey } from "../../packages/shared/test/release-signing-keys.ts";
 import { stampReleaseId } from "./assign-lib.ts";
+import { pushToMain, runSigner, TEST_NOW } from "./fake-google.ts";
 import { builds, info } from "./fixture-release.ts";
 import { generateManifest, writeRelease } from "./manifest-lib.ts";
 
 const SCRIPT = path.join(import.meta.dirname, "publish-release.ts");
-const SIGNER = path.join(import.meta.dirname, "sign-manifest.ts");
 const TRUST_TEST_KEY = path.join(import.meta.dirname, "trust-test-key.ts");
 const BUCKET = "grasp-releases-staging";
 const COMMIT = "1".repeat(40);
@@ -47,14 +48,6 @@ const HTTP_FORBIDDEN = 403;
 const HTTP_CONFLICT = 409;
 const HTTP_PRECONDITION_FAILED = 412;
 const HTTP_UNAVAILABLE = 503;
-
-/** A key nobody trusts: an attacker's, or a signing secret set up wrong. */
-const strangerKey: ReleaseSigningJwk = {
-  kty: "OKP",
-  crv: "Ed25519",
-  x: "A2VEuP3eHRFGIPqELZm-RDZnYWKhUXJLPFsDL5Y8xVY",
-  d: "7Bs1IAjNMwqAVTTNRQkEsTjYn2p3b4Vz3RhHn0GXi8o",
-};
 
 const fixture = await builds();
 const built = generateManifest(
@@ -127,9 +120,10 @@ interface Bucket {
 const manifestIdSchema = z.object({ releaseId: z.string() });
 
 describe("publishing a release as CI does, through the staging admin", () => {
-  // Ids of this month, as the admin gives only those.
-  const first = `${releaseMonthPrefix(new Date())}1`;
-  const second = `${releaseMonthPrefix(new Date())}2`;
+  // Ids of this month, as the admin gives only those, and as the signer
+  // signs only those: its clock is set to `TEST_NOW`.
+  const first = `${releaseMonthPrefix(new Date(TEST_NOW))}1`;
+  const second = `${releaseMonthPrefix(new Date(TEST_NOW))}2`;
   let dir = "";
   let server: Server | undefined;
   let origin = "";
@@ -317,7 +311,7 @@ describe("publishing a release as CI does, through the staging admin", () => {
    */
   const publish = async (
     head = COMMIT,
-    key: ReleaseSigningJwk = testReleaseSigningKey
+    key: TestSigningKey = testReleaseSigningKey
   ): Promise<string> => {
     const env = {
       PATH: process.env.PATH,
@@ -334,13 +328,10 @@ describe("publishing a release as CI does, through the staging admin", () => {
     if (!existsSync(stamped)) {
       return said;
     }
-    await run([SIGNER, staged], {
-      PATH: process.env.PATH,
-      GITHUB_EVENT_NAME: "push",
-      GITHUB_REF: "refs/heads/main",
-      GITHUB_SHA: COMMIT,
-      RELEASE_SIGNING_KEY: JSON.stringify(key),
-    });
+    const signed = await runSigner(staged, { env: pushToMain(COMMIT), key });
+    if (signed.code !== 0) {
+      throw new Error(signed.output);
+    }
     return (
       said +
       (await run(
@@ -443,7 +434,7 @@ describe("publishing a release as CI does, through the staging admin", () => {
   });
 
   it("publishes no manifest signed with a key Grasp doesn't trust: the admin gives it no link", async () => {
-    const outcome = await outcomeOf(publish(COMMIT, strangerKey));
+    const outcome = await outcomeOf(publish(COMMIT, strangerSigningKey));
 
     expect({
       refused: outcome.includes("refused the publish's finish: 400 Release"),

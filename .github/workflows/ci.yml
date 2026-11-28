@@ -1017,8 +1017,8 @@ jobs:
   # id changes from the release job's bundle, never a blob. Neither holds
   # a secret: GitHub's token for the run (id-token) is their credential at
   # the staging admin, whose links each put one object, only if absent,
-  # for 15 minutes. No bucket key is ever in CI, and the signing key only
-  # in sign-release. The admin's address comes from the names module
+  # for 15 minutes. No bucket key is ever in CI, and the signing key never
+  # leaves Cloud KMS (sign-release). The admin's address comes from the names module
   # (scripts/platform-names.ts). Pushes to main share the workflow's
   # concurrency group, which keeps only the newest pending run: in a burst
   # of merges a middle commit may never be published, and its changes ship

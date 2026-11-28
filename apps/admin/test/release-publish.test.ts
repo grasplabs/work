@@ -40,11 +40,13 @@ import { z } from "zod";
 
 import {
   signReleaseManifest,
+  strangerSigningKey,
   testReleaseSigningKey,
 } from "../../../packages/shared/test/release-signing-keys.ts";
 import { adminDatabase } from "../src/db/act.ts";
 import { auditEvents, releaseBlobs } from "../src/db/schema.ts";
 import worker from "../src/server.ts";
+import { testReleaseMonth } from "./release-clock.ts";
 import { buildRelease, putBlobs } from "./releases.ts";
 import type { TestRelease } from "./releases.ts";
 import { setStoreSecret, useStoreSecrets } from "./secrets-store.ts";
@@ -161,7 +163,7 @@ const stamped = (release: TestRelease, id: string): string =>
 
 /** The id the month's next release would get now, from what the bucket holds. */
 const monthsNext = async (): Promise<string> => {
-  const now = new Date();
+  const now = testReleaseMonth;
   const listed = await env.RELEASES.list({
     prefix: `releases/${releaseMonthPrefix(now)}`,
     delimiter: "/",
@@ -464,7 +466,7 @@ describe("CI's publish through the staging admin", () => {
     const id = "id" in plan ? plan.id : "";
     await putBlobs(release);
     const token = await githubToken(publishClaims(release.manifest.commit));
-    const otherId = `${releaseMonthPrefix(new Date())}999999`;
+    const otherId = `${releaseMonthPrefix(testReleaseMonth)}999999`;
     const another = await statusOf(
       "finish",
       stamped(release, otherId),
@@ -510,12 +512,7 @@ describe("CI's publish through the staging admin", () => {
         "finish",
         manifest,
         token,
-        await signReleaseManifest(encoder.encode(manifest), {
-          kty: "OKP",
-          crv: "Ed25519",
-          x: "A2VEuP3eHRFGIPqELZm-RDZnYWKhUXJLPFsDL5Y8xVY",
-          d: "7Bs1IAjNMwqAVTTNRQkEsTjYn2p3b4Vz3RhHn0GXi8o",
-        })
+        await signReleaseManifest(encoder.encode(manifest), strangerSigningKey)
       ),
       another: await statusOf(
         "finish",
