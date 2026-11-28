@@ -14,6 +14,7 @@ import { WorkflowRun } from "@grasp-os/workerflow/run";
 import { applyClient } from "./clients/apply.ts";
 import { provisionPlacedClientRun } from "./hosting/workflow.ts";
 import { deployRun } from "./rollout/deploy.ts";
+import { orgRolloutRun } from "./rollout/org-rollout.ts";
 import { adminWorkflows } from "./workflow-runs.ts";
 import type { AdminWorkflow } from "./workflow-runs.ts";
 
@@ -24,6 +25,7 @@ const definitions: Readonly<
   [adminWorkflows.applyClient]: applyClient,
   [adminWorkflows.provisionPlacedClient]: provisionPlacedClientRun,
   [adminWorkflows.deploy]: deployRun,
+  [adminWorkflows.orgRollout]: orgRolloutRun,
 };
 
 const isAdminWorkflow = (name: string): name is AdminWorkflow =>

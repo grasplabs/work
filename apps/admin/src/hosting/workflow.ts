@@ -29,8 +29,7 @@ import {
 } from "../runners.ts";
 import type { HeldClient } from "../runners.ts";
 import { adminWorkflow, adminWorkflows } from "../workflow-runs.ts";
-import { asStepError, stop, deployStepConfig } from "../workflow-steps.ts";
-import { InventoryError } from "./inventory.ts";
+import { asOperationStepError, deployStepConfig } from "../workflow-steps.ts";
 import {
   ProvisionOperationError,
   provisionOf,
@@ -51,17 +50,6 @@ export const provisionAttempts = (
     env,
     adminWorkflows.provisionPlacedClient
   );
-
-/**
- * A step's failure: the operation's and the inventory's own codes stop
- * the attempt at once, for staff to act on; anything else as any step's
- * (`asStepError`), so a smoke check still starting or an API that didn't
- * answer is retried, resuming the operation.
- */
-const asOperationStepError = (error: unknown): Error =>
-  error instanceof ProvisionOperationError || error instanceof InventoryError
-    ? stop(error.code, error.message)
-    : asStepError(error);
 
 /**
  * An attempt: the client's operation, run as one step. Each try of the
