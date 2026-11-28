@@ -25,7 +25,7 @@ import {
 import { act, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
 import { loadFromCore } from "../load-from-core.tsx";
 import { wordsOf } from "../test-words.ts";
@@ -387,6 +387,15 @@ const shows = () => ({
 });
 
 describe("a chat's own page", () => {
+  // The thread's code (Markdown, maths, highlighting) loads once a chat is
+  // shown (chat-body.tsx), and its first load in a test worker takes
+  // seconds, far longer on a loaded runner: past a test's 5 s, which then
+  // leaves its act() running into the tests after it. Loaded once here,
+  // its own time, so each test only draws it.
+  beforeAll(async () => {
+    await import("./thread.tsx");
+  }, 60_000);
+
   afterEach(async () => {
     act(() => {
       root?.unmount();
@@ -471,15 +480,11 @@ describe("a chat's own page", () => {
     );
     await typed("And which are late?");
     await sent();
-    // The thread, which loads once a chat is shown.
-    // The thread, which loads once a chat is shown.
-    await vi.waitFor(
-      async () => {
-        await settled();
-        expect(document.querySelector("article")).not.toBeNull();
-      },
-      { timeout: 15_000 }
-    );
+    // The thread, drawn once a chat is shown.
+    await vi.waitFor(async () => {
+      await settled();
+      expect(document.querySelector("article")).not.toBeNull();
+    });
     const meanwhile = {
       box: box()?.textContent,
       thread: [...document.querySelectorAll("article")].map((row) =>
@@ -632,13 +637,10 @@ describe("a chat's own page", () => {
       });
       await settled();
     };
-    // Shown once, its thread's code loaded.
-    await vi.waitFor(
-      () => {
-        expect(shows().questions).toStrictEqual(["Question 1"]);
-      },
-      { timeout: 10_000 }
-    );
+    // Shown once its thread is drawn.
+    await vi.waitFor(() => {
+      expect(shows().questions).toStrictEqual(["Question 1"]);
+    });
     await go("chat-b");
     await go("chat-a");
     const back = shows();
@@ -788,14 +790,11 @@ describe("a chat's own page", () => {
     await settled();
     await typed("Spain?");
     await sent();
-    // The thread, which loads once a chat is shown.
-    await vi.waitFor(
-      async () => {
-        await settled();
-        expect(document.body.textContent).toContain("Spain?");
-      },
-      { timeout: 15_000 }
-    );
+    // The thread, drawn once a chat is shown.
+    await vi.waitFor(async () => {
+      await settled();
+      expect(document.body.textContent).toContain("Spain?");
+    });
     const onItsWay = drawn();
     await act(async () => {
       update?.(answering([{ id: "8", text: "Spain?" }]));
