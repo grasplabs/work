@@ -29,8 +29,13 @@ import {
   unshareWorkflowResource,
 } from "../src/workflow-members.ts";
 import {
+  allEmbedded,
+  answersOf,
+  embeddedThrough,
   markerWord,
   markersIn,
+  nearestReadable,
+  ownedRecall,
   surfaces,
   reading,
   findingsOf,
@@ -46,7 +51,7 @@ import {
 import type { Finding } from "./brain-next-leaks-harness.ts";
 import { ageOwnErasure } from "./brain-next-own-store.ts";
 import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
-import { textOf } from "./brain-next-surfaces.ts";
+import { recallFixture, textOf } from "./brain-next-surfaces.ts";
 import type { Probe, Probing } from "./brain-next-surfaces.ts";
 import { mockIdp } from "./idp.ts";
 import { answeringProvider } from "./model-provider.ts";
@@ -144,28 +149,63 @@ describe(
         "the holder's instruction file": fileMarker,
       } = markers;
       const sharedWord = `s${unique()}`;
-      const own = await add(`Salary ${sharedWord} ${ownMarker}`, {
-        kind: "owner",
-        personId: holder,
-      });
-      const teamSource = await add(`Minutes ${sharedWord} ${teamMarker}`, {
-        kind: "team",
-        teamId: team,
-      });
+      const holderFile: InstructionFile = { scope: "person", personId: holder };
       const upload: SourceRef = { producer: "upload", id: crypto.randomUUID() };
       const chat: SourceRef = { producer: "chat", id: crypto.randomUUID() };
       const run: SourceRef = { producer: "run", id: crypto.randomUUID() };
+      const own = newSource();
+      const teamSource = newSource();
+      const erased = [own, teamSource, upload, chat, run].flatMap((source) =>
+        [1, 2].map((version) => ({ source, version }))
+      );
+      const asReader = (
+        personId: string,
+        hiddenInstructionFiles: InstructionFile[]
+      ): Probing => ({
+        personId,
+        reader: { person: personId, groups: [`team:${team}`] },
+        personal: true,
+        sharedWord,
+        markers: Object.values(markers),
+        hiddenVersions: erased,
+        hiddenInstructionFiles,
+        instructionGroups: ["company"],
+      });
+      const asHolder = asReader(holder, []);
+      const asTeamMate = asReader(teamMate, [holderFile]);
+      // What each may still read once it is all erased, nearest the
+      // markers, the team-mate's own among it, and their answers then,
+      // before anything of the holder's was added: a restore must give
+      // them exactly these again.
+      await nearestReadable(teamMate, team, Object.values(markers), sharedWord);
+      await recallFixture(asHolder);
+      await recallFixture(asTeamMate);
+      await allEmbedded([holder, teamMate]);
+      const holderBefore = await answersOf(asHolder, ownedRecall);
+      const teamMateBefore = await answersOf(asTeamMate, ownedRecall);
+      await add(
+        `Salary ${sharedWord} ${ownMarker}`,
+        { kind: "owner", personId: holder },
+        own
+      );
+      await add(
+        `Minutes ${sharedWord} ${teamMarker}`,
+        { kind: "team", teamId: team },
+        teamSource
+      );
       const holders: SourceReaders = { kind: "owner", personId: holder };
       await add(`Contract ${sharedWord} ${uploadMarker}`, holders, upload);
       await add(`Asked ${sharedWord} ${chatMarker}`, holders, chat);
       await add(`Run note ${sharedWord} ${runMarker}`, holders, run);
-      const holderFile: InstructionFile = { scope: "person", personId: holder };
       await addInstructionFile(env, {
         file: holderFile,
         change: crypto.randomUUID(),
         text: `Instructions ${sharedWord} ${fileMarker}`,
         after: 0,
       });
+      // Embedded before the copy is taken: what comes back holds their
+      // vectors too.
+      await allEmbedded([holder, teamMate]);
       const backup = await copyOfStore();
 
       // A chat and an upload deleted for good, a run past its retention,
@@ -200,23 +240,22 @@ describe(
       await erasePerson(env, { personId: holder, reason: "person_erased" });
       await workBrain(env, new Date(), noProducers);
       await restoreStore(backup);
+      // Once what came back is embedded again: the answers of before,
+      // whether their own store changed them among them.
+      await allEmbedded([teamMate]);
+      const restored = [
+        ...(await findingsOf("the holder, after a restore", asHolder, markers, {
+          among: ownedRecall,
+          before: holderBefore,
+        })),
+        ...(await findingsOf(
+          "a team-mate, after a restore",
+          asTeamMate,
+          markers,
+          { among: ownedRecall, before: teamMateBefore }
+        )),
+      ];
 
-      const erased = [own, teamSource, upload, chat, run].flatMap((source) =>
-        [1, 2].map((version) => ({ source, version }))
-      );
-      const asReader = (
-        personId: string,
-        hiddenInstructionFiles: InstructionFile[]
-      ): Probing => ({
-        personId,
-        reader: { person: personId, groups: [`team:${team}`] },
-        personal: true,
-        sharedWord,
-        markers: Object.values(markers),
-        hiddenVersions: erased,
-        hiddenInstructionFiles,
-        instructionGroups: ["company"],
-      });
       // Their own store was erased whole, and takes nothing from then on:
       // the surfaces that write a skill of theirs, or ask a draft of one
       // (and decide a share of one) can only be refused for them, and are
@@ -238,24 +277,20 @@ describe(
         // after an erasure is new: saving it is probed as the team-mate
         // only, so the holder's pass finds their erased file if it came
         // back, and nothing they wrote since.
-        ...(await findingsOf(
-          "the holder, after a restore",
-          asReader(holder, []),
-          markers,
-          {
-            among: surfaces.filter(([name]) => !holderWritesOwn.has(name)),
-          }
-        )),
+        ...(await findingsOf("the holder, after a restore", asHolder, markers, {
+          among: surfaces.filter(([name]) => !holderWritesOwn.has(name)),
+        })),
         ...(await findingsOf(
           "a team-mate, after a restore",
-          asReader(teamMate, [holderFile]),
+          asTeamMate,
           markers
         )),
       ];
       const carried = await Promise.all(Object.values(markers).map(carrying));
       const prompted = carried.flat();
 
-      expect({ findings, prompted }).toStrictEqual({
+      expect({ restored, findings, prompted }).toStrictEqual({
+        restored: [],
         findings: [],
         prompted: [],
       });
@@ -824,6 +859,30 @@ describe(
       const sharedWord = `s${unique()}`;
       const markers = { "what their run returned": markerWord() };
       const returned = markers["what their run returned"];
+      const team = await newTeam(personId);
+      const asPerson: Probing = {
+        personId,
+        reader: { person: personId, groups: [`team:${team}`] },
+        personal: true,
+        sharedWord,
+        markers: Object.values(markers),
+        hiddenVersions: [],
+        hiddenUploads: [],
+        hiddenInstructionFiles: [],
+        instructionGroups: ["company"],
+      };
+      // What they may read nearest the marker, their own among it, and
+      // their answers before the run: once they lost the workflow, its
+      // result in their own store must move none of them.
+      const { team: teams } = await nearestReadable(
+        personId,
+        team,
+        Object.values(markers),
+        sharedWord
+      );
+      await recallFixture(asPerson);
+      await embeddedThrough([personId], teams);
+      const before = await answersOf(asPerson, ownedRecall);
       const workflow = await publishedWorkflow(
         owner,
         definitionOf([], { value: { status: `${sharedWord} ${returned}` } })
@@ -855,24 +914,26 @@ describe(
         id: personId,
       });
       await removeLostRunSources(env);
+      const lost: Probing = {
+        ...asPerson,
+        hiddenVersions: everyVersionOf(source),
+      };
+      await embeddedThrough([personId], teams);
+      const asBefore = await findingsOf(
+        "a person who lost the workflow",
+        lost,
+        markers,
+        { among: ownedRecall, before }
+      );
       const findings = await findingsOf(
         "a person who lost the workflow",
-        {
-          personId,
-          reader: { person: personId, groups: [] },
-          personal: true,
-          sharedWord,
-          markers: Object.values(markers),
-          hiddenVersions: everyVersionOf(source),
-          hiddenUploads: [],
-          hiddenInstructionFiles: [],
-          instructionGroups: ["company"],
-        },
+        lost,
         markers
       );
       const carried = await Promise.all(Object.values(markers).map(carrying));
 
-      expect({ findings, prompted: carried.flat() }).toStrictEqual({
+      expect({ asBefore, findings, prompted: carried.flat() }).toStrictEqual({
+        asBefore: [],
         findings: [],
         prompted: [],
       });

@@ -1,6 +1,6 @@
-import { recallBudgetMax } from "@grasp-os/brain-next/contract";
+import { recallBudgetMax, recallLimit } from "@grasp-os/brain-next/contract";
 import type { WorkOverview } from "@grasp-os/brain-next/contract";
-import { runDurableObjectAlarm } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -11,6 +11,7 @@ import {
   addSource,
   brainWorkOverview,
   recallAs,
+  recallOwnedAs,
   workBrain,
 } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
@@ -19,6 +20,7 @@ import { inJurisdiction } from "../src/durable-objects.ts";
 import { brainSurfaces, textOf } from "./brain-next-surfaces.ts";
 import type { Answer, Probe, Probing } from "./brain-next-surfaces.ts";
 import { noProducers } from "./no-producers.ts";
+import { stopIfEnded } from "./test-attempts.ts";
 
 /**
  * What the marker test's files share (brain-next-leaks.test.ts and the
@@ -91,6 +93,17 @@ export const surfaces: [string, Probe][] = brainSurfaces.flatMap(
       `${name} ${member}`,
       probe,
     ])
+);
+
+/**
+ * Core's recall with whether the reader's own store changed what it
+ * handed over (`recallOwnedAs`): the surface a test holds to its answers
+ * before anything hidden was added (`answersOf`, `findingsOf`'s
+ * `before`), `fromOwn` among them, which the comparison with the twins
+ * leaves out (`apartFromMeaning`).
+ */
+export const ownedRecall = surfaces.filter(
+  ([name]) => name === "core recallOwnedAs"
 );
 
 /**
@@ -419,6 +432,56 @@ export const allEmbedded = async (
   throw new Error(`Not everything was embedded in ${embedTicksMost} ticks`);
 };
 
+/**
+ * How many passages the current versions of `sources` hold in the shared
+ * store, and how many of them have a vector: read from its storage, as
+ * the store's overview counts only the whole store.
+ */
+export const embeddedOf = async (
+  sources: readonly SourceRef[]
+): Promise<{ chunks: number; embedded: number }> =>
+  await runInDurableObject(
+    inJurisdiction(env, env.BRAIN_STORE).getByName("brain"),
+    (_instance, state) =>
+      state.storage.sql
+        .exec<{ chunks: number; embedded: number }>(
+          `SELECT count(*) AS chunks,
+          count(DISTINCT vector_codes.chunk) AS embedded
+        FROM source_versions
+        JOIN current_versions
+          ON current_versions.version_row = source_versions.row
+        JOIN chunks ON chunks.version_row = source_versions.row
+        LEFT JOIN vector_codes ON vector_codes.chunk = chunks.row
+        WHERE source_versions.source IN (SELECT value FROM json_each(?))`,
+          JSON.stringify(sources.map(({ producer, id }) => `${producer}:${id}`))
+        )
+        .one()
+  );
+
+/**
+ * Each of `people`'s own stores settled (`settledOwnStores`), then the
+ * shared store ticked, as core's clock does, until every passage of the
+ * current versions of `sources` has a vector: as `allEmbedded`, for a test
+ * whose store still holds work earlier tests of its file left waiting.
+ */
+export const embeddedThrough = async (
+  people: readonly string[],
+  sources: readonly SourceRef[]
+): Promise<void> => {
+  await settledOwnStores(people);
+  for (let ticks = 0; ticks < embedTicksMost; ticks += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- read before each tick
+    const { chunks, embedded } = await embeddedOf(sources);
+    if (embedded === chunks) {
+      return;
+    }
+    clock.at = Math.max(clock.at, Date.now()) + 60_000;
+    // oxlint-disable-next-line no-await-in-loop -- one tick at a time, as core's clock
+    await workBrain(env, new Date(clock.at), noProducers);
+  }
+  throw new Error(`Not every source was embedded in ${embedTicksMost} ticks`);
+};
+
 /** Each of `among`'s answers by meaning (`recalledByMeaning`), and every line written. */
 const askedEachByMeaning = async (
   among: readonly [string, Probe][],
@@ -427,6 +490,7 @@ const askedEachByMeaning = async (
   const value: [string, Answer[]][] = [];
   const lines: unknown[] = [];
   for (const [name, probe] of among) {
+    stopIfEnded();
     // In a pass that reads as the person, their own store embedded and
     // asleep before each surface asks: a probe before this one may have
     // changed it (an own source added or removed, a skill, a memory), and
@@ -574,6 +638,66 @@ export const add = async (
   });
   return source;
 };
+
+/** A source's key, as the Brain names it. */
+const keyOf = ({ producer, id }: SourceRef): string => `${producer}:${id}`;
+
+/**
+ * What `reader`'s recall of `question` in their own chat hands over, asked
+ * by meaning as a pass asks (`recalledByMeaning`): whether their own store
+ * changed it (`fromOwn`), and whether it hands over an item of a source.
+ */
+export const ownedRecallOf = async (
+  reader: string,
+  question: string
+): Promise<{ fromOwn: boolean; hands: (source: SourceRef) => boolean }> => {
+  const {
+    value: { pack, fromOwn },
+  } = await recalledByMeaning(
+    "core recallOwnedAs",
+    async () =>
+      await recallOwnedAs(env, reader, {
+        personal: true,
+        question,
+        budget: { tokens: recallBudgetMax },
+      })
+  );
+  const handed = new Set(pack.items.map(({ source }) => keyOf(source)));
+  return { fromOwn, hands: (source) => handed.has(keyOf(source)) };
+};
+
+/**
+ * `words`, each split in two: a passage of them holds none of the words,
+ * and meaning still finds their pieces in it.
+ */
+export const split = (words: readonly string[]): string =>
+  words.map((word) => `${word.slice(0, 7)} ${word.slice(7)}`).join(" ");
+
+/**
+ * What `reader` may read nearest a question of `markers`, and nothing
+ * else near it: a passage of their own, with `sharedWord`, and
+ * `recallLimit - 1` of the team `teamId`, each the markers split
+ * (`split`). Every place recall takes by meaning for the markers is
+ * theirs to read, their own passage among them (`fromOwn`), so anything
+ * hidden that took one would move their answer.
+ */
+export const nearestReadable = async (
+  reader: string,
+  teamId: string,
+  markers: readonly string[],
+  sharedWord: string
+): Promise<{ own: SourceRef; team: SourceRef[] }> => ({
+  own: await add(`${sharedWord} ${split(markers)}`, {
+    kind: "owner",
+    personId: reader,
+  }),
+  team: await Promise.all(
+    Array.from(
+      { length: recallLimit - 1 },
+      async () => await add(split(markers), { kind: "team", teamId })
+    )
+  ),
+});
 
 /** What a read answered: its value, or its error's message. */
 export const answerOf = async (

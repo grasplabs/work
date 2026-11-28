@@ -32,13 +32,16 @@ import {
   publishAs,
   readSourceVersionAs,
   recallAs,
-  recallOwnedAs,
   recordEvents,
   rememberAs,
   versionRefSchema,
   workBrain,
 } from "../src/brain-next.ts";
-import type { InstructionFile, SourceRef } from "../src/brain-next.ts";
+import type {
+  InstructionFile,
+  SourceReaders,
+  SourceRef,
+} from "../src/brain-next.ts";
 import { selectSkillsFor } from "../src/brain-skills.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
@@ -55,6 +58,7 @@ import { published } from "./apps.ts";
 import { chooseAudience } from "./brain-audiences.ts";
 import {
   allEmbedded,
+  answersOf,
   markerWord,
   surfaces,
   readingSurfaces,
@@ -62,8 +66,11 @@ import {
   recallSurfaces,
   findingsOf,
   ownStoreOf,
-  recalledByMeaning,
   settledOwnStores,
+  nearestReadable,
+  ownedRecall,
+  ownedRecallOf,
+  split,
   join,
   leave,
   newTeam,
@@ -79,6 +86,7 @@ import { brainModules } from "./brain-next-modules.ts";
 import {
   brainSurfaces,
   membersOf,
+  recallFixture,
   textOf,
   twinOf,
 } from "./brain-next-surfaces.ts";
@@ -136,13 +144,6 @@ import {
 
 const idp = mockIdp();
 
-/**
- * `words`, each split in two: a passage of them holds none of the words,
- * and meaning still finds their pieces in it.
- */
-const split = (words: readonly string[]): string =>
-  words.map((word) => `${word.slice(0, 7)} ${word.slice(7)}`).join(" ");
-
 /** The account `claims` signed in with, as a reader list names it. */
 const accountOf = (claims: Claims): SourceReader => ({
   kind: "account",
@@ -152,6 +153,14 @@ const accountOf = (claims: Claims): SourceReader => ({
 });
 
 teamsWatched();
+
+/** A Microsoft group of `tenant`, as a reader list names it. */
+const microsoftGroup = (tenant: string, group: string): SourceReader => ({
+  kind: "group",
+  provider: "microsoft",
+  tenant,
+  group,
+});
 
 /** A chat's agent acting for `personId`. */
 const agentFor = (personId: string) =>
@@ -381,28 +390,12 @@ describe(
         )
       );
       await allEmbedded([reader]);
-      // By meaning, as a pass asks (`recalledByMeaning`).
       const drawn = async (words: readonly string[]) => {
-        const {
-          value: { pack, fromOwn },
-        } = await recalledByMeaning(
-          "core recallOwnedAs",
-          async () =>
-            await recallOwnedAs(env, reader, {
-              personal: true,
-              question: words.join(" "),
-              budget: { tokens: recallBudgetMax },
-            })
-        );
-        const handed = new Set(
-          pack.items.map(({ source }) => `${source.producer}:${source.id}`)
-        );
-        const isHanded = ({ producer, id }: SourceRef) =>
-          handed.has(`${producer}:${id}`);
+        const { fromOwn, hands } = await ownedRecallOf(reader, words.join(" "));
         return {
           fromOwn,
-          own: isHanded(own),
-          shared: shared.filter(isHanded).length,
+          own: hands(own),
+          shared: shared.filter(hands).length,
         };
       };
 
@@ -422,13 +415,166 @@ describe(
             instructionGroups: [],
           },
           Object.fromEntries(markers.map((marker) => [marker, marker])),
-          {
-            among: surfaces.filter(([name]) => name === "core recallOwnedAs"),
-          }
+          { among: ownedRecall }
         ),
       }).toStrictEqual({
         markers: { fromOwn: false, own: false, shared: recallLimit },
         twins: { fromOwn: true, own: true, shared: recallLimit - 1 },
+        findings: [],
+      });
+    });
+
+    it("gives a reader the answer they had before, whether their own store changed it among it, whatever is added for accounts, links, groups and synced drives that aren't theirs", async () => {
+      // The reader may read exactly the ten passages nearest the markers'
+      // question. Then exact copies of it are added for readers that reach
+      // them nowhere: someone else's account, a link and a group; a list
+      // that named them and then dropped them; someone else's synced
+      // drive, in that person's own store; a synced file once shared with
+      // them, then gone at the source; and groups they were proved in over
+      // a day ago, or that the directory lists them in only in another
+      // tenant.
+      const [reader, holder] = await Promise.all([
+        signedInWithRole(idp, "user"),
+        signedInWithRole(idp, "user"),
+      ]);
+      const team = await newTeam(reader.userId);
+      const markers = Array.from({ length: 6 }, () => markerWord());
+      const question = markers.join(" ");
+      const sharedWord = `s${unique()}`;
+      await nearestReadable(reader.userId, team, markers, sharedWord);
+      const probing: Probing = {
+        personId: reader.userId,
+        reader: { person: reader.userId, groups: [`team:${team}`] },
+        personal: true,
+        sharedWord,
+        markers,
+        hiddenVersions: [],
+        hiddenInstructionFiles: [],
+        instructionGroups: [],
+      };
+      await recallFixture(probing);
+      await allEmbedded([reader.userId]);
+      const before = await answersOf(probing, ownedRecall);
+
+      const othersReaders = await add(question, {
+        kind: "readers",
+        readers: [
+          accountOf(holder.person),
+          { kind: "link" },
+          microsoftGroup(acmeTenant, `group-${unique()}`),
+        ],
+      });
+      const both: SourceReaders = {
+        kind: "readers",
+        readers: [accountOf(reader.person), accountOf(holder.person)],
+      };
+      const dropped = await add(question, both);
+      const syncConnection = `connection-${unique()}`;
+      const synced: SourceRef = {
+        producer: "sync",
+        id: `${syncConnection}/1/${unique()}`,
+      };
+      await addSource(env, {
+        source: synced,
+        change: crypto.randomUUID(),
+        text: question,
+        readers: { kind: "owner", personId: holder.userId },
+        group: { producer: "sync", id: syncConnection },
+      });
+      const goneSync = await add(question, both, {
+        producer: "sync",
+        id: `${syncConnection}/1/${unique()}`,
+      });
+      // A read of their own connection's groups, and the directory's
+      // lists, over a day old; and one read now, but of another tenant.
+      const [staleGroup, directoryStaleGroup, otherTenantGroup] = [
+        crypto.randomUUID(),
+        crypto.randomUUID(),
+        crypto.randomUUID(),
+      ];
+      const dayAgo = Date.now() - readerProofMaxAgeMs - 60_000;
+      await connectDb()
+        .prepare(
+          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tenant, account_id, reader_groups, reader_groups_at, created_at, updated_at) VALUES (?, 'microsoft', 'personal', ?, 'active', 'native', 'microsoft-365', ?, ?, ?, ?, ?, ?)"
+        )
+        .bind(
+          crypto.randomUUID(),
+          reader.userId,
+          acmeTenant,
+          String(reader.person.oid),
+          JSON.stringify([staleGroup]),
+          dayAgo,
+          Date.now(),
+          Date.now()
+        )
+        .run();
+      const oid = String(reader.person.oid).toLowerCase();
+      const directoryTenant = acmeTenant.toLowerCase();
+      await env.DB.batch([
+        env.DB.prepare(
+          "INSERT INTO directory_people (provider, tenant, account_id, department, enabled, user_id) VALUES ('microsoft-directory', ?, ?, '', 1, ?)"
+        ).bind(directoryTenant, oid, reader.userId),
+        env.DB.prepare(
+          "INSERT INTO directory_group_members (provider, tenant, group_id, account_id, read_at) VALUES ('microsoft-directory', ?, ?, ?, ?), ('microsoft-directory', ?, ?, ?, ?)"
+        ).bind(
+          directoryTenant,
+          directoryStaleGroup,
+          oid,
+          dayAgo,
+          directoryTenant,
+          otherTenantGroup,
+          oid,
+          Date.now()
+        ),
+      ]);
+      const staleGroups = await add(question, {
+        kind: "readers",
+        readers: [
+          microsoftGroup(acmeTenant, staleGroup),
+          microsoftGroup(acmeTenant, directoryStaleGroup),
+          microsoftGroup(otherTenant, otherTenantGroup),
+        ],
+      });
+      await allEmbedded([reader.userId, holder.userId]);
+      // While the list and the synced file still name them, they read
+      // both, nearest of all: what the passes below hold would show them.
+      const whileTheirs = await ownedRecallOf(reader.userId, question);
+
+      await changeSourceReaders(env, {
+        source: dropped,
+        change: crypto.randomUUID(),
+        readers: { kind: "readers", readers: [accountOf(holder.person)] },
+      });
+      await eraseSource(env, {
+        source: goneSync,
+        readers: { kind: "none" },
+        reason: "deleted",
+      });
+      await allEmbedded([reader.userId, holder.userId]);
+      const findings = await findingsOf(
+        "a reader of none of them",
+        {
+          ...probing,
+          hiddenVersions: everyVersionOf(
+            othersReaders,
+            dropped,
+            synced,
+            goneSync,
+            staleGroups
+          ),
+        },
+        Object.fromEntries(markers.map((marker) => [marker, marker])),
+        { among: ownedRecall, before }
+      );
+
+      expect({
+        whileTheirs: {
+          dropped: whileTheirs.hands(dropped),
+          goneSync: whileTheirs.hands(goneSync),
+        },
+        findings,
+      }).toStrictEqual({
+        whileTheirs: { dropped: true, goneSync: true },
         findings: [],
       });
     });
