@@ -456,14 +456,18 @@ const progressSchema = z.object({
   /** The core origin the probe passed at. */
   origin: z.string().optional(),
   /**
-   * What core went live with in this change, as its upload step read the
-   * client: its secrets generation, and since when its company starts
+   * What core went live with in change `change`, as its upload step read
+   * the client: its secrets generation, and since when its company starts
    * closed (ISO; null where it starts open). The probe, the route and the
    * record hold the client to these, never to the client as it reads
    * later: a rotation since is the next change's to deliver.
    */
   delivered: z
-    .object({ generation: z.int(), closedFrom: z.string().nullable() })
+    .object({
+      change: z.int(),
+      generation: z.int(),
+      closedFrom: z.string().nullable(),
+    })
     .optional(),
   /**
    * When the settings core last went live with were read (ISO): a change
@@ -2312,6 +2316,7 @@ const recordDelivered = async (
     ...now,
     configuredAt: loaded.readAt.toISOString(),
     delivered: {
+      change: loaded.operation.change,
       generation: loaded.client.generation,
       closedFrom: loaded.client.closedFrom?.toISOString() ?? null,
     },
@@ -3094,7 +3099,8 @@ const inventoryOf = async (
  * ran before to its own (`assertCanGo`), by what its scripts were
  * observed at now: what its start checked, checked again by every run of
  * it, as a run resumed later goes on from what's observed then. A first
- * release, or a run of the one it ran already, goes from nothing else.
+ * release goes from nothing; a run of the release it runs again goes on
+ * from the one it was released from, and checks that move again.
  */
 const assertMovable = async (
   db: AdminDatabase,
@@ -3127,7 +3133,12 @@ const firstSteps: Readonly<Record<OperationPhase, ProvisionStep>> = {
 const phaseWork: Readonly<
   Record<
     OperationPhase,
-    (context: ProvisionContext, loaded: Loaded, at: Reached) => Promise<void>
+    (
+      context: ProvisionContext,
+      loaded: Loaded,
+      at: Reached,
+      inventory: readonly ClientResource[]
+    ) => Promise<void>
   >
 > = {
   preflight: async (context, loaded, at) => {
@@ -3143,17 +3154,16 @@ const phaseWork: Readonly<
     );
     await recordStep(db, loaded, "resources", { resources: inventory.length });
   },
-  snapshot: async (context, loaded) => {
-    await snapshot(context, loaded, await inventoryOf(context, loaded));
+  snapshot: async (context, loaded, _at, inventory) => {
+    await snapshot(context, loaded, inventory);
   },
-  migrate: async (context, loaded) => {
-    await migrate(context, loaded, await inventoryOf(context, loaded));
+  migrate: async (context, loaded, _at, inventory) => {
+    await migrate(context, loaded, inventory);
   },
-  install: async (context, loaded, at) => {
+  install: async (context, loaded, at, inventory) => {
     // The settings are read again here, for what goes live: checked as
     // the first step checked them.
     await checkWorkers(context, loaded);
-    const inventory = await inventoryOf(context, loaded);
     // Rendered before either uploads, so a binding that can't be mapped
     // onto the client's own resources stops it before anything is live.
     const order = appsOf(loaded.manifest);
@@ -3171,11 +3181,11 @@ const phaseWork: Readonly<
       await upload(context, loaded, inventory, app);
     }
   },
-  probe: async (context, loaded) => {
-    await probeOrForget(context, loaded, await inventoryOf(context, loaded));
+  probe: async (context, loaded, _at, inventory) => {
+    await probeOrForget(context, loaded, inventory);
   },
-  route: async (context, loaded) => {
-    await route(context, loaded, await inventoryOf(context, loaded));
+  route: async (context, loaded, _at, inventory) => {
+    await route(context, loaded, inventory);
   },
   record: async (context, loaded) => {
     await complete(context.db, loaded);
@@ -3200,7 +3210,7 @@ const asDelivered = async (
   loaded: Loaded
 ): Promise<Loaded> => {
   const { delivered } = await progressNow(db, loaded.operation.id);
-  if (delivered === undefined) {
+  if (delivered?.change !== loaded.operation.change) {
     throw new ProvisionOperationError(
       "phase_out_of_order",
       `${loaded.held.clientId}'s core has no upload recorded in this change`
@@ -3218,12 +3228,34 @@ const asDelivered = async (
 };
 
 /**
+ * Records the operation's last finished step back to `step` (none for
+ * null) when a later one is recorded, while `loaded.held` holds the
+ * client: a phase that starts again undoes nothing, but what it and the
+ * phases after it did counts again only once it finishes.
+ */
+const stepBack = async (
+  db: AdminDatabase,
+  { operation, held }: Loaded,
+  step: ProvisionStep | null
+): Promise<void> => {
+  if (stepIndexOf(operation.step) <= stepIndexOf(step)) {
+    return;
+  }
+  await db
+    .update(clientProvisions)
+    .set({ step })
+    .where(and(eq(clientProvisions.id, operation.id), stillHolds(held)));
+};
+
+/**
  * Runs phase `phase` of client `held.clientId`'s operation, as runner
  * `held`, on the operation as it is now: one done already is left as it
  * is, and one whose phase before hasn't finished in this change is
- * refused (`phase_out_of_order`). A failure is recorded (its step and
- * code, audited) and answered, never thrown; so is one that stops it
- * before it loads (`stage_unset`, a client no longer held or placed).
+ * refused (`phase_out_of_order`), answered and left unrecorded. Any other
+ * failure is recorded (its step and code, audited) and answered, never
+ * thrown; so is one that stops it before it loads (`stage_unset`, a
+ * client no longer held or placed). Once admitted, its steps and those
+ * after it no longer count as done until it finishes again (`stepBack`).
  */
 export const runOperationPhase = async (
   context: ProvisionContext,
@@ -3253,17 +3285,14 @@ export const runOperationPhase = async (
         "This admin's STAGE is neither staging nor production: it runs no operation"
       );
     }
-    const after = follows[phase];
-    if (
-      after !== undefined &&
-      stepIndexOf(operation.step) < stepIndexOf(after)
-    ) {
+    await assertHolds(db, held);
+    const after = follows[phase] ?? null;
+    if (stepIndexOf(operation.step) < stepIndexOf(after)) {
       throw new ProvisionOperationError(
         "phase_out_of_order",
-        `${held.clientId}'s ${phase} needs its ${after} step done in this change first`
+        `${held.clientId}'s ${phase} needs its ${after ?? "first"} step done in this change first`
       );
     }
-    await assertHolds(db, held);
     const loaded: Loaded = {
       ...(await load(db, held, operation)),
       ownNamespace,
@@ -3271,8 +3300,13 @@ export const runOperationPhase = async (
     const working = afterInstall.has(phase)
       ? await asDelivered(db, loaded)
       : loaded;
+    const inventory = await inventoryOf(context, loaded);
+    // Its steps and the later ones no longer count as done, until it
+    // finishes again: a phase run again that fails never leaves a later
+    // phase admitted on what it did before.
+    await stepBack(db, loaded, after);
     unstarted = false;
-    await phaseWork[phase](context, working, at);
+    await phaseWork[phase](context, working, at, inventory);
     return undefined;
   } catch (error) {
     // Any failure, a resource outside the organization's jurisdiction
@@ -3285,7 +3319,11 @@ export const runOperationPhase = async (
       step: at.step,
       error: code,
     });
-    await recordFailure(db, { operation, held }, at.step, code);
+    // A phase called out of order changed nothing: the operation keeps
+    // how it stands, and why it last stopped.
+    if (code !== "phase_out_of_order") {
+      await recordFailure(db, { operation, held }, at.step, code);
+    }
     return { operation, step: at.step, code, error, unstarted };
   }
 };

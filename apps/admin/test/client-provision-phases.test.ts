@@ -492,6 +492,44 @@ describe("an operation's phases, its restore point and its probe", () => {
     });
   });
 
+  it("refuses the route once a probe run again fails, until a probe passes again", async () => {
+    const { clientId, b } = await liveOnA();
+    const held = await attempt(clientId);
+    await startClientRelease(db, staff, held, { releaseId: b.releaseId });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const outcomes: Record<string, unknown> = {};
+    try {
+      for (const phase of operationPhases.slice(0, 5)) {
+        // oxlint-disable-next-line no-await-in-loop -- in order, through the probe
+        await runOperationPhase(context, held, phase);
+      }
+      // Run again, the probe finds core answering as another client.
+      cloudflare.coreOf(clientId).coreProbe = { asClient: "someone-else" };
+      outcomes.probe = await runOperationPhase(context, held, "probe");
+      outcomes.route = await runOperationPhase(context, held, "route");
+      delete cloudflare.coreOf(clientId).coreProbe;
+      outcomes.probeAgain = await runOperationPhase(context, held, "probe");
+      outcomes.routeAgain = await runOperationPhase(context, held, "route");
+      outcomes.record = await runOperationPhase(context, held, "record");
+    } finally {
+      errors.mockRestore();
+    }
+
+    expect({
+      outcomes,
+      operation: await operationOf(clientId),
+    }).toMatchObject({
+      outcomes: {
+        probe: { code: "probe_identity_mismatch" },
+        route: { code: "phase_out_of_order", unstarted: true },
+        probeAgain: undefined,
+        routeAgain: undefined,
+        record: undefined,
+      },
+      operation: { status: "done", releaseId: b.releaseId },
+    });
+  });
+
   it("publishes a core from before the probe named its release and schema, as it is", async () => {
     const manifest = await importRelease();
     const { clientId, held } = await setUp(manifest);
