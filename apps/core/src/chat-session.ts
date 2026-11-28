@@ -87,6 +87,15 @@ const storageFailuresKey = "storageFailures";
 /** How many opens in a row failed, or are under way: none once one works. */
 const failedOpensKey = "failedOpens";
 
+/**
+ * pi's code (chat-harness.ts), once this isolate has loaded it: with its
+ * first chat's open, not as core starts, and never again. Kept as the
+ * class, never as a promise of it: an isolate hosts many chats, and a
+ * promise belongs to the object that made it, which then runs or holds
+ * whatever another object awaits on it.
+ */
+let harnessClass: typeof ChatHarness | undefined;
+
 export class ChatSession extends DurableObject<Env> {
   #opened: Promise<ChatHarness> | undefined;
 
@@ -163,6 +172,21 @@ export class ChatSession extends DurableObject<Env> {
     // for outside the block, and at most `closeMs`: a tool call that never
     // answers holds pi's close, and the object then resets, which ends it.
     await this.#closedOrReset();
+    // pi's code loads before the block, not in it: loading is the isolate's,
+    // once for every chat it hosts, and can take long (a cold isolate, one
+    // starved of CPU, the tests' runtime fetching each module), while the
+    // block resets the object past 30 s. Calls meanwhile still wait on this
+    // open (`#harness`); the block holds only what is this object's.
+    let loadFailure: unknown;
+    try {
+      if (harnessClass === undefined) {
+        const { ChatHarness: loaded } = await import("./chat-harness.ts");
+        harnessClass = loaded;
+      }
+    } catch (error) {
+      // Taken up in the block, so it counts as an open that failed.
+      loadFailure = error;
+    }
     if (this.#erased()) {
       throw agentErrors.create("agent.chat_not_found");
     }
@@ -180,8 +204,10 @@ export class ChatSession extends DurableObject<Env> {
         this.ctx.storage.kv.put(failedOpensKey, failed);
         let harness: ChatHarness | undefined;
         try {
-          const { ChatHarness: Opening } = await import("./chat-harness.ts");
-          harness = await Opening.open(
+          if (harnessClass === undefined) {
+            throw loadFailure;
+          }
+          harness = await harnessClass.open(
             this.#host,
             this.ctx.id.name ?? this.ctx.id.toString(),
             this.env

@@ -72,6 +72,8 @@ await Promise.all([
   import("../src/channels/workflow-offers.ts"),
   // workflows/kept-email.ts
   import("postal-mime"),
+  // chat-session.ts
+  import("../src/chat-harness.ts"),
   // workspace.ts
   import("../src/agent.ts"),
   import("../src/agent-thinking.ts"),

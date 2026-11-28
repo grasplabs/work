@@ -431,6 +431,49 @@ describe("a chat's ChatSession", () => {
     });
   });
 
+  it(
+    "tells a chat a decision though its object holds its calls past the platform's limit and resets, and one beside it at once",
+    { timeout: 120_000 },
+    async () => {
+      const { userId } = await signedInWithRole(idp, "user");
+      const { id, stub, newChat } = await personalChatsOf(userId);
+      const { chat: held } = await newChat();
+      const { chat: beside } = await newChat();
+      // Calls held past the platform's 30 s, as an object starved of CPU
+      // may hold them as it opens: the platform resets the object, and
+      // every call that waited fails with that reset, before it ran.
+      const hold = { reached: false };
+      const overran = runInDurableObject(
+        chatSession(env, {
+          workspaceId: id,
+          chatId: chatIdSchema.parse(held.id),
+        }),
+        async (_instance, state) => {
+          await state.blockConcurrencyWhile(async () => {
+            hold.reached = true;
+            await scheduler.wait(31_000);
+          });
+        }
+      ).catch(() => "reset");
+      await vi.waitFor(() => {
+        expect(hold.reached).toBeTruthy();
+      });
+      const decide = async (chatId: string) => {
+        await stub.connectionDecided(chatId, userId, {
+          binding: "MAIL",
+          decision: "denied",
+        });
+      };
+      const told = decide(held.id);
+      // The chat beside it, in the same isolate, opens and is told meanwhile.
+      // Neither touches the other: an error of one object's reaching the
+      // other would fail the run as an unhandled error.
+      await decide(beside.id);
+      await expect(told).resolves.toBeUndefined();
+      await expect(overran).resolves.toBe("reset");
+    }
+  );
+
   it("ends a turn whose step pi parked after restarts cut it off, so the chat can be deleted and its person erased", async () => {
     const { userId, person: signedIn } = await signedInWithRole(idp, "user");
     const never = Promise.withResolvers<boolean>();
