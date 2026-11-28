@@ -59,6 +59,7 @@ import type { Rows, Skipped } from "./migration-data.ts";
 import {
   runRecordingWrites,
   statementChanges,
+  triggerSql,
 } from "./migration-statements.ts";
 import type { Write } from "./migration-statements.ts";
 
@@ -732,6 +733,8 @@ const replayOnRows = (
     }
     db.exec("PRAGMA foreign_keys = ON");
     const { skipped } = seed(db, shape);
+    // The rows and columns main has: what the branch adds is its own.
+    const main = snapshotOf(db);
     for (const { idx, sql } of migrations.filter(
       (migration) => migration.idx >= added
     )) {
@@ -744,7 +747,7 @@ const replayOnRows = (
         results.set(idx, message(error));
         break;
       }
-      results.set(idx, dataChanges(before, db));
+      results.set(idx, dataChanges(before, db, main));
     }
     return { results, skipped };
   } finally {
@@ -838,17 +841,19 @@ export const checkDatabase = (
   const db = new DatabaseSync(":memory:");
   try {
     let base: Schema["tables"] | undefined;
+    let mainTriggers: Map<string, string> | undefined;
     for (const { idx, tag, sql } of migrations) {
       const file = `${dir}/${tag}.sql`;
       // A cut-off never covers what the branch adds: `from` <= `added`.
       const before = idx >= from ? schemaOf(db) : undefined;
       if (idx >= added) {
         base ??= before?.tables;
+        mainTriggers ??= triggerSql(db);
       }
       let writes: Write[] = [];
       try {
         if (idx >= added) {
-          writes = runRecordingWrites(db, sql);
+          writes = runRecordingWrites(db, sql, mainTriggers ?? new Map());
         } else {
           db.exec(sql);
         }

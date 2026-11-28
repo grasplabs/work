@@ -6,6 +6,7 @@ import {
   runRecordingWrites,
   shownStatement,
   statementChanges,
+  triggerSql,
 } from "./migration-statements.ts";
 
 const recorded = (sql: string) => {
@@ -13,7 +14,8 @@ const recorded = (sql: string) => {
   db.exec(`CREATE TABLE \`p\` (\`id\` text PRIMARY KEY, \`kind\` text);
 CREATE TABLE \`log\` (\`x\` text);
 CREATE TRIGGER \`p_logged\` AFTER INSERT ON \`p\` BEGIN UPDATE \`log\` SET \`x\` = NEW.\`id\`; END;`);
-  const writes = runRecordingWrites(db, sql).map(
+  // The trigger is main's: what it writes is free.
+  const writes = runRecordingWrites(db, sql, triggerSql(db)).map(
     ({ kind, table, column }) =>
       `${kind} ${table}${column === undefined ? "" : `.${column}`}`
   );

@@ -21,7 +21,7 @@
  * covers a migration the branch adds. What each migration the branch adds
  * deletes or updates is judged by statement (scripts/migration-statements.ts)
  * and what its rebuilds keep on generated rows (scripts/migration-data.ts);
- * how many tables take no row is printed and held to a recorded number,
+ * which tables take no row is printed and held to a recorded list,
  * and what each contract marker covers is printed for the reviewer.
  */
 import { execFileSync } from "node:child_process";

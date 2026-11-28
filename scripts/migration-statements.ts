@@ -10,7 +10,7 @@
  * (`delete rows <table>`, `change values <table>.<column>`). Free: an
  * INSERT, an UPDATE of a column the branch adds (its backfill), any write
  * to a table the migration creates (drizzle-kit's rebuild tables), and
- * what triggers write. An INSERT that replaces the rows it conflicts with
+ * what main's triggers write. An INSERT that replaces the rows it conflicts with
  * (`INSERT OR REPLACE`, `REPLACE INTO`, a constraint's `ON CONFLICT
  * REPLACE`) needs `delete rows`: SQLite reports it as an INSERT, so its
  * program is read (EXPLAIN) for the delete it does. `ON CONFLICT DO
@@ -18,18 +18,29 @@
  * generator could not write needs `delete rows` too: what the rebuild
  * keeps of it is not seen.
  *
+ * A rebuild's copy (an INSERT into a table the migration creates, from a
+ * table main has that it drops) must be a plain copy, by the opcodes of
+ * its prepared program (EXPLAIN, against PLAIN_COPY), or carry
+ * `change values <table>`: a copy that filters, rewrites, dedupes or
+ * limits passes the generated rows when no generated value meets it.
+ *
+ * Writes through a trigger main has are free; a trigger the branch adds or
+ * changes writes as the statement that fires it.
+ *
  * SQLite splits the migration into statements itself (each prepared
  * statement's own text), so each change is told with its statement.
  */
 import { constants } from "node:sqlite";
 import type { DatabaseSync } from "node:sqlite";
 
-/** A write a statement makes, outside triggers. */
+/** A write a statement makes, itself or through a trigger the branch made. */
 export interface Write {
-  kind: "delete" | "update" | "drop" | "replace";
+  kind: "delete" | "update" | "drop" | "replace" | "copy";
   table: string;
   column?: string;
   statement: string;
+  /** For a copy: why it is more than a plain copy. */
+  detail?: string;
 }
 
 /** A change a marker must name, and the statements that make it. */
@@ -51,44 +62,136 @@ export const shownStatement = (statement: string): string => {
 };
 
 /**
- * Whether a prepared INSERT replaces rows it conflicts with (REPLACE, or
- * a constraint's ON CONFLICT REPLACE): its own program deletes them. A
- * trigger's program comes after it in EXPLAIN, its addresses from 0 again.
+ * The opcodes of a statement's own program: a trigger's program comes
+ * after it in EXPLAIN, its addresses from 0 again.
  */
-const replaces = (db: DatabaseSync, statement: string): boolean => {
+const ownProgram = (db: DatabaseSync, statement: string): string[] => {
   const program = db.prepare(`EXPLAIN ${statement}`).all();
   const triggers = program.findIndex(({ addr }, at) => at > 0 && addr === 0);
   return program
     .slice(0, triggers === -1 ? program.length : triggers)
-    .some(({ opcode }) => opcode === "Delete");
+    .map(({ opcode }) => String(opcode));
 };
 
 /**
- * Runs `sql` on `db` statement by statement, as SQLite splits it (each
- * prepared statement's own text), with what each writes.
+ * Whether a prepared INSERT replaces rows it conflicts with (REPLACE, or
+ * a constraint's ON CONFLICT REPLACE): its own program deletes them.
  */
-export const runRecordingWrites = (db: DatabaseSync, sql: string): Write[] => {
+const replaces = (program: readonly string[]): boolean =>
+  program.includes("Delete");
+
+/**
+ * What a plain copy's SELECT (the coroutine SQLite compiles for an
+ * INSERT ... SELECT) does: read one table row by row and hand each row's
+ * columns on, with literals for columns the old table lacks. A WHERE, a
+ * CASE or a function adds comparisons, jumps and Function; a LIMIT adds
+ * DecrJumpZero; DISTINCT, ORDER BY and joins add sorters, ephemeral tables
+ * and a second cursor.
+ */
+const PLAIN_COPY = new Set([
+  "OpenRead",
+  "Rewind",
+  "Column",
+  "Rowid",
+  "Yield",
+  "Next",
+  "Null",
+  "String8",
+  "Integer",
+  "Real",
+  "Blob",
+  "Copy",
+  "SCopy",
+]);
+
+/**
+ * Why an INSERT ... SELECT is more than a plain copy, by the opcodes of
+ * its program; none for a plain one. SQLite copies a bare `SELECT *` row
+ * by row (RowData), which is plain.
+ */
+const notPlain = (program: readonly string[], functions: boolean): string[] => {
+  if (program.includes("RowData")) {
+    return [];
+  }
+  const start = program.indexOf("InitCoroutine");
+  const end = program.indexOf("EndCoroutine");
+  if (start === -1 || end === -1) {
+    return ["no plain INSERT ... SELECT"];
+  }
+  const select = program.slice(start + 1, end);
+  const why = [...new Set(select.filter((opcode) => !PLAIN_COPY.has(opcode)))];
+  if (select.filter((opcode) => opcode === "OpenRead").length > 1) {
+    why.push("OpenRead of a second table");
+  }
+  if (functions && !why.includes("Function") && !why.includes("PureFunc")) {
+    why.push("a function call");
+  }
+  return why;
+};
+
+/** Each trigger's SQL, by name. */
+export const triggerSql = (db: DatabaseSync): Map<string, string> =>
+  new Map(
+    db
+      .prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger'")
+      .all()
+      .map(({ name, sql }) => [String(name), String(sql)])
+  );
+
+const tableNames = (db: DatabaseSync): Set<string> =>
+  new Set(
+    db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all()
+      .map(({ name }) => String(name))
+  );
+
+/**
+ * Runs `sql` on `db` statement by statement, as SQLite splits it (each
+ * prepared statement's own text), with what each writes. A trigger main
+ * has (`mainTriggers`, by name, as written) writes for main's release: what
+ * it writes is free. What any other trigger writes is the statement's own.
+ */
+export const runRecordingWrites = (
+  db: DatabaseSync,
+  sql: string,
+  mainTriggers: ReadonlyMap<string, string>
+): Write[] => {
   const writes: Write[] = [];
+  const atStart = tableNames(db);
   let rest = sql;
   for (;;) {
+    const triggers = triggerSql(db);
     const own: Write[] = [];
     const inserted = new Set<string>();
+    const read = new Set<string>();
+    let functions = false;
     db.setAuthorizer((action, first, second, _database, trigger) => {
-      if (trigger === null && first !== null && !first.startsWith("sqlite_")) {
+      const mains =
+        trigger !== null &&
+        mainTriggers.has(trigger) &&
+        mainTriggers.get(trigger) === triggers.get(trigger);
+      if (!mains && first !== null && !first.startsWith("sqlite_")) {
+        const through = trigger === null ? "" : ` (through trigger ${trigger})`;
         if (action === constants.SQLITE_DROP_TABLE) {
-          own.push({ kind: "drop", table: first, statement: "" });
+          own.push({ kind: "drop", table: first, statement: through });
         } else if (action === constants.SQLITE_DELETE) {
-          own.push({ kind: "delete", table: first, statement: "" });
+          own.push({ kind: "delete", table: first, statement: through });
         } else if (action === constants.SQLITE_UPDATE && second !== null) {
           own.push({
             kind: "update",
             table: first,
             column: second,
-            statement: "",
+            statement: through,
           });
-        } else if (action === constants.SQLITE_INSERT) {
+        } else if (action === constants.SQLITE_INSERT && trigger === null) {
           inserted.add(first);
+        } else if (action === constants.SQLITE_READ && trigger === null) {
+          read.add(first);
         }
+      }
+      if (action === constants.SQLITE_FUNCTION && trigger === null) {
+        functions = true;
       }
       return constants.SQLITE_OK;
     });
@@ -116,19 +219,44 @@ export const runRecordingWrites = (db: DatabaseSync, sql: string): Write[] => {
     writes.push(
       ...own
         .filter(({ kind, table }) => !(kind === "delete" && dropped.has(table)))
-        .map((write) => ({ ...write, statement })),
-      ...(inserted.size > 0 &&
+        .map((write) => ({
+          ...write,
+          statement: `${statement}${write.statement}`,
+        }))
+    );
+    if (inserted.size > 0) {
+      const program = ownProgram(db, statement);
       // An upsert's DO UPDATE is reported as the UPDATE it is, and an
       // UPDATE's program deletes and writes rows again too.
-      !own.some(({ kind }) => kind === "update") &&
-      replaces(db, statement)
-        ? [...inserted].map((table) => ({
+      if (!own.some(({ kind }) => kind === "update") && replaces(program)) {
+        writes.push(
+          ...[...inserted].map((table) => ({
             kind: "replace" as const,
             table,
             statement,
           }))
-        : [])
-    );
+        );
+      }
+      // A rebuild's copy: into a table this migration creates, from one
+      // that was there. Whether the old one is dropped is judged after.
+      const sources = [...read].filter((table) => atStart.has(table));
+      if (
+        [...inserted].some((table) => !atStart.has(table)) &&
+        sources.length > 0
+      ) {
+        const why = notPlain(program, functions);
+        if (why.length > 0) {
+          writes.push(
+            ...sources.map((table) => ({
+              kind: "copy" as const,
+              table,
+              statement,
+              detail: why.join(", "),
+            }))
+          );
+        }
+      }
+    }
     db.exec(statement);
   }
   return writes;
@@ -159,7 +287,11 @@ export const statementChanges = (
     }
     changes.set(subject, change);
   };
-  for (const { kind, table, column, statement } of writes) {
+  // A table the migration drops, kept or rebuilt under its name.
+  const droppedHere = new Set(
+    writes.filter(({ kind }) => kind === "drop").map(({ table }) => table)
+  );
+  for (const { kind, table, column, statement, detail } of writes) {
     // A table this migration creates, or the branch did, holds no rows
     // the release before wrote.
     const mains = before.has(table) ? base.get(table) : undefined;
@@ -186,6 +318,12 @@ export const statementChanges = (
       add(
         `change values ${table}.${column}`,
         "an UPDATE, whatever rows it matches",
+        statement
+      );
+    } else if (kind === "copy" && droppedHere.has(table)) {
+      add(
+        `change values ${table}`,
+        `rebuilt with a copy that is more than a plain copy, so it may leave rows out or rewrite them: ${detail ?? ""}`,
         statement
       );
     } else if (kind === "drop" && after.has(table) && skipped.has(table)) {

@@ -238,6 +238,117 @@ CREATE TRIGGER \`people_touch\` AFTER INSERT ON \`people\` BEGIN UPDATE \`chats\
   });
 });
 
+describe("a rebuild's copy", () => {
+  const copy = (select: string, tail = "") =>
+    rebuildChats(
+      `INSERT INTO \`__new_chats\`(id, title, kind, owner_id, created_at) SELECT ${select} FROM \`chats\`${tail};--> statement-breakpoint`
+    );
+  const columns = "id, title, kind, owner_id, created_at";
+
+  it.each([
+    ["a WHERE on a value", copy(columns, " WHERE `kind` != 'archived'")],
+    ["a NOT IN", copy(columns, " WHERE `kind` NOT IN ('legacy', 'v1')")],
+    [
+      "a WHERE on JSON",
+      copy(columns, " WHERE json_extract(`title`, '$.v') IS NOT 1"),
+    ],
+    [
+      "a CASE",
+      copy(
+        "id, title, CASE kind WHEN 'archived' THEN 'deleted' ELSE kind END, owner_id, created_at"
+      ),
+    ],
+    [
+      "a JSON rewrite",
+      copy("id, json_remove(title, '$.legacy'), kind, owner_id, created_at"),
+    ],
+    ["a LIMIT", copy(columns, " LIMIT 1000")],
+  ])("refuses a copy with %s", (_, migration) => {
+    expect(flagged(migration)).toContain("change values chats");
+  });
+
+  it("names the opcodes that make a copy more than plain", () => {
+    expect(listed(copy(columns, " WHERE `kind` != 'archived'"))).toStrictEqual([
+      "  - change values chats (rebuilt with a copy that is more than a plain copy, so it may leave rows out or rewrite them: Eq)",
+      "      by: INSERT INTO `__new_chats`(id, title, kind, owner_id, created_at) SELECT id, title, kind, owner_id, created_at FROM `chats` WHERE `kind` != 'archived';",
+    ]);
+  });
+
+  it("passes a plain copy, one that fills a new column with a literal, and a filtered copy into a table that leaves the old one in place", () => {
+    expect(flagged(rebuildChats(copyAll))).toStrictEqual([]);
+    expect(
+      flagged(
+        rebuildChats(
+          "INSERT INTO `__new_chats`(id, title, kind, owner_id, created_at, summary) SELECT id, title, kind, owner_id, created_at, 'none' FROM `chats`;--> statement-breakpoint"
+        )
+      )
+    ).toStrictEqual([]);
+    expect(
+      flagged(`CREATE TABLE \`task_chats\` (\`id\` text PRIMARY KEY NOT NULL);--> statement-breakpoint
+INSERT INTO \`task_chats\` SELECT \`id\` FROM \`chats\` WHERE \`kind\` = 'task';`)
+    ).toStrictEqual([]);
+  });
+});
+
+/** A trigger on `people` that runs `body` after each insert. */
+const touch = (body: string) =>
+  `CREATE TRIGGER \`people_touch\` AFTER INSERT ON \`people\` BEGIN ${body} END;`;
+
+describe("triggers the branch adds", () => {
+  it("refuses a delete through a trigger created in the migration", () => {
+    expect(
+      flagged(`CREATE TABLE \`g\` (\`ref\` text, \`v\` text);--> statement-breakpoint
+CREATE TRIGGER \`g_wipe\` AFTER INSERT ON \`g\` BEGIN DELETE FROM \`chats\` WHERE \`kind\` = 'archived'; END;--> statement-breakpoint
+INSERT INTO \`g\` (\`ref\`, \`v\`) VALUES ('x', 'y');--> statement-breakpoint
+DROP TRIGGER \`g_wipe\`;`)
+    ).toStrictEqual(["delete rows chats"]);
+  });
+
+  it("refuses an update through an INSTEAD OF trigger on a view created in the migration", () => {
+    expect(
+      flagged(`CREATE VIEW \`titles\` AS SELECT \`id\`, \`title\` FROM \`chats\`;--> statement-breakpoint
+CREATE TRIGGER \`titles_write\` INSTEAD OF INSERT ON \`titles\` BEGIN UPDATE \`chats\` SET \`title\` = NULL WHERE \`id\` = NEW.\`id\`; END;--> statement-breakpoint
+INSERT INTO \`titles\` (\`id\`, \`title\`) VALUES ('c-1', 'x');`)
+    ).toStrictEqual(["change values chats.title"]);
+  });
+
+  it("refuses a write through a trigger main has that the migration redefines", () => {
+    expect(
+      flagged(
+        `DROP TRIGGER \`people_touch\`;--> statement-breakpoint
+${touch("DELETE FROM `chats` WHERE `kind` = 'archived';")}--> statement-breakpoint
+INSERT INTO \`people\` (\`id\`, \`name\`) VALUES ('p-new', 'New');`,
+        `${base}
+--> statement-breakpoint
+${touch("UPDATE `chats` SET `title` = `title` WHERE 0;")}`
+      )
+    ).toStrictEqual(["delete rows chats"]);
+  });
+});
+
+describe("a branch of several migrations", () => {
+  it("passes a backfill of a column an earlier migration of the branch added", () => {
+    const { errors } = checkDatabase(
+      "db",
+      [
+        { idx: 0, tag: "0000_base", sql: base },
+        {
+          idx: 1,
+          tag: "0001_add",
+          sql: "ALTER TABLE `chats` ADD `topic` text;",
+        },
+        {
+          idx: 2,
+          tag: "0002_fill",
+          sql: "UPDATE `chats` SET `topic` = `title`;",
+        },
+      ],
+      { ...judging, from: 1, added: 1 }
+    );
+    expect(errors).toStrictEqual([]);
+  });
+});
+
 describe("history replayed as if added", () => {
   // Replays a real database whole: slower than the rest.
   it(
@@ -314,7 +425,7 @@ describe("rows before and after", () => {
           "INSERT INTO `__new_chats`(id, title, kind, owner_id, created_at) SELECT id, json_set(title, '$.moved', 1), kind, owner_id, created_at FROM `chats`;--> statement-breakpoint"
         )
       )
-    ).toStrictEqual(["change values chats.title"]);
+    ).toStrictEqual(["change values chats.title", "change values chats"]);
   });
 
   it("refuses renaming a column and adding one under its name", () => {
@@ -464,16 +575,14 @@ CREATE VIRTUAL TABLE \`words\` USING fts5(\`word\`);`).skipped
 describe(skippedErrors, () => {
   const skipped = [{ table: "locked", reason: "locked is closed" }];
 
-  it("passes as many skipped tables as recorded", () => {
-    expect(skippedErrors("db", skipped, { db: 1 })).toStrictEqual([]);
+  it("passes the skipped tables recorded, by name", () => {
+    expect(skippedErrors("db", skipped, { db: ["locked"] })).toStrictEqual([]);
   });
 
-  it("refuses more skipped tables than recorded, and asks to lower it for fewer", () => {
-    expect(skippedErrors("db", skipped, {})).toStrictEqual([
-      "db: 1 tables take no generated row, more than the 0 scripts/migration-data.ts allows, so the data check covers less: make them take one, or raise skippedTables with the reason.",
-    ]);
-    expect(skippedErrors("db", [], { db: 1 })).toStrictEqual([
-      "db: 0 tables take no generated row, fewer than the 1 scripts/migration-data.ts allows: lower skippedTables to 0.",
+  it("refuses a table skipped that is not recorded, and one recorded that is covered", () => {
+    expect(skippedErrors("db", skipped, { db: ["sealed"] })).toStrictEqual([
+      "db: locked (locked is closed) take no generated row, so the data check covers less: make them take one, or add them to skippedTables in scripts/migration-data.ts with the reason.",
+      "db: sealed take generated rows now: remove them from skippedTables in scripts/migration-data.ts.",
     ]);
   });
 });

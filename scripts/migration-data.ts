@@ -24,8 +24,8 @@
  * another but for its key (so a dedupe shows) and one has empty text. A
  * row a constraint refuses is tried again with JSON string text and with
  * its nullable columns left empty. A table that takes no row is skipped
- * and said so, with the reason; how many each database skips is held to
- * `skippedTables`, so coverage cannot fall unnoticed. What a migration's
+ * and said so, with the reason; which ones each database skips is held to
+ * `skippedTables`, by name, so coverage cannot fall unnoticed. What a migration's
  * own statements delete or update is judged exactly, rows or not
  * (scripts/migration-statements.ts); these rows judge what its rebuilds
  * keep.
@@ -38,35 +38,62 @@
 import type { DatabaseSync, SQLInputValue, SQLOutputValue } from "node:sqlite";
 
 /**
- * How many tables each database skips: raise it only with the reason in
- * the pull request, lower it when a table is covered again.
+ * The tables of each database no generated row gets into, by name: add
+ * one only with the reason, remove one when it is covered again.
  */
-export const skippedTables: Readonly<Record<string, number>> = {
-  "apps/core/src/db/core/migrations": 11,
-  "packages/brain-next/src/db/migrations": 5,
+export const skippedTables: Readonly<Record<string, readonly string[]>> = {
+  "apps/core/src/db/core/migrations": [
+    // Triggers refuse rows unless the run, App, workflow or candidate they
+    // name exists in a given state.
+    "accounts",
+    "app_candidate_reports",
+    "app_candidates",
+    "dependency_admission_refusals",
+    "dependency_build_leases",
+    "dependency_locks",
+    "dependency_requests",
+    "run_lineage_attempts",
+    "run_lineages",
+    // Their parents are among those.
+    "run_lineage_accounts",
+    "run_lineage_children",
+  ],
+  "packages/brain-next/src/db/migrations": [
+    // Full-text tables.
+    "chunk_stems",
+    "chunk_words",
+    "memory_stems",
+    "memory_words",
+    // One row, which another table's trigger writes first.
+    "word_index",
+  ],
 };
 
 /**
- * What is wrong with how many tables of `dir` took no row: it must be the
- * number `skippedTables` holds, so a change in coverage is seen in review.
+ * What is wrong with which tables of `dir` took no row: they must be the
+ * ones `skippedTables` names, so a change in coverage is seen in review.
  */
 export const skippedErrors = (
   dir: string,
   skipped: readonly Skipped[],
-  baseline: Readonly<Record<string, number>> = skippedTables
+  baseline: Readonly<Record<string, readonly string[]>> = skippedTables
 ): string[] => {
-  const expected = baseline[dir] ?? 0;
-  if (skipped.length > expected) {
-    return [
-      `${dir}: ${skipped.length} tables take no generated row, more than the ${expected} scripts/migration-data.ts allows, so the data check covers less: make them take one, or raise skippedTables with the reason.`,
-    ];
+  const expected = new Set(baseline[dir]);
+  const actual = new Set(skipped.map(({ table }) => table));
+  const errors: string[] = [];
+  const added = skipped.filter(({ table }) => !expected.has(table));
+  if (added.length > 0) {
+    errors.push(
+      `${dir}: ${added.map(({ table, reason }) => `${table} (${reason})`).join(", ")} take no generated row, so the data check covers less: make them take one, or add them to skippedTables in scripts/migration-data.ts with the reason.`
+    );
   }
-  if (skipped.length < expected) {
-    return [
-      `${dir}: ${skipped.length} tables take no generated row, fewer than the ${expected} scripts/migration-data.ts allows: lower skippedTables to ${skipped.length}.`,
-    ];
+  const covered = [...expected].filter((table) => !actual.has(table));
+  if (covered.length > 0) {
+    errors.push(
+      `${dir}: ${covered.join(", ")} take generated rows now: remove them from skippedTables in scripts/migration-data.ts.`
+    );
   }
-  return [];
+  return errors;
 };
 
 /** Rows written per table. */
@@ -471,15 +498,84 @@ const shown = (value: unknown): string =>
     ? `x'${Buffer.from(value).toString("hex")}'`
     : JSON.stringify(value);
 
-/** What `db` lost or changed of the rows in `before`. */
+/**
+ * What `db` lost or changed of the rows in `before` that main wrote
+ * (`main`, as written before the branch's migrations): a row or a column
+ * the branch added is its own to change.
+ */
+/** What `now` lost or changed of `oldRows`, one table's rows. */
+const rowChanges = (
+  table: string,
+  key: readonly string[],
+  oldRows: readonly Stored[],
+  nowRows: readonly Stored[],
+  kept: readonly string[]
+): DataChange[] => {
+  const found: DataChange[] = [];
+  // Without a primary key, a row is found again by all it holds.
+  const findBy = key.length > 0 ? key : kept;
+  let lost = 0;
+  const changed = new Map<string, { rows: number; detail: string }>();
+  // Each row found again once: of two equal rows, one may be lost.
+  const unmatched = new Set(nowRows);
+  for (const old of oldRows) {
+    const match = [...unmatched].find((row) =>
+      findBy.every((column) => same(row[column], old[column]))
+    );
+    if (match === undefined) {
+      lost += 1;
+      continue;
+    }
+    unmatched.delete(match);
+    for (const column of kept) {
+      if (!same(match[column], old[column])) {
+        const moved = kept.find(
+          (other) => other !== column && same(match[column], old[other])
+        );
+        const entry = changed.get(column) ?? {
+          rows: 0,
+          detail:
+            moved === undefined
+              ? `${shown(old[column])} to ${shown(match[column])}`
+              : `now holds what ${table}.${moved} held`,
+        };
+        entry.rows += 1;
+        changed.set(column, entry);
+      }
+    }
+  }
+  if (lost > 0) {
+    found.push({
+      subject: `delete rows ${table}`,
+      detail: `${lost} of ${oldRows.length} rows gone`,
+    });
+  }
+  for (const [column, { rows: count, detail }] of changed) {
+    found.push({
+      subject: `change values ${table}.${column}`,
+      detail: `${count} of ${oldRows.length} rows, ${detail}`,
+    });
+  }
+  return found;
+};
+
 export const dataChanges = (
   before: Snapshot,
-  db: DatabaseSync
+  db: DatabaseSync,
+  main: Snapshot
 ): DataChange[] => {
   const after = snapshotOf(db);
   const found: DataChange[] = [];
-  for (const [table, { key, rows: oldRows }] of before) {
+  for (const [table, { key, rows: rowsBefore }] of before) {
     const now = after.get(table);
+    const mainRows = main.get(table)?.rows ?? [];
+    const mainColumns = Object.keys(mainRows[0] ?? {});
+    const ofMain = key.length > 0 ? key : mainColumns;
+    const oldRows = rowsBefore.filter((old) =>
+      mainRows.some((row) =>
+        ofMain.every((column) => same(row[column], old[column]))
+      )
+    );
     // A table or key column dropped is the schema check's to judge.
     if (now === undefined || oldRows.length === 0) {
       continue;
@@ -491,53 +587,10 @@ export const dataChanges = (
     if (!key.every((column) => columns.includes(column))) {
       continue;
     }
-    const kept = Object.keys(oldRows[0] ?? {}).filter((column) =>
-      columns.includes(column)
+    const kept = Object.keys(oldRows[0] ?? {}).filter(
+      (column) => columns.includes(column) && mainColumns.includes(column)
     );
-    // Without a primary key, a row is found again by all it holds.
-    const findBy = key.length > 0 ? key : kept;
-    let lost = 0;
-    const changed = new Map<string, { rows: number; detail: string }>();
-    // Each row found again once: of two equal rows, one may be lost.
-    const unmatched = new Set(now.rows);
-    for (const old of oldRows) {
-      const match = [...unmatched].find((row) =>
-        findBy.every((column) => same(row[column], old[column]))
-      );
-      if (match === undefined) {
-        lost += 1;
-        continue;
-      }
-      unmatched.delete(match);
-      for (const column of kept) {
-        if (!same(match[column], old[column])) {
-          const moved = kept.find(
-            (other) => other !== column && same(match[column], old[other])
-          );
-          const entry = changed.get(column) ?? {
-            rows: 0,
-            detail:
-              moved === undefined
-                ? `${shown(old[column])} to ${shown(match[column])}`
-                : `now holds what ${table}.${moved} held`,
-          };
-          entry.rows += 1;
-          changed.set(column, entry);
-        }
-      }
-    }
-    if (lost > 0) {
-      found.push({
-        subject: `delete rows ${table}`,
-        detail: `${lost} of ${oldRows.length} rows gone`,
-      });
-    }
-    for (const [column, { rows: count, detail }] of changed) {
-      found.push({
-        subject: `change values ${table}.${column}`,
-        detail: `${count} of ${oldRows.length} rows, ${detail}`,
-      });
-    }
+    found.push(...rowChanges(table, key, oldRows, now.rows, kept));
   }
   return found;
 };
