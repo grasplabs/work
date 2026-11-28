@@ -27,10 +27,11 @@
  * - drops or changes an index code names with `INDEXED BY`, where SQLite
  *   fails rather than scans when the index is gone or no longer fits.
  *
- * Not judged: dropping any other index, and what a migration does to the
- * data (an UPDATE or DELETE, a rebuild that copies nothing or swaps
- * columns, a table dropped and created again with the same columns). Only
- * running the previous release on a seeded copy catches those.
+ * Not judged: dropping any other index. What a migration a branch adds
+ * does to the rows already written (an UPDATE or DELETE, a rebuild that
+ * copies nothing or swaps columns, a table dropped and created again) is
+ * judged on generated rows (scripts/migration-data.ts), with markers of
+ * the same form: `delete rows <table>`, `change values <table>.<column>`.
  *
  * Such a migration is the contract step of expand, then contract, and
  * passes only with one marker per unsafe change, each a whole-line
@@ -46,6 +47,15 @@
 import { DatabaseSync } from "node:sqlite";
 
 import { parsePublishedReleaseId } from "@grasp-os/shared/release-id";
+
+import {
+  asDeployed,
+  dataChanges,
+  isDataSubject,
+  seed,
+  snapshotOf,
+} from "./migration-data.ts";
+import type { Skipped, TextStyle } from "./migration-data.ts";
 
 /**
  * The first migration of each database this check judges, by its index
@@ -608,13 +618,18 @@ export interface Judging {
   now: Date;
   /** Every index name code gives `INDEXED BY`, lower-cased. */
   indexedBy: ReadonlySet<string>;
+  /**
+   * The first migration the branch adds, whose changes to the rows the
+   * release before wrote are judged too (scripts/migration-data.ts).
+   */
+  added: number;
 }
 
 const judge = (
   file: string,
   sql: string,
   changes: readonly Change[],
-  now: Date
+  { now, dataJudged }: { now: Date; dataJudged: boolean }
 ): string[] => {
   const { subjects, errors } = contractMarkers(sql, now);
   const found = errors.map((error) => `${file} ${error}.`);
@@ -636,7 +651,8 @@ const judge = (
   }
   const changed = new Set(changes.map(({ subject }) => subject));
   for (const subject of subjects) {
-    if (!changed.has(subject)) {
+    // A migration main has already had its data judged when it was added.
+    if (!changed.has(subject) && (dataJudged || !isDataSubject(subject))) {
       found.push(
         `${file} has a contract marker for ${subject}, which it does not change in a way the release before it relies on: remove the marker.`
       );
@@ -645,41 +661,138 @@ const judge = (
   return found;
 };
 
-/** What is wrong with the migrations of one database, applied in order. */
+const message = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+const TEXT_STYLES = ["string", "object", "list"] as const;
+
+const replayOnRows = (
+  migrations: readonly Migration[],
+  added: number,
+  style: TextStyle
+): Map<number, Change[] | string> => {
+  const results = new Map<number, Change[] | string>();
+  const db = new DatabaseSync(":memory:");
+  try {
+    for (const { sql } of migrations.filter(
+      (migration) => migration.idx < added
+    )) {
+      db.exec(asDeployed(sql));
+    }
+    db.exec("PRAGMA foreign_keys = ON");
+    seed(db, style);
+    for (const { idx, sql } of migrations.filter(
+      (migration) => migration.idx >= added
+    )) {
+      const before = snapshotOf(db);
+      try {
+        db.exec("BEGIN");
+        db.exec(asDeployed(sql));
+        db.exec("COMMIT");
+      } catch (error) {
+        results.set(idx, message(error));
+        break;
+      }
+      results.set(idx, dataChanges(before, db));
+    }
+  } finally {
+    db.close();
+  }
+  return results;
+};
+
+/**
+ * The database as main has it (`migrations` before `added`), with a few
+ * rows in every table, and what the branch's migrations do to them: what
+ * each changes of the rows before it, or why it does not apply to them.
+ */
+const dataOfAdded = (
+  migrations: readonly Migration[],
+  added: number
+): Map<number, Change[] | string> => {
+  const none = new Map<number, Change[] | string>();
+  if (!migrations.some(({ idx }) => idx >= added)) {
+    return none;
+  }
+  // Text is written as a JSON string first; a migration that reads it as
+  // an object or a list gets those, so it is not refused for the rows'
+  // shape alone.
+  const tries = TEXT_STYLES.map((style) =>
+    replayOnRows(migrations, added, style)
+  );
+  return (
+    tries.find(
+      (results) =>
+        ![...results.values()].some((result) => typeof result === "string")
+    ) ??
+    tries[0] ??
+    none
+  );
+};
+
+/**
+ * The tables of `db` that take no generated row, written in a transaction
+ * undone after.
+ */
+const skippedOf = (db: DatabaseSync): Skipped[] => {
+  db.exec("PRAGMA foreign_keys = ON");
+  db.exec("BEGIN");
+  try {
+    return seed(db).skipped;
+  } finally {
+    db.exec("ROLLBACK");
+  }
+};
+
+/**
+ * What is wrong with the migrations of one database, applied in order,
+ * and which of its tables the data check cannot write to.
+ */
 export const checkDatabase = (
   dir: string,
   migrations: readonly Migration[],
-  { from, now, indexedBy }: Judging
-): string[] => {
+  { from, now, indexedBy, added }: Judging
+): { errors: string[]; skipped: Skipped[] } => {
   const errors: string[] = [];
+  const data = dataOfAdded(migrations, added);
   const db = new DatabaseSync(":memory:");
   try {
     for (const { idx, tag, sql } of migrations) {
       const file = `${dir}/${tag}.sql`;
+      // A cut-off never covers what the branch adds: `from` <= `added`.
       const before = idx >= from ? schemaOf(db) : undefined;
       try {
         db.exec(sql);
       } catch (error) {
         errors.push(
-          `${file} does not apply after the migrations before it: ${error instanceof Error ? error.message : String(error)}`
+          `${file} does not apply after the migrations before it: ${message(error)}`
         );
-        break;
+        return { errors, skipped: [] };
+      }
+      const onRows = data.get(idx);
+      if (typeof onRows === "string") {
+        errors.push(
+          `${file} does not apply to the rows the release before it wrote: ${onRows}`
+        );
       }
       if (before !== undefined) {
         errors.push(
           ...judge(
             file,
             sql,
-            unsafeChanges(before, schemaOf(db), indexedBy),
-            now
+            [
+              ...unsafeChanges(before, schemaOf(db), indexedBy),
+              ...(Array.isArray(onRows) ? onRows : []),
+            ],
+            { now, dataJudged: idx >= added }
           )
         );
       }
     }
+    return { errors, skipped: skippedOf(db) };
   } finally {
     db.close();
   }
-  return errors;
 };
 
 /**

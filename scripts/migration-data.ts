@@ -1,0 +1,482 @@
+/**
+ * What a migration does to the rows the release before it wrote: the half
+ * of migration safety the schema comparison cannot see
+ * (scripts/migration-safety.ts).
+ *
+ * For each migration a branch adds, its database is built as main has it,
+ * a few rows are written to every table, and the migration is applied to
+ * them. Every row must still be there by its primary key, and every
+ * column still there must hold what it held: an UPDATE or DELETE, a
+ * rebuild that copies nothing or swaps columns, a table dropped and
+ * created again all fail, unless the migration names the change with a
+ * contract marker (`delete rows <table>`, `change values <table>.<column>`).
+ * A column the migration adds may be filled from the others: it held
+ * nothing before.
+ *
+ * Each column gets values of its own (`"chats.title#0"`, numbers counting
+ * from the column's place), so a value that moved to another column is
+ * told apart from one that was lost. Text is JSON, a string first; a
+ * migration the rows refuse is tried again on rows whose text is a JSON
+ * object, then a list of objects, so it is not refused for their shape.
+ * Rows are written parents first, each child pointing at a parent's row;
+ * a CHECK's `IN (...)`, `= n` or `BETWEEN n` gives its values, and a row a
+ * constraint refuses is tried again with JSON object text and with its
+ * nullable columns left empty. A table that takes no row is skipped and
+ * said so, with the reason; how many each database skips is held to
+ * `skippedTables`, so coverage cannot fall unnoticed. What a migration
+ * does to rows the generator does not write (a value no column held) is
+ * not seen.
+ *
+ * D1 and Durable Objects ignore `PRAGMA foreign_keys = OFF`, so its
+ * toggles are dropped and each migration runs in one transaction, as
+ * there: a rebuild that drops a parent table deletes its children's rows
+ * through their ON DELETE actions here too.
+ */
+import type { DatabaseSync, SQLInputValue, SQLOutputValue } from "node:sqlite";
+
+/**
+ * How many tables each database skips: raise it only with the reason in
+ * the pull request, lower it when a table is covered again.
+ */
+export const skippedTables: Readonly<Record<string, number>> = {
+  "apps/core/src/db/core/migrations": 11,
+  "apps/core/src/db/data-store/migrations": 2,
+  "packages/brain-next/src/db/migrations": 5,
+};
+
+/**
+ * What is wrong with how many tables of `dir` took no row: it must be the
+ * number `skippedTables` holds, so a change in coverage is seen in review.
+ */
+export const skippedErrors = (
+  dir: string,
+  skipped: readonly Skipped[],
+  baseline: Readonly<Record<string, number>> = skippedTables
+): string[] => {
+  const expected = baseline[dir] ?? 0;
+  if (skipped.length > expected) {
+    return [
+      `${dir}: ${skipped.length} tables take no generated row, more than the ${expected} scripts/migration-data.ts allows, so the data check covers less: make them take one, or raise skippedTables with the reason.`,
+    ];
+  }
+  if (skipped.length < expected) {
+    return [
+      `${dir}: ${skipped.length} tables take no generated row, fewer than the ${expected} scripts/migration-data.ts allows: lower skippedTables to ${skipped.length}.`,
+    ];
+  }
+  return [];
+};
+
+/** Rows written per table. */
+const ROWS = 3;
+
+/** A change to the rows the release before wrote, as markers name it. */
+export interface DataChange {
+  subject: string;
+  detail?: string;
+}
+
+/** Contract markers that name a change to data rather than to schema. */
+export const isDataSubject = (subject: string): boolean =>
+  subject.startsWith("delete rows ") || subject.startsWith("change values ");
+
+interface Column {
+  name: string;
+  type: string;
+  notNull: boolean;
+}
+
+interface ForeignKey {
+  parent: string;
+  from: string[];
+  to: string[];
+}
+
+interface Table {
+  name: string;
+  columns: Column[];
+  primaryKey: string[];
+  foreignKeys: ForeignKey[];
+  /** By column, lower-cased: the values a CHECK's `IN (...)` allows. */
+  allowed: Map<string, string[]>;
+}
+
+/** A table that took no row, and why. */
+export interface Skipped {
+  table: string;
+  reason: string;
+}
+
+/** A row as written. */
+type Row = Record<string, SQLInputValue>;
+
+/** A row as read back. */
+type Stored = Record<string, SQLOutputValue>;
+
+const rows = (db: DatabaseSync, sql: string, ...values: SQLInputValue[]) =>
+  db.prepare(sql).all(...values);
+
+const text = (value: unknown): string =>
+  typeof value === "string" ? value : String(value);
+
+const quoted = (name: string): string => `"${name.replaceAll('"', '""')}"`;
+
+/** Every ordinary table, and every virtual one, of `db`. */
+const tableNames = (db: DatabaseSync): { name: string; virtual: boolean }[] =>
+  rows(db, "PRAGMA table_list")
+    .filter(
+      (table) =>
+        table.schema === "main" &&
+        (table.type === "table" || table.type === "virtual") &&
+        !text(table.name).startsWith("sqlite_")
+    )
+    .map((table) => ({
+      name: text(table.name),
+      virtual: table.type === "virtual",
+    }));
+
+const tableOf = (db: DatabaseSync, name: string): Table => {
+  const info = rows(db, `PRAGMA table_xinfo(${quoted(name)})`).filter(
+    // Generated columns: never written.
+    (column) => column.hidden === 0
+  );
+  const created = text(
+    rows(db, "SELECT sql FROM sqlite_master WHERE name = ?", name)[0]?.sql ?? ""
+  );
+  const allowed = new Map<string, string[]>();
+  for (const match of created.matchAll(
+    /["`[]?(?<column>\w+)["`\]]?\s+in\s*\((?<values>(?:\s*'(?:[^']|'')*'\s*,?)+)\)/giu
+  )) {
+    allowed.set(
+      (match.groups?.column ?? "").toLowerCase(),
+      [
+        ...(match.groups?.values ?? "").matchAll(/'(?<value>(?:[^']|'')*)'/gu),
+      ].map((value) => (value.groups?.value ?? "").replaceAll("''", "'"))
+    );
+  }
+  // `id = 1` (a table of one row) and `priority BETWEEN 0 AND 4`.
+  for (const match of created.matchAll(
+    /["`[]?(?<column>\w+)["`\]]?\s*(?:=|\bbetween\b)\s*(?<value>-?\d+)/giu
+  )) {
+    allowed.set((match.groups?.column ?? "").toLowerCase(), [
+      match.groups?.value ?? "",
+    ]);
+  }
+  const columns = info.map((column) => ({
+    name: text(column.name),
+    type: text(column.type).toUpperCase(),
+    notNull: column.notnull === 1 || Number(column.pk) > 0,
+  }));
+  return {
+    name,
+    columns,
+    primaryKey: info
+      .filter((column) => Number(column.pk) > 0)
+      .toSorted((a, b) => Number(a.pk) - Number(b.pk))
+      .map((column) => text(column.name)),
+    foreignKeys: [
+      ...Map.groupBy(
+        rows(db, `PRAGMA foreign_key_list(${quoted(name)})`),
+        (part) => text(part.id)
+      ).values(),
+    ].map((parts) => ({
+      parent: text(parts[0]?.table),
+      from: parts.map((part) => text(part.from)),
+      to: parts.map((part) => (part.to === null ? "" : text(part.to))),
+    })),
+    allowed,
+  };
+};
+
+/** Tables with each one's parents before it; a cycle keeps its order. */
+const parentsFirst = (tables: readonly Table[]): Table[] => {
+  const byName = new Map(tables.map((table) => [table.name, table]));
+  const ordered: Table[] = [];
+  const seen = new Set<string>();
+  const visit = (table: Table, path: Set<string>): void => {
+    if (seen.has(table.name) || path.has(table.name)) {
+      return;
+    }
+    path.add(table.name);
+    for (const { parent } of table.foreignKeys) {
+      const parentTable = byName.get(parent);
+      if (parentTable !== undefined) {
+        visit(parentTable, path);
+      }
+    }
+    seen.add(table.name);
+    ordered.push(table);
+  };
+  for (const table of tables) {
+    visit(table, new Set());
+  }
+  return ordered;
+};
+
+/** A value of its own for `column`, by its type's affinity (SQLite 3.1). */
+/**
+ * How text is written: each a JSON value, since a migration may read a
+ * text column as JSON (a string, an object, a list of objects).
+ */
+export type TextStyle = "string" | "object" | "list";
+
+const textValue = (value: string, style: TextStyle): string =>
+  JSON.stringify(
+    { string: value, object: { seed: value }, list: [{ seed: value }] }[style]
+  );
+
+const valueFor = (
+  table: Table,
+  column: Column,
+  place: number,
+  row: number,
+  style: TextStyle
+): SQLInputValue => {
+  const allowed = table.allowed.get(column.name.toLowerCase());
+  if (allowed !== undefined && allowed.length > 0) {
+    return allowed[row % allowed.length] ?? null;
+  }
+  const number = (place + 1) * 1000 + row + 1;
+  const { type } = column;
+  if (type.includes("INT")) {
+    return number;
+  }
+  if (/CHAR|CLOB|TEXT/u.test(type)) {
+    return textValue(`${table.name}.${column.name}#${row}`, style);
+  }
+  if (type === "" || type.includes("BLOB")) {
+    return new TextEncoder().encode(`${table.name}.${column.name}#${row}`);
+  }
+  if (/REAL|FLOA|DOUB/u.test(type)) {
+    return number + 0.5;
+  }
+  return number;
+};
+
+/** The rows to try for one row of `table`, in order. */
+const attempts = (
+  table: Table,
+  row: number,
+  written: ReadonlyMap<string, Row[]>,
+  tables: ReadonlyMap<string, Table>,
+  style: TextStyle
+): Row[] => {
+  const own: Row = Object.fromEntries(
+    table.columns.map((column, place) => [
+      column.name,
+      valueFor(table, column, place, row, style),
+    ])
+  );
+  const nullable = table.columns.filter((column) => !column.notNull);
+  const allNull = Object.fromEntries(
+    nullable.map((column) => [column.name, null])
+  );
+  // Each parent row in turn, from the one of the same place: a parent's
+  // row a trigger reads as closed (a removed App) refuses children.
+  const choices = Math.max(
+    1,
+    ...table.foreignKeys.map(({ parent }) => written.get(parent)?.length ?? 0)
+  );
+  return Array.from({ length: choices }, (_, offset) => {
+    const base: Row = { ...own };
+    for (const key of table.foreignKeys) {
+      const parentRows =
+        key.parent === table.name ? [base] : (written.get(key.parent) ?? []);
+      const parent =
+        parentRows[(row + offset) % Math.max(parentRows.length, 1)];
+      // A key that names no columns references the parent's primary key.
+      const to = key.to.some((column) => column === "")
+        ? (tables.get(key.parent)?.primaryKey ?? [])
+        : key.to;
+      for (const [at, from] of key.from.entries()) {
+        const target = to[at];
+        if (parent !== undefined && target !== undefined && target in parent) {
+          base[from] = parent[target] ?? null;
+        }
+      }
+    }
+    const asJson: Row = Object.fromEntries(
+      Object.entries(base).map(([name, value]) => [
+        name,
+        typeof value === "string" ? JSON.stringify({ seed: value }) : value,
+      ])
+    );
+    const variants = [
+      base,
+      asJson,
+      ...nullable.map((column) => ({ ...base, [column.name]: null })),
+    ];
+    // The last row leaves its nullable columns empty first: a parent with
+    // them all set may read as closed (removed) to its children.
+    return row === ROWS - 1
+      ? [{ ...base, ...allNull }, ...variants]
+      : [...variants, { ...base, ...allNull }];
+  }).flat();
+};
+
+const firstLine = (error: unknown): string =>
+  (error instanceof Error ? error.message : String(error)).split("\n")[0] ?? "";
+
+/**
+ * Writes a few rows to every table of `db`: which tables took them, and
+ * which took none and why.
+ */
+export const seed = (
+  db: DatabaseSync,
+  style: TextStyle = "string"
+): { seeded: string[]; skipped: Skipped[] } => {
+  const names = tableNames(db);
+  const skipped: Skipped[] = names
+    .filter(({ virtual }) => virtual)
+    .map(({ name }) => ({ table: name, reason: "a virtual table" }));
+  const written = new Map<string, Row[]>();
+  const tables = new Map(
+    names
+      .filter(({ virtual }) => !virtual)
+      .map(({ name }) => [name, tableOf(db, name)] as const)
+  );
+  for (const table of parentsFirst([...tables.values()])) {
+    if (table.columns.length === 0) {
+      continue;
+    }
+    const insert = db.prepare(
+      `INSERT INTO ${quoted(table.name)} (${table.columns.map(({ name }) => quoted(name)).join(", ")}) VALUES (${table.columns.map(() => "?").join(", ")})`
+    );
+    const done: Row[] = [];
+    let refusal: string | undefined;
+    for (let row = 0; row < ROWS; row += 1) {
+      for (const attempt of attempts(table, row, written, tables, style)) {
+        try {
+          insert.run(...table.columns.map(({ name }) => attempt[name] ?? null));
+          done.push(attempt);
+          break;
+        } catch (error) {
+          refusal ??= firstLine(error);
+        }
+      }
+    }
+    if (done.length === 0) {
+      skipped.push({ table: table.name, reason: refusal ?? "no row" });
+    } else {
+      written.set(table.name, done);
+    }
+  }
+  return { seeded: [...written.keys()], skipped };
+};
+
+/** The rows of a table, and the columns that find one again. */
+interface TableRows {
+  key: string[];
+  rows: Stored[];
+}
+
+/** Every ordinary table's rows. */
+export type Snapshot = Map<string, TableRows>;
+
+export const snapshotOf = (db: DatabaseSync): Snapshot =>
+  new Map(
+    tableNames(db)
+      .filter(({ virtual }) => !virtual)
+      .map(({ name }) => [
+        name,
+        {
+          key: tableOf(db, name).primaryKey,
+          rows: rows(db, `SELECT * FROM ${quoted(name)}`),
+        },
+      ])
+  );
+
+/** Whether SQLite would read `a` and `b` as the same value. */
+const same = (
+  a: SQLOutputValue | undefined,
+  b: SQLOutputValue | undefined
+): boolean => {
+  if (a === null || b === null || a === undefined || b === undefined) {
+    return a === b;
+  }
+  if (a instanceof Uint8Array || b instanceof Uint8Array) {
+    return (
+      a instanceof Uint8Array &&
+      b instanceof Uint8Array &&
+      Buffer.from(a).equals(b)
+    );
+  }
+  return String(a) === String(b);
+};
+
+const shown = (value: unknown): string =>
+  value instanceof Uint8Array
+    ? `x'${Buffer.from(value).toString("hex")}'`
+    : JSON.stringify(value);
+
+/** What `db` lost or changed of the rows in `before`. */
+export const dataChanges = (
+  before: Snapshot,
+  db: DatabaseSync
+): DataChange[] => {
+  const after = snapshotOf(db);
+  const found: DataChange[] = [];
+  for (const [table, { key, rows: oldRows }] of before) {
+    const now = after.get(table);
+    // A table or key column dropped is the schema check's to judge.
+    if (now === undefined || oldRows.length === 0) {
+      continue;
+    }
+    const columns =
+      Object.keys(now.rows[0] ?? {}).length > 0
+        ? Object.keys(now.rows[0] ?? {})
+        : tableOf(db, table).columns.map(({ name }) => name);
+    if (!key.every((column) => columns.includes(column))) {
+      continue;
+    }
+    const kept = Object.keys(oldRows[0] ?? {}).filter((column) =>
+      columns.includes(column)
+    );
+    // Without a primary key, a row is found again by all it holds.
+    const findBy = key.length > 0 ? key : kept;
+    let lost = 0;
+    const changed = new Map<string, { rows: number; detail: string }>();
+    for (const old of oldRows) {
+      const match = now.rows.find((row) =>
+        findBy.every((column) => same(row[column], old[column]))
+      );
+      if (match === undefined) {
+        lost += 1;
+        continue;
+      }
+      for (const column of kept) {
+        if (!same(match[column], old[column])) {
+          const moved = kept.find(
+            (other) => other !== column && same(match[column], old[other])
+          );
+          const entry = changed.get(column) ?? {
+            rows: 0,
+            detail:
+              moved === undefined
+                ? `${shown(old[column])} to ${shown(match[column])}`
+                : `now holds what ${table}.${moved} held`,
+          };
+          entry.rows += 1;
+          changed.set(column, entry);
+        }
+      }
+    }
+    if (lost > 0) {
+      found.push({
+        subject: `delete rows ${table}`,
+        detail: `${lost} of ${oldRows.length} rows gone`,
+      });
+    }
+    for (const [column, { rows: count, detail }] of changed) {
+      found.push({
+        subject: `change values ${table}.${column}`,
+        detail: `${count} of ${oldRows.length} rows, ${detail}`,
+      });
+    }
+  }
+  return found;
+};
+
+/** A migration as D1 and Durable Objects run it: `foreign_keys` stays on. */
+export const asDeployed = (sql: string): string =>
+  sql.replaceAll(/^\s*PRAGMA\s+foreign_keys\s*=\s*\w+\s*;/gimu, "");
