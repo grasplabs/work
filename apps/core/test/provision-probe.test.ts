@@ -19,11 +19,13 @@ import {
 } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { clock, clockTasks } from "../src/clock.ts";
 import worker from "../src/index.ts";
 import { connectVersionMetadata } from "./connect-providers.ts";
 import { coreOrigin } from "./sign-in.ts";
+import { testBinding } from "./test-env.ts";
 
 // The admin's provisioning probe (src/provision-probe.ts). The ways it
 // can fail, tried here:
@@ -37,6 +39,8 @@ import { coreOrigin } from "./sign-in.ts";
 // - A refused request making core do anything: its clock armed.
 // - The answer leaking a secret, a resource's id or an error's words.
 // - A binding or clock that doesn't answer passing as one that does.
+// - A database that doesn't answer passing as one on the release's last
+//   migration.
 // - A deployment whose model files bucket lacks a file of the model core
 //   runs passing, to fail at its first question instead (each way the
 //   bucket can fail to hold one, `holdsModelFiles`, is tried in
@@ -47,6 +51,13 @@ const clientId = "acme";
 
 /** Core's env as the admin deploys it. */
 const deployed: Env = { ...env, CLIENT_ID: clientId };
+
+/** The last migration of core's own database, as its release lists them. */
+const lastCoreMigration = (): string | undefined =>
+  z
+    .array(z.object({ name: z.string() }))
+    .parse(testBinding("CORE_MIGRATIONS"))
+    .at(-1)?.name;
 
 /** `body`'s signature as the admin makes it, with the key `secret` gives for `purpose`. */
 const signatureOf = async (
@@ -173,6 +184,10 @@ describe("the console's provisioning probe", () => {
         // Connect's, as connect named it over its binding.
         connectVersion: connectVersionMetadata.id,
         clientId,
+        // Its deploy named no release.
+        release: null,
+        // Its database, migrated as the release lists it.
+        schema: { DB: lastCoreMigration() },
         // Its deploy asked for no closed start.
         startsClosed: false,
         bindings: {
@@ -292,6 +307,7 @@ describe("the console's provisioning probe", () => {
       ...deployed,
       FILES: down(env.FILES, "bucket 4f1c0a77d2 is gone"),
       CONNECT: down(env.CONNECT, "connect isn't deployed"),
+      DB: down(env.DB, "database 7d20e5c1b4 is gone"),
       APPS: down(env.APPS, "namespace 9b3e7d10aa isn't bound"),
       // Neither sandbox runs App code: the host this test pool binds, nor
       // the Loader.
@@ -306,8 +322,9 @@ describe("the console's provisioning probe", () => {
     const text = await response.text();
 
     expect(provisionProbeSchema.parse(JSON.parse(text))).toMatchObject({
+      schema: { DB: null },
       bindings: {
-        DB: true,
+        DB: false,
         FILES: false,
         CONNECT: false,
         APPS: false,
@@ -317,10 +334,12 @@ describe("the console's provisioning probe", () => {
       },
       clocks: { core: { armed: true }, connect: null },
     });
-    expect(text).not.toContain("4f1c0a77d2");
-    expect(text).not.toContain("9b3e7d10aa");
-    expect(text).not.toContain("51c2e9");
-    expect(text).not.toContain("deployed");
+    // None of why any of them failed.
+    expect(
+      ["4f1c0a77d2", "9b3e7d10aa", "7d20e5c1b4", "51c2e9", "deployed"].filter(
+        (word) => text.includes(word)
+      )
+    ).toStrictEqual([]);
   });
 
   it("says the model files bucket failed while it lacks a file of the model core runs", async () => {
@@ -339,6 +358,21 @@ describe("the console's provisioning probe", () => {
     const response = await probe(env);
     expect(provisionProbeSchema.parse(await response.json())).toMatchObject({
       clientId: null,
+    });
+  });
+
+  it("names the release its deploy says it runs", async () => {
+    const response = await probe({
+      ...deployed,
+      PLATFORM_CHANGE: JSON.stringify({
+        by: "rollout",
+        what: "release",
+        release: "26.11.27.1",
+        at: "2026-11-27T09:00:00.000Z",
+      }),
+    });
+    expect(provisionProbeSchema.parse(await response.json())).toMatchObject({
+      release: "26.11.27.1",
     });
   });
 
