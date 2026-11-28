@@ -258,9 +258,9 @@ CREATE TABLE t (id TEXT);`,
     // The admin on its own hostname, which the links name.
     const hosted = { ...env, ADMIN_HOST: "admin.grasp.test" };
 
-    await deployEnded(clientId, "26.11.7", "release_rolled_back");
+    await deployEnded(clientId, "26.11.7", "d1_migration_failed");
     await deliver(hosted);
-    await deployEnded(clientId, "26.11.7", "release_rolled_back");
+    await deployEnded(clientId, "26.11.7", "d1_migration_failed");
     await deliver(hosted);
     await deployEnded(clientId, "26.11.8", null);
     await deliver(hosted);
@@ -327,7 +327,7 @@ CREATE TABLE t (id TEXT);`,
         `${shownName}\n\`${clientId}\``,
         "26.11.7",
         "Stable",
-        "`release_rolled_back`",
+        "`d1_migration_failed`",
       ]
     );
   });
@@ -737,7 +737,7 @@ CREATE TABLE t (id TEXT);`,
       kind: "deploy_failed",
       clientId,
       releaseId: "26.11.7",
-      code: "release_rolled_back",
+      code: "d1_migration_failed",
     });
     await deliver(hosted);
     const [test, real] = discord.posts;

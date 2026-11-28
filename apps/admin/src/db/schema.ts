@@ -104,14 +104,6 @@ export const channels = sqliteTable("channels", {
     .notNull()
     .references(() => releases.id),
   updatedAt: timestamp("updated_at").notNull(),
-  /**
-   * Why nothing new deploys on the channel: its rollout's halt reason
-   * (src/rollout/scheduler.ts), or, from an older admin, an error code;
-   * null once it's resumed or the channel moves. Shown in "Needs Grasp
-   * today" at each of its organizations. Kept while an older admin may
-   * read it.
-   */
-  stoppedBy: text("stopped_by"),
 });
 
 /**
@@ -362,11 +354,10 @@ export const clientRuns = sqliteTable("client_runs", {
    * Which Workflow the runner is an instance of: `provision_placed`
    * provisions a client placed in a hosting destination
    * (src/hosting/workflow.ts); `rollout` takes it to a release, a step a
-   * phase (src/rollout/org-rollout.ts); `deploy`, the same in one step
-   * (src/rollout/deploy.ts), until that goes.
+   * phase (src/rollout/org-rollout.ts).
    */
   kind: text({
-    enum: ["deploy", "apply", "provision_placed", "rollout"],
+    enum: ["apply", "provision_placed", "rollout"],
   }).notNull(),
   /**
    * The runner's attempt that holds the client, for a runner on Workerflow
@@ -428,7 +419,7 @@ export const clientDeploys = sqliteTable(
     releaseId: text("release_id")
       .notNull()
       .references(() => releases.id),
-    /** The deploy's run (src/rollout/deploy.ts). */
+    /** The deploy's run (src/rollout/org-rollout.ts). */
     runId: text("run_id").notNull(),
     status: text({ enum: ["deploying", "done", "failed"] }).notNull(),
     /** Why it failed: a code, never a message or a response body. */

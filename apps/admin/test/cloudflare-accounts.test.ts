@@ -124,27 +124,9 @@ describe("answers as Cloudflare sends them", () => {
 });
 
 describe("retries", () => {
-  it("retries a rate-limited call, creating once", async () => {
+  it("fails a rate-limited call at once, never sending it again, and keeps until when it said to wait", async () => {
     const account = cloudflare.addAccount();
-    // The create is refused twice, then goes through.
-    cloudflare.failCall(1, 429);
-    cloudflare.failCall(2, 429);
-    await createD1Database(api, account.id, "grasp-os-core", "eu");
-    expect(account.d1).toHaveLength(1);
-    expect(cloudflare.calls.map(({ method }) => method)).toStrictEqual([
-      "POST",
-      "POST",
-      "POST",
-    ]);
-  });
-
-  it("fails a rate-limited call at once for a caller that waits the block out, and keeps until when it said to wait", async () => {
-    const account = cloudflare.addAccount();
-    const fresh = cloudflareApi({
-      token,
-      retryDelayMs: 0,
-      failRateLimited: true,
-    });
+    const fresh = cloudflareApi({ token, retryDelayMs: 0 });
     cloudflare.failCall(1, { retryAfter: "7" });
     const sentAt = Date.now();
     await expect(
@@ -160,11 +142,7 @@ describe("retries", () => {
 
   it("counts a 429 that names no wait as Cloudflare's five-minute block", async () => {
     const account = cloudflare.addAccount();
-    const fresh = cloudflareApi({
-      token,
-      retryDelayMs: 0,
-      failRateLimited: true,
-    });
+    const fresh = cloudflareApi({ token, retryDelayMs: 0 });
     cloudflare.failCall(1, 429);
     const sentAt = Date.now();
     await expect(getAccount(fresh, account.id)).rejects.toMatchObject({
@@ -177,11 +155,7 @@ describe("retries", () => {
 
   it("keeps the last Ratelimit header an answer carried, and counts every call", async () => {
     const account = cloudflare.addAccount("Acme");
-    const fresh = cloudflareApi({
-      token,
-      retryDelayMs: 0,
-      failRateLimited: true,
-    });
+    const fresh = cloudflareApi({ token, retryDelayMs: 0 });
     cloudflare.failCall(1, 503);
     await getAccount(fresh, account.id);
     await getAccount(fresh, account.id);
@@ -223,28 +197,16 @@ describe("retries", () => {
     ]);
   });
 
-  it("waits as long as a 429's Retry-After asks, up to a minute", async () => {
-    const account = cloudflare.addAccount();
-    const wait = vi.spyOn(scheduler, "wait").mockResolvedValue();
-    cloudflare.failCall(1, { retryAfter: "7" });
-    cloudflare.failCall(2, { retryAfter: "3600" });
-    cloudflare.failCall(3, { retryAfter: "soon" });
-    await getAccount(api, account.id);
-    // Seven seconds; capped at a minute; no number, so the usual backoff.
-    expect(wait.mock.calls).toStrictEqual([[7000], [60_000], [0]]);
-  });
-
   it("gives up after four attempts, waiting twice as long each time", async () => {
     const account = cloudflare.addAccount();
     // Waits are counted, not waited.
     const wait = vi.spyOn(scheduler, "wait").mockResolvedValue();
     const slow = cloudflareApi({ token, retryDelayMs: 100 });
     for (const n of [1, 2, 3, 4]) {
-      cloudflare.failCall(n, 429);
+      cloudflare.failCall(n, 503);
     }
     await expect(getAccount(slow, account.id)).rejects.toMatchObject({
-      status: 429,
-      codes: [971],
+      status: 503,
     });
     expect(cloudflare.calls).toHaveLength(4);
     expect(wait.mock.calls).toStrictEqual([[100], [200], [400]]);

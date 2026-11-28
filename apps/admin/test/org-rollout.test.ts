@@ -17,7 +17,6 @@ import {
   rollouts as rolloutRows,
 } from "../src/db/schema.ts";
 import { operationPhases } from "../src/hosting/operation.ts";
-import { rolloutPass } from "../src/rollout/scheduler.ts";
 import { claimRun, currentRun, hasEnded, takeAttempt } from "../src/runners.ts";
 import { adminWorkflow, adminWorkflows } from "../src/workflow-runs.ts";
 import type { ApiCall } from "./cloudflare-api-kit.ts";
@@ -355,7 +354,7 @@ describe("an organization's rollout", () => {
 
   it("takes an organization to a release, a step a phase, records it done, and keeps what it saw of the API's limit", async () => {
     const { client, to } = await clientAndRelease(withMigration);
-    await using runs = followAdminRuns();
+    await using _runs = followAdminRuns();
     const runId = await rollOut(client.clientId, to);
     const run = await ended(rollouts, runId);
     const { steps } = await journalOf(rollouts, runId);
@@ -368,7 +367,6 @@ describe("an organization's rollout", () => {
       steps: steps.filter(({ type }) => type === "do").map(({ name }) => name),
       remaining: budget?.remaining === cloudflare.rateLimit.remaining,
       blocked: budget?.blockedUntil ?? null,
-      deploys: runs.of(adminWorkflows.deploy),
     }).toStrictEqual({
       status: "complete",
       deploy: { releaseId: to, status: "done", error: null },
@@ -377,7 +375,6 @@ describe("an organization's rollout", () => {
       steps: ["start", ...operationPhases],
       remaining: true,
       blocked: null,
-      deploys: [],
     });
   });
 
@@ -447,7 +444,6 @@ describe("an organization's rollout", () => {
             path.endsWith("/time_travel/bookmark")
           ).length,
           restored: await auditedOf(client.clientId, "release.rollback"),
-          deploys: runs.of(adminWorkflows.deploy),
         }).toStrictEqual({
           status: "complete",
           deploy: { releaseId: to, status: "done", error: null },
@@ -460,7 +456,6 @@ describe("an organization's rollout", () => {
           migrated: 1,
           bookmarks: 1,
           restored: [],
-          deploys: [],
         });
       } finally {
         held?.lose();
@@ -478,7 +473,7 @@ describe("an organization's rollout", () => {
     const cuts = Array.from({ length: 4 }, () => heldAfter(coreRead));
     const takeovers: Promise<void>[] = [];
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    await using runs = followAdminRuns();
+    await using _runs = followAdminRuns();
     try {
       const runId = await rollOut(client.clientId, to);
       for (const cut of cuts) {
@@ -494,7 +489,6 @@ describe("an organization's rollout", () => {
         ...(await deployOf(client.clientId)),
         releases: await releasesOf(client.clientId),
         install: install.map(({ ended: how }) => how),
-        deploys: runs.of(adminWorkflows.deploy),
       }).toStrictEqual({
         status: "complete",
         deploy: { releaseId: to, status: "done", error: null },
@@ -507,7 +501,6 @@ describe("an organization's rollout", () => {
           "superseded",
           "succeeded",
         ],
-        deploys: [],
       });
     } finally {
       for (const cut of cuts) {
@@ -559,7 +552,6 @@ describe("an organization's rollout", () => {
         releases: await releasesOf(client.clientId),
         restored: await auditedOf(client.clientId, "release.rollback"),
         alert: await alertOf(client.clientId),
-        deploys: runs.of(adminWorkflows.deploy),
       }).toStrictEqual({
         // The run's steps failed, so it did; its deploy is done.
         status: "errored",
@@ -570,7 +562,6 @@ describe("an organization's rollout", () => {
         releases: on(to),
         restored: [],
         alert: null,
-        deploys: [],
       });
     } finally {
       errors.mockRestore();
@@ -582,7 +573,7 @@ describe("an organization's rollout", () => {
     const { core } = await scriptsOf(client.clientId);
     cloudflare.failNext(uploading(core), 400);
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    await using runs = followAdminRuns();
+    await using _runs = followAdminRuns();
     try {
       const runId = await rollOut(client.clientId, to);
       const run = await ended(rollouts, runId);
@@ -600,7 +591,6 @@ describe("an organization's rollout", () => {
         ]),
         // Restored: the rollout counts it, and nobody is told of it alone.
         alert: await alertOf(client.clientId),
-        deploys: runs.of(adminWorkflows.deploy),
       }).toStrictEqual({
         status: "errored",
         deploy: {
@@ -613,7 +603,6 @@ describe("an organization's rollout", () => {
         uploads: { connect: 2, core: 2 },
         failed: [{ error: "cloudflare_400_10000", restored: true }],
         alert: null,
-        deploys: [],
       });
     } finally {
       errors.mockRestore();
@@ -672,7 +661,7 @@ describe("an organization's rollout", () => {
     });
     // oxlint-enable require-await
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    await using runs = followAdminRuns();
+    await using _runs = followAdminRuns();
     try {
       const runId = await rollOut(client.clientId, to);
       const run = await ended(rollouts, runId);
@@ -686,7 +675,6 @@ describe("an organization's rollout", () => {
         restoredTo: await auditedOf(client.clientId, "release.rollback", [
           "cause",
         ]),
-        deploys: runs.of(adminWorkflows.deploy),
       }).toStrictEqual({
         status: "errored",
         // Not tried again: it answered, wrongly.
@@ -700,7 +688,6 @@ describe("an organization's rollout", () => {
         releases: on(from),
         uploads: { connect: 2, core: 2 },
         restoredTo: [{ cause: "probe_release_mismatch" }],
-        deploys: [],
       });
     } finally {
       errors.mockRestore();
@@ -725,7 +712,7 @@ describe("an organization's rollout", () => {
         { timeout: 20_000, interval: 50 }
       );
       delete client.core.coreProbe;
-      await using runs = followAdminRuns();
+      await using _runs = followAdminRuns();
       const run = await hurriedToEnd(runId);
 
       expect({
@@ -733,14 +720,12 @@ describe("an organization's rollout", () => {
         probe: await endsAt(runId, "probe"),
         ...(await deployOf(client.clientId)),
         restored: await auditedOf(client.clientId, "release.rollback"),
-        deploys: runs.of(adminWorkflows.deploy),
       }).toStrictEqual({
         status: "complete",
         probe: ["failed", "succeeded"],
         deploy: { releaseId: to, status: "done", error: null },
         runner: null,
         restored: [],
-        deploys: [],
       });
     } finally {
       errors.mockRestore();
@@ -776,7 +761,7 @@ describe("an organization's rollout", () => {
         }
       }, patiently);
       delete client.core.coreProbe;
-      await using runs = followAdminRuns();
+      await using _runs = followAdminRuns();
       await hurriedToEnd(runId);
 
       expect({
@@ -789,7 +774,6 @@ describe("an organization's rollout", () => {
           "error",
           "restored",
         ]),
-        deploys: runs.of(adminWorkflows.deploy),
       }).toStrictEqual({
         deploy: {
           releaseId: to,
@@ -801,7 +785,6 @@ describe("an organization's rollout", () => {
         // Started once, from the release that failed.
         rollbacks: [{ from: to }],
         failed: [{ error: "probe_release_mismatch", restored: true }],
-        deploys: [],
       });
     } finally {
       errors.mockRestore();
@@ -816,7 +799,7 @@ describe("an organization's rollout", () => {
       await emptyStoreSecret(env.DEPLOYER_API_TOKEN, "DEPLOYER_API_TOKEN");
     });
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    await using runs = followAdminRuns();
+    await using _runs = followAdminRuns();
     try {
       const runId = await rollOut(client.clientId, to);
       await ended(rollouts, runId);
@@ -828,13 +811,11 @@ describe("an organization's rollout", () => {
           "cause",
         ]),
         alert: await alertOf(client.clientId),
-        deploys: runs.of(adminWorkflows.deploy),
       }).toStrictEqual({
         deploy: { releaseId: to, status: "failed", error: "restore_failed" },
         runner: null,
         failed: [{ error: "restore_failed", cause: "store_secret_missing" }],
         alert: { failing: true, kind: "restore_failed" },
-        deploys: [],
       });
     } finally {
       errors.mockRestore();
@@ -845,7 +826,7 @@ describe("an organization's rollout", () => {
     const { client, to } = await clientAndRelease(onPi("1.6.1"), onPi("1.4.2"));
     client.core.coreProbe = { asClient: "someone-else" };
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    await using runs = followAdminRuns();
+    await using _runs = followAdminRuns();
     try {
       const runId = await rollOut(client.clientId, to);
       await ended(rollouts, runId);
@@ -858,7 +839,6 @@ describe("an organization's rollout", () => {
           "cause",
         ]),
         alert: await alertOf(client.clientId),
-        deploys: runs.of(adminWorkflows.deploy),
       }).toStrictEqual({
         deploy: { releaseId: to, status: "failed", error: "restore_refused" },
         runner: null,
@@ -867,7 +847,6 @@ describe("an organization's rollout", () => {
           { error: "restore_refused", cause: "probe_identity_mismatch" },
         ],
         alert: { failing: true, kind: "restore_refused" },
-        deploys: [],
       });
     } finally {
       errors.mockRestore();
@@ -879,7 +858,7 @@ describe("an organization's rollout", () => {
     // Whatever runs, its core answers as another client.
     client.core.coreProbe = { asClient: "someone-else" };
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    await using runs = followAdminRuns();
+    await using _runs = followAdminRuns();
     try {
       const runId = await rollOut(client.clientId, to);
       await ended(rollouts, runId);
@@ -891,13 +870,11 @@ describe("an organization's rollout", () => {
           "cause",
         ]),
         alert: await alertOf(client.clientId),
-        deploys: runs.of(adminWorkflows.deploy),
       }).toStrictEqual({
         deploy: { releaseId: to, status: "failed", error: "restore_failed" },
         runner: null,
         failed: [{ error: "restore_failed", cause: "probe_identity_mismatch" }],
         alert: { failing: true, kind: "restore_failed" },
-        deploys: [],
       });
     } finally {
       errors.mockRestore();
@@ -974,7 +951,6 @@ describe("an organization's rollout", () => {
           "error",
           "restored",
         ]),
-        deploys: runs.of(adminWorkflows.deploy),
       }).toStrictEqual({
         status: "errored",
         probe: ["timed_out", "timed_out", "timed_out", "timed_out"],
@@ -986,7 +962,6 @@ describe("an organization's rollout", () => {
         runner: null,
         releases: on(from),
         failed: [{ error: "attempt_lost: probe", restored: true }],
-        deploys: [],
       });
     } finally {
       holding.released.resolve(true);
@@ -1033,13 +1008,11 @@ describe("an organization's rollout", () => {
           "error",
           "restored",
         ]),
-        deploys: runs.of(adminWorkflows.deploy),
       }).toStrictEqual({
         deploy: { releaseId: to, status: "failed", error: "run_terminated" },
         runner: null,
         releases: on(from),
         failed: [{ error: "run_terminated", restored: true }],
-        deploys: [],
       });
     } finally {
       held?.lose();
@@ -1085,13 +1058,11 @@ describe("an organization's rollout", () => {
           "error",
           "restored",
         ]),
-        deploys: runs.of(adminWorkflows.deploy),
       }).toStrictEqual({
         deploy: { releaseId: to, status: "failed", error: "run_terminated" },
         runner: null,
         releases: on(from),
         failed: [{ error: "run_terminated", restored: true }],
-        deploys: [],
       });
     } finally {
       held?.lose();
@@ -1135,7 +1106,7 @@ describe("an organization's rollout", () => {
           throw new Error("The attempt that timed out hasn't stopped yet");
         }
       }, patiently);
-      await using runs = followAdminRuns();
+      await using _runs = followAdminRuns();
       const run = await ended(rollouts, runId);
 
       expect({
@@ -1144,111 +1115,16 @@ describe("an organization's rollout", () => {
         releases: await releasesOf(client.clientId),
         // Only the retry recorded the resources.
         resources: await auditedOf(client.clientId, "provision.resources"),
-        deploys: runs.of(adminWorkflows.deploy),
       }).toStrictEqual({
         status: "complete",
         deploy: { releaseId: to, status: "done", error: null },
         runner: null,
         releases: on(to),
         resources,
-        deploys: [],
       });
     } finally {
       first.release();
       await Promise.allSettled(deliveries);
-      errors.mockRestore();
-    }
-  });
-
-  it("lets an old admin's deploy run and the pass's rollouts claim organizations one at a time, and settles both", async () => {
-    const before = await placedRelease("feat(core): before");
-    const old = await live(before);
-    const fresh = await live(before);
-    const release = await placedRelease("feat(core): both runs");
-    const { core } = await scriptsOf(old.clientId);
-    const held = heldAfter(
-      (call) => call.method === "GET" && call.path.endsWith(`/scripts/${core}`)
-    );
-    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    await using runs = followAdminRuns();
-    try {
-      // An older admin, mid-deploy of this one, starts a deploy run for one
-      // organization, as its reconciler did; the release is on Edge.
-      const oldRun = `deploy-${crypto.randomUUID().slice(0, 12)}`;
-      const claimed = await claimRun(
-        db,
-        "system",
-        old.clientId,
-        null,
-        { action: "deploy.start", clientId: old.clientId, target: release },
-        { kind: "deploy", runId: oldRun }
-      );
-      await db.insert(clientDeploys).values({
-        clientId: old.clientId,
-        releaseId: release,
-        runId: oldRun,
-        status: "deploying",
-        startedAt: new Date(),
-      });
-      await adminWorkflow(env, adminWorkflows.deploy).create({
-        id: oldRun,
-        params: { clientId: old.clientId, releaseId: release },
-      });
-      await held.read();
-      // Claimed long enough ago that the pass would settle a run it can't
-      // find as gone.
-      await db
-        .update(clientDeploys)
-        .set({ startedAt: new Date(Date.now() - 10 * 60 * 1000) })
-        .where(eq(clientDeploys.clientId, old.clientId));
-      await releaseToEdge(env, [release]);
-      await rolloutPass(env);
-      const { deploy, runner } = await deployOf(old.clientId);
-      const whileOut = {
-        claimed: claimed === oldRun,
-        rollouts: runs.of(rollouts).length,
-        oldRunner: runner?.runId,
-        oldDeploy: deploy?.status,
-      };
-      held.release();
-      await ended(adminWorkflows.deploy, oldRun);
-      await Promise.all(
-        runs.of(rollouts).map(async (id) => await hurriedToEnd(id))
-      );
-      // The pass settles nothing more: each recorded its own end.
-      await rolloutPass(env);
-
-      expect({
-        whileOut,
-        old: await deployOf(old.clientId),
-        fresh: await deployOf(fresh.clientId),
-        releases: {
-          old: await releasesOf(old.clientId),
-          fresh: await releasesOf(fresh.clientId),
-        },
-        rollouts: runs.of(rollouts).length,
-      }).toStrictEqual({
-        // The pass started a rollout only for the organization the old
-        // run didn't have, and found the old run out.
-        whileOut: {
-          claimed: true,
-          rollouts: 1,
-          oldRunner: oldRun,
-          oldDeploy: "deploying",
-        },
-        old: {
-          deploy: { releaseId: release, status: "done", error: null },
-          runner: null,
-        },
-        fresh: {
-          deploy: { releaseId: release, status: "done", error: null },
-          runner: null,
-        },
-        releases: { old: on(release), fresh: on(release) },
-        rollouts: 1,
-      });
-    } finally {
-      held.release();
       errors.mockRestore();
     }
   });
@@ -1291,7 +1167,7 @@ describe("a 429 storm across organizations' rollouts", () => {
           }, patiently);
         })
       );
-      await using runs = followAdminRuns();
+      await using _runs = followAdminRuns();
       await Promise.all(runIds.map(async (id) => await hurriedToEnd(id)));
       const blocked = await db
         .select({ key: alerts.key })
@@ -1316,7 +1192,6 @@ describe("a 429 storm across organizations' rollouts", () => {
         alerts: blocked.length,
         audited,
         deploys,
-        oldRuns: runs.of(adminWorkflows.deploy),
       }).toStrictEqual({
         parked: runIds.map(() => 300_000),
         refused: true,
@@ -1327,7 +1202,6 @@ describe("a 429 storm across organizations' rollouts", () => {
           status: "done",
           error: null,
         })),
-        oldRuns: [],
       });
     } finally {
       errors.mockRestore();

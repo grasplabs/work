@@ -16,7 +16,7 @@
  * - Removing what's in use: the bucket holds model files only, under one
  *   prefix, so the deploy lists that prefix and removes what neither the
  *   release being deployed nor the one running before it (what a failed
- *   probe rolls back to) names. Any release deployed later, a rollback
+ *   rollout restores) names. Any release deployed later, a rollback
  *   included, copies what it names again; a file a crashed deploy left
  *   behind goes with the next.
  *

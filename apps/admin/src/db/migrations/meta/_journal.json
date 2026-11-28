@@ -428,6 +428,20 @@
       "when": 1795877070817,
       "tag": "0060_deploys_out",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "6",
+      "when": 1795878380281,
+      "tag": "0061_deploy_runs_gone",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "6",
+      "when": 1795879309577,
+      "tag": "0062_drop_channel_stopped_by",
+      "breakpoints": true
     }
   ]
 }

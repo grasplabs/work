@@ -3,7 +3,7 @@ import type { WorkerEntry } from "@grasp-os/shared/release";
 import { routerHostKey } from "@grasp-os/shared/router";
 import { env } from "cloudflare:workers";
 import { and, eq, sql } from "drizzle-orm";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import {
@@ -496,88 +496,6 @@ describe("provisioning a placed client", () => {
       },
       resumed: [core],
       operation: { releaseId: later.releaseId, status: "done" },
-    });
-  });
-
-  it("rolls a release that fails its probe once live back to the release before on its own, audited, and records a rollback that fails too", async () => {
-    const first = await importRelease();
-    const { clientId } = await liveClient(first);
-    // Its connect changed too, so the release and its rollback upload it.
-    const later = await importRelease({
-      notes: "feat(core): broken once live",
-      connect: "export default { later: true };",
-    });
-    const { connect } = await scriptsOf(clientId);
-    // The release's core answers as another client; once the release's
-    // connect went, the next upload of connect (the rollback's) finds core
-    // answering as it should again.
-    cloudflare.coreOf(clientId).coreProbe = { asClient: "someone-else" };
-    // oxlint-disable require-await -- the fake waits on these; nothing to wait for
-    cloudflare.beforeAnswering(isUpload(connect), async () => {
-      cloudflare.beforeAnswering(isUpload(connect), async () => {
-        delete cloudflare.coreOf(clientId).coreProbe;
-      });
-    });
-    // oxlint-enable require-await
-
-    await startClientRelease(db, staff, await attempt(clientId), {
-      releaseId: later.releaseId,
-    });
-    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      await runClientProvision(context, await attempt(clientId));
-    } finally {
-      errors.mockRestore();
-    }
-    const [rolledBack] = await db
-      .select({ actor: auditEvents.actor, detail: auditEvents.detail })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.clientId, clientId),
-          eq(auditEvents.action, "release.rollback")
-        )
-      );
-
-    // A rollback that fails its probe too: thrown, and recorded on the
-    // operation, where its Setup says so.
-    const stuck = await liveClient(first);
-    await startClientRelease(db, staff, await attempt(stuck.clientId), {
-      releaseId: later.releaseId,
-    });
-    cloudflare.coreOf(stuck.clientId).coreProbe = { asClient: "someone-else" };
-    const stuckErrors = vi.spyOn(console, "error").mockImplementation(() => {});
-    const stuckError = await runClientProvision(
-      context,
-      await attempt(stuck.clientId)
-    ).then(
-      () => null,
-      (error: unknown) => error
-    );
-    stuckErrors.mockRestore();
-
-    expect({
-      operation: await operationOf(clientId),
-      runs: await runs(clientId),
-      rolledBack: {
-        actor: rolledBack?.actor,
-        detail: z.unknown().parse(JSON.parse(rolledBack?.detail ?? "null")),
-      },
-      stuck: {
-        error: stuckError,
-        operation: await operationOf(stuck.clientId),
-      },
-    }).toMatchObject({
-      operation: { releaseId: first.releaseId, status: "done" },
-      runs: { core: first.releaseId, connect: first.releaseId },
-      rolledBack: {
-        actor: "system",
-        detail: { from: later.releaseId, cause: "probe_identity_mismatch" },
-      },
-      stuck: {
-        error: { code: "probe_identity_mismatch" },
-        operation: { releaseId: first.releaseId, status: "failed" },
-      },
     });
   });
 

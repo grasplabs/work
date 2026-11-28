@@ -257,7 +257,7 @@ export const provisionOperationErrorCodes = [
   /**
    * A rollback past a release that changed how chats are stored: the
    * release before can't read the chats the client stores since
-   * (`canMove`). Also what a failed probe's rollback stops with.
+   * (`canMove`).
    */
   "rollback_past_chat_storage",
   /**
@@ -265,11 +265,6 @@ export const provisionOperationErrorCodes = [
    * stores: an older one, from before a change in how they're stored.
    */
   "release_behind_chat_storage",
-  /**
-   * The release failed its probe once live and was rolled back to the
-   * release before on its own: its deploy counts as failed.
-   */
-  "release_rolled_back",
   /**
    * A release that failed once it started installing, and whose restore
    * to the release before was refused (`canMove`): past a Durable Object
@@ -893,7 +888,7 @@ export const startedAs = (started: {
  * (`rollback_past_chat_storage`, `release_behind_chat_storage`), and when
  * the claim or the operation changed as it started
  * (`operation_running`). `cause` goes in the audit event, as when a
- * release is rolled back on its own.
+ * failed rollout restores the release before (src/rollout/org-rollout.ts).
  */
 export const startClientRelease = async (
   db: AdminDatabase,
@@ -1964,7 +1959,7 @@ const uploadCountedAsRun = async (
  * Step 3's other half: the model files the release names, in the client's
  * models bucket before core goes live (src/deploy/model-files.ts), and
  * every other model file there removed unless the release running before
- * (what a failed probe rolls back to) names it.
+ * (what a failed rollout restores) names it.
  */
 const syncClientModelFiles = async (
   context: ProvisionContext,
@@ -3082,12 +3077,6 @@ export interface Stopped {
   step: ProvisionStep;
   code: string;
   error: unknown;
-  /**
-   * Whether it stopped before its phase did any of its own work: refused
-   * out of order, no longer held, or the client unreadable. Nothing of
-   * the release failed then, so nothing is rolled back for it.
-   */
-  unstarted: boolean;
 }
 
 /**
@@ -3312,7 +3301,6 @@ export const runOperationPhase = async (
     return undefined;
   }
   const at: Reached = { step: firstSteps[phase] };
-  let unstarted = true;
   try {
     // Before anything is read or asked of Cloudflare: an admin whose
     // STAGE names no stage has no namespace of its own to hold a client
@@ -3346,7 +3334,6 @@ export const runOperationPhase = async (
     // finishes again: a phase run again that fails never leaves a later
     // phase admitted on what it did before.
     await stepBack(db, loaded, after);
-    unstarted = false;
     await phaseWork[phase](context, working, at, inventory);
     return undefined;
   } catch (error) {
@@ -3365,7 +3352,7 @@ export const runOperationPhase = async (
     if (code !== "phase_out_of_order") {
       await recordFailure(db, { operation, held }, at.step, code);
     }
-    return { operation, step: at.step, code, error, unstarted };
+    return { operation, step: at.step, code, error };
   }
 };
 
@@ -3389,110 +3376,22 @@ const runOperation = async (
 };
 
 /**
- * Whether a run that failed at `step` with `code` rolls a live client
- * back on its own: a release (one with a release before it) whose code
- * went onto the client's stable scripts and then failed its probe. A
- * user Worker has no documented version-then-promote, so the new code
- * serves from its upload; the probe failing means it serves broken until
- * the release before is back. `probe_unqualified` isn't the release's
- * fault, and the release before would stop there too.
- */
-const rollsBack = async (
-  db: AdminDatabase,
-  operation: Operation,
-  step: ProvisionStep,
-  code: string
-): Promise<boolean> => {
-  if (
-    step !== "probe" ||
-    code === "probe_unqualified" ||
-    operation.previousReleaseId === null ||
-    operation.previousReleaseId === operation.releaseId
-  ) {
-    return false;
-  }
-  const client = await db
-    .select({ status: clients.status })
-    .from(clients)
-    .where(eq(clients.id, operation.clientId))
-    .get();
-  return client?.status === "active";
-};
-
-/**
- * Rolls client `held.clientId` back to the release it ran before
- * `failed`, which failed its probe with `code`: through its operation,
- * as runner `held`, audited as the system's rollback with the cause.
- * Throws when the rollback doesn't finish, its failure recorded on the
- * operation as any is. Refused as any rollback is (`assertCanGo`): past a
- * Durable Object migration, or to a release that can't read the chats
- * the failed one stores (`rollback_past_chat_storage`). Then the client
- * stays on the failed release, its probe's failure on its operation, and
- * the refusal is what its run stops with, for staff to release a fix:
- * serving broken for a while does less harm than chats that no longer
- * open.
- */
-const rollBackAfterProbe = async (
-  context: ProvisionContext,
-  held: HeldClient,
-  failed: Operation,
-  code: string
-): Promise<void> => {
-  try {
-    await startClientRelease(context.db, "system", held, {
-      rollback: true,
-      cause: code,
-    });
-    const stopped = await runOperation(context, held);
-    if (stopped !== undefined) {
-      throw stopped.error;
-    }
-  } catch (error) {
-    log.error("provision.rollback_failed", {
-      operation: failed.id,
-      clientId: held.clientId,
-      error: operationErrorCode(error),
-    });
-    throw error;
-  }
-};
-
-/**
  * Runs client `held.clientId`'s provisioning operation, as runner `held`,
  * from its first step, and records it done; one done already is left as
  * it is. Run it again, as this runner or another that claimed the client,
  * to resume one that failed. On a failure it records the step and the
- * error's code, audited, and throws the error; except that a live
- * client's release that fails its probe is rolled back to the release
- * before on its own (`rollsBack`), audited. Only for a release
- * to another release: a run of the release it runs again (settings,
- * rotation, a secrets rollout) or a rollback passes `rollBackOnProbe`
- * false, as going back a release wouldn't undo what failed.
+ * error's code, audited, and throws the error.
  */
 export const runClientProvision = async (
   context: ProvisionContext,
-  held: HeldClient,
-  { rollBackOnProbe = true }: { rollBackOnProbe?: boolean } = {}
+  held: HeldClient
 ): Promise<void> => {
-  // Here, as the attempt enters, and not in `runOperation`: a rollback
-  // that this attempt starts runs the operation again as the same attempt,
-  // from a start of its own, with nothing of it lost.
   const entered = await provisionOf(context.db, held.clientId);
   if (entered !== undefined) {
     await noteLostAttempt(context.db, entered, held);
   }
   const stopped = await runOperation(context, held);
-  if (stopped === undefined) {
-    return;
+  if (stopped !== undefined) {
+    throw stopped.error;
   }
-  const { operation, step, code, error, unstarted } = stopped;
-  if (
-    rollBackOnProbe &&
-    !unstarted &&
-    (await rollsBack(context.db, operation, step, code))
-  ) {
-    await rollBackAfterProbe(context, held, operation, code);
-    return;
-  }
-  throw error;
 };

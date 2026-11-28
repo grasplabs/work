@@ -144,4 +144,39 @@ describe("the admin's migrations, on rows", () => {
       channels: [],
     });
   });
+
+  it("leave a client a deploy run last held to the next rollout's claim, and every other claim as it was", async () => {
+    const db = migrationDb();
+    const { before, it: deployRunsGone } = upTo("0061_deploy_runs_gone.sql");
+    await applyD1Migrations(db, before);
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const deployed = `deployed-${suffix}`;
+    const applied = `applied-${suffix}`;
+    const now = Date.now();
+    await db.batch([
+      db
+        .prepare(
+          "INSERT INTO clients (id, name, created_at, updated_at) VALUES (?1, ?1, ?3, ?3), (?2, ?2, ?3, ?3)"
+        )
+        .bind(deployed, applied, now),
+      db
+        .prepare(
+          "INSERT INTO client_runs (client_id, run_id, kind, claimed_at) VALUES (?1, 'deploy-1', 'deploy', ?3), (?2, 'apply-1', 'apply', ?3)"
+        )
+        .bind(deployed, applied, now),
+    ]);
+
+    await applyD1Migrations(db, [deployRunsGone]);
+    const { results } = await db
+      .prepare(
+        "SELECT client_id, run_id, kind FROM client_runs WHERE client_id IN (?1, ?2) ORDER BY run_id"
+      )
+      .bind(deployed, applied)
+      .all();
+
+    expect(results).toStrictEqual([
+      { client_id: applied, run_id: "apply-1", kind: "apply" },
+      { client_id: deployed, run_id: "deploy-1", kind: "rollout" },
+    ]);
+  });
 });

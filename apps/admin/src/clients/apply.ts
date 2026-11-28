@@ -220,11 +220,7 @@ export const applyClient = (env: Env): WorkflowDefinition => ({
             throw error;
           }
           try {
-            // The release it runs, again: going back a release wouldn't
-            // undo a setting that broke it.
-            await runClientProvision(context, held, {
-              rollBackOnProbe: false,
-            });
+            await runClientProvision(context, held);
           } catch (error) {
             if (
               error instanceof ProvisionOperationError ||

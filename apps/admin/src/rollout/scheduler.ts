@@ -66,7 +66,6 @@ import {
 import { clientDomain } from "../deploy/context.ts";
 import { errorCode } from "../deploy/errors.ts";
 import { currentRun, hasEnded, instanceStatus } from "../runners.ts";
-import type { RunStatus } from "../runners.ts";
 import { adminWorkflow, adminWorkflows } from "../workflow-runs.ts";
 import { deployerToken } from "./api-budget.ts";
 import { channelIds } from "./channel-ids.ts";
@@ -221,41 +220,6 @@ const organizationRuns = (env: Env) =>
   adminWorkflow<OrgRolloutParams>(env, adminWorkflows.orgRollout);
 
 /**
- * The workflows an organization's deploy may be a run of: a rollout, a
- * step a phase (src/rollout/org-rollout.ts), or a deploy in one step
- * (src/rollout/deploy.ts), until the last of those has ended and that
- * definition goes. Each kind's run is its own object, so a run is looked
- * for under each: an admin that starts one kind settles the other's runs
- * as theirs, never as gone, while both are out.
- */
-const organizationWorkflows = [
-  adminWorkflows.orgRollout,
-  adminWorkflows.deploy,
-] as const;
-
-/** Where run `runId`, claimed at `since`, is, of whichever `organizationWorkflows` it's a run of. */
-const runStatusOf = async (
-  env: Env,
-  runId: string,
-  since: Date
-): Promise<RunStatus> => {
-  let status: RunStatus = "gone";
-  for (const workflow of organizationWorkflows) {
-    // oxlint-disable-next-line no-await-in-loop -- the first that has it
-    const found = await instanceStatus(
-      adminWorkflow(env, workflow),
-      runId,
-      since
-    );
-    if (found.instance !== null) {
-      return found.status;
-    }
-    ({ status } = found);
-  }
-  return status;
-};
-
-/**
  * Client `row` once its deploy is settled: one whose run ended without
  * recording how is recorded failed (`run_ended`), and read so; one whose
  * run was never created (a pass cut off between its claim and the run's
@@ -273,7 +237,11 @@ const settled = async (
   }
   let code: string;
   try {
-    const status = await runStatusOf(env, row.run.runId, row.run.startedAt);
+    const { status } = await instanceStatus(
+      organizationRuns(env),
+      row.run.runId,
+      row.run.startedAt
+    );
     if (!hasEnded(status)) {
       return row;
     }
@@ -615,8 +583,7 @@ const alertHalt = async (
 
 /**
  * Halts running rollout `rollout` (`failed`), audited (`rollout.halt`)
- * and alerted once, and says so on its channel (`channels.stopped_by`,
- * which an older admin reads). Nothing when it's no longer as read.
+ * and alerted once. Nothing when it's no longer as read.
  */
 const recordHalt = async (
   db: AdminDatabase,
@@ -640,15 +607,6 @@ const recordHalt = async (
         failed,
       },
     }),
-    db
-      .update(channels)
-      .set({ stoppedBy: reason })
-      .where(
-        and(
-          eq(channels.id, rollout.channel),
-          sql`EXISTS (SELECT 1 FROM ${rollouts} WHERE ${rollouts.id} = ${rollout.id} AND ${rollouts.status} = 'halted')`
-        )
-      ),
   ]);
   if (recorded.length > 0) {
     await alertHalt(db, rollout, { done, failed });
@@ -715,18 +673,6 @@ const recordRollouts = async (
       // between the halt and its alert never loses it.
       // oxlint-disable-next-line no-await-in-loop -- as above
       await alertHalt(db, rollout, counts);
-      // Said again each pass: an older admin's reconciler clears it.
-      // oxlint-disable-next-line no-await-in-loop -- as above
-      await db
-        .update(channels)
-        .set({ stoppedBy: "failed" })
-        .where(
-          and(
-            eq(channels.id, rollout.channel),
-            eq(channels.releaseId, rollout.releaseId),
-            isNull(channels.stoppedBy)
-          )
-        );
     }
   }
 };

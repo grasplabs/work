@@ -36,7 +36,7 @@ const deployFailed: AlertEvent = {
   kind: "deploy_failed",
   clientId: "acme",
   releaseId: "26.11.7",
-  code: "release_rolled_back",
+  code: "d1_migration_failed",
 };
 
 /** A card's fields by name. */
@@ -64,7 +64,7 @@ const embedsOf = (post: ReturnType<typeof discordPostOf>) => {
 /** What a plain message is built from, around `facts`. */
 const messageWith = (alerts: AlertFacts[]) => ({
   subject: "Acme: deploy of 26.11.7 failed",
-  text: "The deploy of release 26.11.7 to Acme (acme) failed (release_rolled_back).",
+  text: "The deploy of release 26.11.7 to Acme (acme) failed (d1_migration_failed).",
   link,
   alerts,
 });
@@ -96,7 +96,7 @@ describe("the Discord alert card", () => {
         { name: "Channel", value: "Beta", inline: true },
         {
           name: "Failure code",
-          value: "`release_rolled_back`",
+          value: "`d1_migration_failed`",
           inline: false,
         },
         {
@@ -370,7 +370,7 @@ describe("the Discord alert card", () => {
         subject: "@everyone [x](http://evil.test): deploy failed",
       })
     );
-    const plainContent = `**Acme\\: deploy of 26.11.7 failed**\nThe deploy of release 26.11.7 to Acme \\(acme\\) failed \\(release\\_rolled\\_back\\).\n${link}`;
+    const plainContent = `**Acme\\: deploy of 26.11.7 failed**\nThe deploy of release 26.11.7 to Acme \\(acme\\) failed \\(d1\\_migration\\_failed\\).\n${link}`;
 
     expect({
       broken,

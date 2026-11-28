@@ -25,8 +25,8 @@
  * `AdminRuns` holds the admin's runs on Workerflow (src/workflow-runs.ts):
  * applying a client's settings now
  * (src/clients/apply.ts), attempts at provisioning a client placed in a
- * hosting destination (src/hosting/workflow.ts), and clients' deploys
- * (src/rollout/deploy.ts).
+ * hosting destination (src/hosting/workflow.ts), and organizations'
+ * rollouts (src/rollout/org-rollout.ts).
  *
  * `/mcp` is the admin's MCP server for Grasp's staff (src/admin/mcp.ts),
  * behind the same Access check.

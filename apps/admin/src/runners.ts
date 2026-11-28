@@ -2,8 +2,7 @@
  * A client's runner: the one thing that may change what its account runs,
  * as `client_runs` names it: one of the admin's runs (src/workflow-runs.ts).
  * A provisioning attempt (a run per attempt, `<clientId>-p<random>`,
- * src/hosting/workflow.ts), a deploy by the reconciler (its run,
- * src/rollout/deploy.ts), an organization's rollout (its run,
+ * src/hosting/workflow.ts), an organization's rollout (its run,
  * src/rollout/org-rollout.ts), or applying its settings (its
  * run, src/clients/apply.ts). Runs are never reused.
  *
@@ -92,7 +91,6 @@ const isMissingInstance = (error: unknown): boolean =>
 
 /** The workflow a runner of `kind` is a run of. */
 const workflows: Readonly<Record<RunKind, (env: Env) => Workflow>> = {
-  deploy: (env) => adminWorkflow(env, adminWorkflows.deploy),
   rollout: (env) => adminWorkflow(env, adminWorkflows.orgRollout),
   apply: (env) => adminWorkflow(env, adminWorkflows.applyClient),
   provision_placed: (env) =>

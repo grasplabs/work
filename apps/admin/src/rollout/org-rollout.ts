@@ -267,7 +267,7 @@ const contextFor = async (
   try {
     // A 429 fails the call at once, and the step parks past the block
     // (`retryDelay`).
-    return await deployContext(env, { failRateLimited: true });
+    return await deployContext(env);
   } catch (error) {
     await recordUnstarted(db, held, errorCode(error));
     throw asStepError(error);
