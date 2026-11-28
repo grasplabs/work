@@ -447,16 +447,12 @@ export class DraftSeals {
         let text: string;
         try {
           text = await sealedEntry(env, seal);
-          // Sealed while the App's approval changed and changed back: its
-          // builds bundled another's packages than the key names. Sealed
-          // again, once.
+          // Sealed while the App's approval changed: its builds bundled
+          // other packages than its key names. Kept nowhere, and answered
+          // as still under way: the next ask seals under the key of the
+          // approval as it is then (a change of approval prepares it too).
           if (!bundlesOnly(text, packages)) {
-            text = await sealedEntry(env, seal);
-          }
-          if (!bundlesOnly(text, packages)) {
-            throw new Error(
-              "The App's approved packages kept changing while its draft was sealed."
-            );
+            throw versionErrors.create("version.seal_slow");
           }
         } catch (error) {
           const own =
