@@ -1,5 +1,6 @@
 import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
 import type { ChatMessage } from "@grasp-os/shared/chat";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -18,9 +19,21 @@ import {
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
-import { inJurisdiction, workspace } from "../src/durable-objects.ts";
-import { codeStep, personalChatsOf, says, setObjectEnv } from "./agent-chat.ts";
+import {
+  chatSession,
+  inJurisdiction,
+  workspace,
+} from "../src/durable-objects.ts";
+import {
+  codeStep,
+  model,
+  personalChatsOf,
+  says,
+  setObjectEnv,
+  testRunOpening,
+} from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
+import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { finishedByTheClock } from "./brain-next-own-store.ts";
 import {
@@ -29,10 +42,21 @@ import {
   restoreStore,
 } from "./brain-next-store-copy.ts";
 import { mockIdp } from "./idp.ts";
+import { mailConnection } from "./mail-connection.ts";
+import { mailControlUrl } from "./mail-server.ts";
+import type { ToolkitServer } from "./mail-server.ts";
 import { answeringProvider, fakeProvider } from "./model-provider.ts";
 import type { FakeProvider, ProviderReply } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
+import {
+  callOf,
+  liveNotes,
+  noteTitles,
+  ownSource,
+  writesNote,
+} from "./notes-app.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
+import { testBinding } from "./test-env.ts";
 
 // What a chat keeps showing of what it read from the Brain (GRA-1807),
 // through a person's own chats as they ask and open them: the Workspace,
@@ -156,7 +180,7 @@ const resultsOf = (messages: readonly ChatMessage[]): string[] =>
  * text, its records of what it read, anything.
  */
 const objectHolds = async (
-  stub: WorkspaceStub,
+  stub: WorkspaceStub | ReturnType<typeof chatSession>,
   text: string
 ): Promise<boolean> =>
   await runInDurableObject(stub, (_instance, state) => {
@@ -172,6 +196,9 @@ const objectHolds = async (
     );
     return JSON.stringify([rows, [...state.storage.kv.list()]]).includes(text);
   });
+
+const isFetcher = (value: unknown): value is Fetcher =>
+  typeof value === "object" && value !== null && "fetch" in value;
 
 /** An object's call refused: the Brain away. */
 const refused = async (): Promise<never> => {
@@ -706,6 +733,304 @@ describe("what a chat shows of what it read from the Brain", () => {
         narrowedErasedAfter: false,
         awayAfter: true,
         backAfter: false,
+      });
+    }
+  );
+
+  it(
+    "withdraws a write to an App held for its person once a source its request quotes is erased: never confirmed, carried out, listed or handed over with it, kept nowhere in the chat's object, held again before its model is kept from it, and its agent told to ask afresh; a write held after is held and runs",
+    slow,
+    async () => {
+      const depot = word();
+      const quoted = word();
+      const marker = word();
+      const later = `later-${unique()}`;
+      const builder = await signedInApi(idp, "builder");
+      const { app, release } = await liveNotes(builder);
+      const asked = { question: quoted, budget: { tokens: 800 } };
+      const reference = {
+        name: "notes.create",
+        kind: release.app.functions["notes.create"]?.kind,
+      };
+      // The code builds the note from what it recalled: the request quotes
+      // the source, the code doesn't.
+      const chats = await personalChatsOf(
+        builder.userId,
+        codeStep(
+          `export default async (self, env) => { const pack = await env.brain.recall(${JSON.stringify(asked)}); const title = pack.items.map(({ text }) => text).join(" ").slice(0, 200); const answer = await env.apps.call(${JSON.stringify(app)}, new Blob([JSON.stringify({ reference: ${JSON.stringify(reference)}, args: { title } })]).stream()); return "held" in answer ? "held" : "not held"; };`
+        ),
+        says("It waits for you."),
+        writesNote(app, release, later),
+        says("That one waits for you.")
+      );
+      await requestGranted(idp, builder, {
+        subject: chats.agent,
+        object: { type: "app", appId: app },
+        actions: ["read", "write"],
+        binding: "NOTES",
+      });
+      const { chat, ask } = await chats.newChat();
+      // Their own source, which the recall before the question finds: what
+      // the chat writes for others from then on waits for them.
+      await ownSource(builder.userId, `Depot ${depot} opens at seven.`);
+      const source = await added(`${quoted} ${marker}`, { kind: "everyone" });
+      await ask(`When does depot ${depot} open? Note it.`);
+      const [held] = await builder.api.chats.heldCalls(chat.id);
+      const ref = {
+        workspaceId: personalWorkspaceId(builder.userId),
+        chatId: chatIdSchema.parse(chat.id),
+      };
+      const confirm = async () =>
+        await outcome(
+          builder.api.chats.confirmHeldCall(
+            chat.id,
+            held?.id ?? "",
+            held?.requestHash ?? ""
+          )
+        );
+      await eraseSource(env, {
+        source,
+        readers: { kind: "everyone" },
+        reason: "deleted",
+      });
+      // The Brain away: nothing confirmed or listed unchecked.
+      const restore = await setObjectEnv(chats.stub, {
+        BRAIN_STORE: refusingErasedOf(env.BRAIN_STORE),
+      });
+      let away: string[];
+      try {
+        away = [
+          await confirm(),
+          await outcome(builder.api.chats.heldCalls(chat.id)),
+        ];
+      } finally {
+        await restore();
+      }
+      // Confirmed as it was shown, before anything else read the chat.
+      const confirmed = await confirm();
+      const listed = await builder.api.chats.heldCalls(chat.id);
+      const exported = await chats.stub.exportHeldAppCalls(ref);
+      // Held again by the turn still under way, before its next request
+      // keeps its model from what was erased.
+      const quoting = callOf(release, "notes.create", { title: marker });
+      const heldAgain = await outcome(
+        chats.stub.holdAppCall(
+          chat.id,
+          builder.userId,
+          {
+            agentId: chats.agent.agentId,
+            appId: app,
+            function: "notes.create",
+            kind: reference.kind ?? "mutation",
+            request: quoting,
+            requestHash: await sha256Hex(quoting),
+          },
+          Date.now()
+        )
+      );
+      const written = await noteTitles(builder.userId, app, release);
+      const events = await allEvents();
+      const ofChat = (action: string) =>
+        events.filter(
+          (event) => event.action === action && event.detail.chat === chat.id
+        ).length;
+      // Told in the chat's own object, which the next turn reads.
+      await vi.waitFor(
+        async () => {
+          await expect(
+            objectHolds(chatSession(env, ref), "was withdrawn")
+          ).resolves.toBeTruthy();
+        },
+        { timeout: 10_000 }
+      );
+      const sentBefore = chats.provider.requests.length;
+      await ask("Thanks. Note that it waits too.");
+      const sentNext = JSON.stringify(
+        chats.provider.requests.slice(sentBefore).map(({ body }) => body)
+      );
+      const [after] = await builder.api.chats.heldCalls(chat.id);
+      const afterConfirmed = await outcome(
+        builder.api.chats.confirmHeldCall(
+          chat.id,
+          after?.id ?? "",
+          after?.requestHash ?? ""
+        )
+      );
+
+      expect({
+        before: held?.request.includes(marker),
+        away,
+        confirmed,
+        listed,
+        exported: exported?.map(({ status, request, function: named }) => ({
+          status,
+          request,
+          named,
+        })),
+        heldAgain,
+        written,
+        events: {
+          withdrawn: ofChat("chat.app_call.withdrawn"),
+          confirmed: ofChat("chat.app_call.confirmed"),
+        },
+        toldNext: sentNext.includes(
+          `The write to an App you asked for (held ID ${held?.id}) was withdrawn`
+        ),
+        sentAgain: sentNext.includes(marker),
+        kept: await objectHolds(chats.stub, marker),
+        after: after?.request.includes(later),
+        afterConfirmed,
+        writtenAfter: await noteTitles(builder.userId, app, release),
+      }).toStrictEqual({
+        before: true,
+        away: ["agent.erasure_unchecked", "agent.erasure_unchecked"],
+        confirmed: "agent.held_call_not_found",
+        listed: [],
+        exported: [{ status: "withdrawn", request: null, named: "" }],
+        heldAgain: "agent.erasure_unchecked",
+        written: [],
+        events: { withdrawn: 1, confirmed: 0 },
+        toldNext: true,
+        sentAgain: false,
+        kept: false,
+        after: true,
+        afterConfirmed: "ok",
+        writtenAfter: [later],
+      });
+    }
+  );
+
+  it(
+    "clears what a chat app's chat read that its writes are traced to once a source it read is erased: no longer handed over, kept or tracing a write, nor kept back by a read landing late",
+    slow,
+    async () => {
+      const depot = word();
+      // Digits, so a write naming it must be traced (stephen-rules.ts).
+      const marker = `zq${crypto.randomUUID().replaceAll(/\D/gu, "").slice(0, 10)}`;
+      const person = await signedInApi(idp, "user");
+      const admin = await signedInApi(idp, "admin");
+      // A mail the chat reads that quotes the source, as a mail the agent
+      // sent from it earlier does.
+      const read = { messages: [{ id: marker, subject: "Gate code" }] };
+      const mail = await mailConnection(
+        [],
+        [{ name: "MAIL_READ", read: true }],
+        { audience: "everyone" }
+      );
+      const providers = testBinding("CONNECT_PROVIDERS");
+      if (!isFetcher(providers)) {
+        throw new TypeError(
+          "Expected the providers Worker as CONNECT_PROVIDERS"
+        );
+      }
+      await providers.fetch(
+        mailControlUrl(mail.id.replace("connection-", "")),
+        {
+          method: "POST",
+          body: JSON.stringify({
+            list: [
+              {
+                name: "MAIL_READ",
+                inputSchema: {
+                  type: "object",
+                  properties: { query: { type: "string" } },
+                },
+              },
+            ],
+            answers: {
+              MAIL_READ: {
+                content: [{ type: "text", text: JSON.stringify(read) }],
+                structuredContent: read,
+              },
+            },
+          } satisfies ToolkitServer),
+        }
+      );
+      const agentId = crypto.randomUUID();
+      await requestGranted(idp, admin, {
+        subject: { type: "agent", agentId },
+        object: { type: "connection", connectionId: mail.id },
+        actions: ["MAIL_READ"],
+        binding: "MAIL",
+      });
+      const source = await added(`${depot} ${marker}`, { kind: "everyone" });
+      const asked = { question: depot, budget: { tokens: 800 } };
+      await fakeProvider(
+        codeStep(
+          `export default async (self, env) => { await env.brain.recall(${JSON.stringify(asked)}); await env.connections.call("MAIL", "MAIL_READ", { query: "gate" }); return "read"; };`
+        ),
+        says("Noted."),
+        says("Ok.")
+      );
+      const stub = workspace(env, personalWorkspaceId(person.userId));
+      const chat = await stub.createChat(
+        "Questions",
+        person.userId,
+        agentId,
+        undefined,
+        "teams"
+      );
+      await stub.ask(chat.id, { text: "Please look that up.", model });
+      const ref = {
+        workspaceId: personalWorkspaceId(person.userId),
+        chatId: chatIdSchema.parse(chat.id),
+      };
+      const traced = async () =>
+        await stub.heldWriteRefusal(chat.id, { messageId: marker }, [
+          "messageId",
+        ]);
+      const before = {
+        handedOver: JSON.stringify(await stub.exportTurnState(ref)).includes(
+          marker
+        ),
+        refusal: await traced(),
+      };
+      await eraseSource(env, {
+        source,
+        readers: { kind: "everyone" },
+        reason: "deleted",
+      });
+      const exported = await stub.exportTurnState(ref);
+      const chatId = chatIdSchema.parse(chat.id);
+      const check = { read: "mail", where: "mail" } as const;
+      /** What a read of a run under way keeps of `values`: whether it may. */
+      const readNow = async (values: string[]) => {
+        const run = await stub.openCodeRun(
+          chatId,
+          crypto.randomUUID(),
+          testRunOpening
+        );
+        const kept = await stub.keepRead(chatId, run, values, check);
+        await stub.closeCodeRun(chatId, run, "completed");
+        return kept;
+      };
+      // A read still under way that echoes the source, landing after the
+      // trace was dropped and before the model was kept from it.
+      const lateRead = await readNow([marker]);
+      const kept = await objectHolds(stub, marker);
+      // The next turn keeps the model from it: reads are kept again.
+      await stub.ask(chat.id, { text: "Thanks.", model });
+      const readAfter = await readNow(["Gate code"]);
+      const after = await stub.exportTurnState(ref);
+
+      expect({
+        before,
+        handedOver: JSON.stringify(exported).includes(marker),
+        trace: exported?.trace,
+        refusal: await traced(),
+        lateRead,
+        kept,
+        readAfter,
+        traceAfter: after?.trace,
+      }).toStrictEqual({
+        before: { handedOver: true, refusal: undefined },
+        handedOver: false,
+        trace: [],
+        refusal: "agent.write_untraced",
+        lateRead: "revoked",
+        kept: false,
+        readAfter: "open",
+        traceAfter: ["Gate code"],
       });
     }
   );
