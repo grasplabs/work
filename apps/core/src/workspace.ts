@@ -159,8 +159,7 @@ import type {
   TurnRequest,
   TurnStop,
 } from "./chat-harness.ts";
-import { ChatListWatch } from "./chat-list-watch.ts";
-import type { ChatList, ChatListListener } from "./chat-list-watch.ts";
+import type { ChatList } from "./chat-list-watch.ts";
 import {
   chatMessageOf,
   partialOf,
@@ -232,8 +231,16 @@ import { instructionFilesFor } from "./instruction-files.ts";
 import type { InstructionContext } from "./instruction-files.ts";
 import { chatTurnPurpose } from "./model-spend.ts";
 import { modelSettings, models } from "./models.ts";
+import { OldWayListWatch } from "./old-way-list-watch.ts";
+import type { ChatListListener } from "./old-way-list-watch.ts";
 import type { OutsideTextNote } from "./outside-text.ts";
-import { acceptConnection, recheckConnections } from "./person-connections.ts";
+import {
+  acceptPersonSocket,
+  endListFollows,
+  listFollowed,
+  pushList,
+  recheckConnections,
+} from "./person-connections.ts";
 import {
   personalWorkspaceId,
   personOfWorkspace,
@@ -1297,10 +1304,14 @@ export class Workspace extends DurableObject<Env> {
     { stood: Date; taking: Set<number>; moves: Set<number> }
   >();
 
-  /** Who follows their list of chats (`watchChats`), by watch ID. */
-  readonly #listWatchers = new Map<string, ChatListWatch>();
+  /**
+   * Who follows the list the old way (`watchChats`), by watch ID: core's
+   * Worker of the release before this one, during a deploy. Removed in
+   * the release after.
+   */
+  readonly #oldWayList = new Map<string, OldWayListWatch>();
 
-  /** Whether the list's watchers are told already this tick (`#listChanged`). */
+  /** Whether the list's followers are told already this tick (`#listChanged`). */
   #listTold = false;
 
   /**
@@ -6717,10 +6728,11 @@ export class Workspace extends DurableObject<Env> {
       }
     }
     this.#watchers.clear();
-    for (const watch of this.#listWatchers.values()) {
+    endListFollows(this.ctx);
+    for (const watch of this.#oldWayList.values()) {
       watch[Symbol.dispose]();
     }
-    this.#listWatchers.clear();
+    this.#oldWayList.clear();
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     // Its tables went with its storage: they are made again, empty, as for
@@ -6946,9 +6958,9 @@ export class Workspace extends DurableObject<Env> {
     );
   }
 
-  /** Refuses another watcher once the object holds its most (chats' and lists' together). */
+  /** Refuses another watcher of a chat once the object holds its most. */
   #requireRoomToWatch(): void {
-    let watching = this.#listWatchers.size;
+    let watching = 0;
     for (const watchers of this.#watchers.values()) {
       watching += watchers.size;
     }
@@ -6958,50 +6970,54 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Follows `personId`'s list of chats, as `chats` gives it: `listener`
-   * gets the whole list, then what changes in it (chat-watch.ts,
-   * `ChatListWatch`). Returns the ID `unwatchChats` drops it by; one that
-   * can't be reached drops itself.
-   */
-  watchChats(personId: string, listener: ChatListListener): string {
-    this.#requireRoomToWatch();
-    const watchId = crypto.randomUUID();
-    const watch = new ChatListWatch(listener.dup(), personId, () => {
-      this.unwatchChats(watchId);
-    });
-    this.#listWatchers.set(watchId, watch);
-    watch.push(this.#listOf(personId));
-    return watchId;
-  }
-
-  /** Drops the list's watcher `watchChats` kept as `watchId`, if it still does. */
-  unwatchChats(watchId: string): void {
-    const watch = this.#listWatchers.get(watchId);
-    this.#listWatchers.delete(watchId);
-    watch?.[Symbol.dispose]();
-  }
-
-  /**
    * Tells whoever follows a list of chats that it may have changed: a
    * chat made, renamed, archived or deleted, asked in, answered, running
    * or not, read. Once a tick, however many changes it made: each
-   * watcher then sends only what of its list did change.
+   * follower then gets only what of its list did change
+   * (person-connections.ts `pushList`).
    */
   #listChanged(): void {
-    if (this.#listTold || this.#listWatchers.size === 0) {
+    if (
+      this.#listTold ||
+      (!listFollowed(this.ctx) && this.#oldWayList.size === 0)
+    ) {
       return;
     }
     this.#listTold = true;
     queueMicrotask(() => {
       this.#listTold = false;
-      // Read once for each person followed, whoever many follow it.
-      const lists = new Map<string, ChatList>();
-      for (const watch of this.#listWatchers.values()) {
-        const list = lists.get(watch.personId) ?? this.#listOf(watch.personId);
-        lists.set(watch.personId, list);
-        watch.push(list);
+      pushList(this.ctx, (personId) => this.#listOf(personId));
+      const personId = personOfWorkspace(this.ctx.id.name);
+      if (this.#oldWayList.size > 0 && personId !== undefined) {
+        const list = this.#listOf(personId);
+        for (const watch of this.#oldWayList.values()) {
+          watch.push(list);
+        }
       }
     });
+  }
+
+  /**
+   * Follows `personId`'s list the old way, `listener` kept in memory: for
+   * core's Worker of the release before this one, during a deploy.
+   * Returns the ID `unwatchChats` drops it by. Removed in the release
+   * after, with `unwatchChats`.
+   */
+  watchChats(personId: string, listener: ChatListListener): string {
+    const watchId = crypto.randomUUID();
+    const watch = new OldWayListWatch(listener.dup(), () => {
+      this.unwatchChats(watchId);
+    });
+    this.#oldWayList.set(watchId, watch);
+    watch.push(this.#listOf(personId));
+    return watchId;
+  }
+
+  /** Drops the old way's follower `watchChats` kept as `watchId`. Removed in the release after. */
+  unwatchChats(watchId: string): void {
+    const watch = this.#oldWayList.get(watchId);
+    this.#oldWayList.delete(watchId);
+    watch?.[Symbol.dispose]();
   }
 
   /** `personId`'s list as its watchers follow it: what `chats` gives, and how many they archived. */
@@ -7431,14 +7447,15 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * A connection of the person's opens its socket to their object
-   * (person-connections.ts): what tells it to read its session again.
+   * A connection of the person's opens its socket to their object, or a
+   * page follows their list of chats (person-connections.ts).
    */
   override fetch(request: Request): Response {
-    return acceptConnection(
+    return acceptPersonSocket(
       this.ctx,
       request,
-      personOfWorkspace(this.ctx.id.name) ?? ""
+      personOfWorkspace(this.ctx.id.name) ?? "",
+      (personId) => this.#listOf(personId)
     );
   }
 

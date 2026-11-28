@@ -98,8 +98,10 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { requireNotStaff } from "./sharing.ts";
+import { watchEnds } from "./socket-watchers.ts";
 import { requireCompanyAdmin, requireKnownTeams } from "./stephen-reach.ts";
 import { Subscription } from "./subscription.ts";
+import { followObject } from "./upstream.ts";
 import {
   workflowKind,
   createWorkflowResource,
@@ -265,6 +267,24 @@ const chatIdOf = (chatId: unknown): ChatId => {
   return parsed.data;
 };
 
+/**
+ * What the person's object sends a follower of their list (`ChatListUpdate`,
+ * person-connections.ts): checked before anything reaches the page.
+ */
+const listUpdateSchema = z.object({
+  chats: z.array(z.looseObject({ id: z.string(), lastAt: z.string() })),
+  removed: z.array(z.string()),
+  full: z.boolean(),
+  archived: z.number(),
+});
+
+/**
+ * The most a slow page's follow of the list holds for it, as JSON: a few
+ * updates of a long list. Past it the follow catches up with the whole
+ * list, so a page that keeps not answering holds at most this.
+ */
+const maxQueuedList = 512 * 1024;
+
 /** How a push to a chat page is refused. */
 const refusals = {
   invalid: () => agentErrors.create("agent.invalid_request"),
@@ -323,11 +343,17 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
    * session-check.ts).
    */
   readonly #stillOpen: StillOpen;
-  constructor(env: Env, check: SessionCheck) {
+  /** `closed`: aborted once the connection closes, which lets go of every watch of it. */
+  constructor(env: Env, check: SessionCheck, closed: AbortSignal) {
     super();
     this.#env = env;
     this.#check = check;
     this.#stillOpen = stillOpenWhile(check);
+    closed.addEventListener("abort", () => {
+      for (const watch of this.#watches) {
+        watch[Symbol.dispose]();
+      }
+    });
   }
 
   /** The object that holds `userId`'s chats. */
@@ -1479,14 +1505,57 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     );
   }
 
+  /**
+   * Follows the person's list of chats for the page: the whole list, then
+   * what changes in it, over a socket to their object that hibernates
+   * with it (person-connections.ts, upstream.ts). Each push is checked
+   * against the connection's session before it reaches the page; one of
+   * the connection's few watches.
+   */
   async watchList(
     onUpdate: (update: ChatListUpdate) => void
   ): Promise<Subscription> {
-    return await withPerson(
-      this.#check,
-      async ({ userId }) =>
+    return await withPerson(this.#check, async ({ userId }) => {
+      if (!isStub(onUpdate)) {
+        throw agentErrors.create("agent.invalid_request");
+      }
+      if (this.#watches.size >= maxWatches) {
+        throw agentErrors.create("agent.too_many_watches");
+      }
+      let following: Disposable | undefined;
+      const page = callbackFor(onUpdate, this.#stillOpen, refusals, () => {
+        this.#watches.delete(page);
+        following?.[Symbol.dispose]();
+      });
+      this.#watches.add(page);
+      /** Why core let go of it by itself, once it did. */
+      const ended: { by: "displaced" | null } = { by: null };
+      try {
         // Only the signed-in person's own object, and only their list in it.
-        await this.#follow(
+        following = await followObject({
+          open: async () =>
+            await this.#chatsOf(userId).fetch("https://person/list", {
+              headers: { Upgrade: "websocket" },
+            }),
+          parse: (frame) => listUpdateSchema.parse(frame),
+          deliver: page,
+          maxQueued: maxQueuedList,
+          ended: (code) => {
+            // The page's callback ends with it, which the page hears, and
+            // follows again (follow-chat.ts `follow`): only on its next
+            // look when it was displaced.
+            ended.by = code === watchEnds.displaced ? "displaced" : null;
+            page[Symbol.dispose]();
+          },
+          logged: { purpose: "chat list" },
+        });
+      } catch (error) {
+        log.warn("chat.list_socket_unopened", errorFields(error));
+        page[Symbol.dispose]();
+        // The person's object still runs the code of the release before,
+        // which takes no socket: followed the old way, until the release
+        // after removes it.
+        return await this.#follow(
           onUpdate,
           {
             start: async (listener) =>
@@ -1496,8 +1565,20 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
             },
           },
           {}
-        )
-    );
+        );
+      }
+      // Let go of while it opened: its socket goes with it.
+      if (!this.#watches.has(page)) {
+        following[Symbol.dispose]();
+      }
+      return new Subscription(
+        async () => {
+          page[Symbol.dispose]();
+          await Promise.resolve();
+        },
+        () => ended.by
+      );
+    });
   }
 
   /**

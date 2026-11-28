@@ -5,14 +5,23 @@ import type {
 } from "@grasp-os/shared/chat";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { RpcStub } from "capnweb";
-import { runInDurableObject } from "cloudflare:test";
+import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+} from "vite-plus/test";
 
-import { ChatListWatch } from "../src/chat-list-watch.ts";
 import { ChatsRpc, personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
+import { sessionEndedCloseCode } from "../src/rpc.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
+import { reopenJitter } from "../src/upstream.ts";
 import { model, pausedReply, says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -76,13 +85,17 @@ const followList = async (chats: Person["api"]["chats"]) => {
 const listOverFlakySession = async (someone: Person) => {
   const identity = await someone.api.whoami();
   let failing = 0;
-  const chats = new ChatsRpc(env, async () => {
-    if (failing > 0) {
-      failing -= 1;
-      throw new Error("D1_ERROR: Network connection lost.");
-    }
-    return await Promise.resolve(identity);
-  });
+  const chats = new ChatsRpc(
+    env,
+    async () => {
+      if (failing > 0) {
+        failing -= 1;
+        throw new Error("D1_ERROR: Network connection lost.");
+      }
+      return await Promise.resolve(identity);
+    },
+    new AbortController().signal
+  );
   const titles: string[][] = [];
   // The page's callback as core gets it, a stub, whose calls core never
   // waits on.
@@ -104,12 +117,32 @@ const listOverFlakySession = async (someone: Person) => {
   };
 };
 
+/** How many sockets follow the list in the person's object `object`. */
+const listSockets = async (
+  object: ReturnType<typeof workspace>
+): Promise<number> =>
+  await runInDurableObject(
+    object,
+    (_instance, state) => state.getWebSockets("list").length
+  );
+
 /** Waits until `check` holds of what the follower has. */
-const until = async (check: () => void) => {
+const until = async (check: () => void | Promise<void>) => {
   await vi.waitFor(check, { timeout: 10_000 });
 };
 
 describe("a person's list of chats", () => {
+  // Every pause before the list's socket opens again (upstream.ts), its
+  // jitter's draw fixed at none: no test waits on a draw, nor on how long
+  // a pause runs.
+  const { draw } = reopenJitter;
+  beforeEach(() => {
+    reopenJitter.draw = () => 0;
+  });
+  afterEach(() => {
+    reopenJitter.draw = draw;
+  });
+
   it("comes whole, then with each change: made, asked in (first at once), working, answered and unread, read, renamed, archived and deleted", async () => {
     const ann = await person();
     const { reply, release } = pausedReply(says("Here it is."), 1);
@@ -364,30 +397,208 @@ describe("a person's list of chats", () => {
     );
   }, 30_000);
 
-  it("drops a watcher whose push failed and lets go of its listener, which core then watches again with (as after a reset)", async () => {
-    let calls = 0;
-    let letGo = 0;
+  it("keeps coming after the person's object slept with the page following: whole again on the first change, then each change", async () => {
+    const ann = await person();
+    await startedChat(ann, "Before it slept");
+    const follower = await followList(ann.api.chats);
+    await until(() => {
+      expect(follower.rows()).toHaveLength(1);
+    });
+    const object = workspace(env, personalWorkspaceId(ann.userId));
+
+    // Hibernated: its memory gone (what each follower was sent among it),
+    // the page's socket kept, so nothing is sent again until a change.
+    await evictDurableObject(object);
+    const seen = follower.updates.length;
+    await expect(listSockets(object)).resolves.toBe(1);
+    await startedChat(ann, "After it slept");
+    await until(() => {
+      expect(follower.rows().map(({ title }) => title)).toStrictEqual([
+        "After it slept",
+        "Before it slept",
+      ]);
+    });
+    await startedChat(ann, "And after that");
+
+    await until(() => {
+      expect(follower.rows().map(({ title }) => title)).toStrictEqual([
+        "And after that",
+        "After it slept",
+        "Before it slept",
+      ]);
+    });
+    expect(
+      follower.updates.slice(seen).map(({ full, chats }) => ({
+        full,
+        chats: chats.map(({ title }) => title),
+      }))
+    ).toStrictEqual([
+      { full: true, chats: ["After it slept", "Before it slept"] },
+      { full: false, chats: ["And after that"] },
+    ]);
+    // Let go of: its socket goes too, so the object holds nobody's.
+    await follower.subscription.release();
+    await until(async () => {
+      await expect(listSockets(object)).resolves.toBe(0);
+    });
+  });
+
+  it("is followed the old way by core's Worker of the release before, its callback kept in the object, while a deploy runs both", async () => {
+    const ann = await person();
+    await startedChat(ann, "Kept the old way");
+    const titles: string[][] = [];
     const listener = Object.assign(
-      async (): Promise<void> => {
-        calls += 1;
-        await Promise.reject(new Error("The push didn't reach core"));
+      async (update: ChatListUpdate): Promise<void> => {
+        titles.push(update.chats.map(({ title }) => title));
+        await Promise.resolve();
       },
       {
         [Symbol.dispose]: () => {
-          letGo += 1;
+          // Let go of by the object.
         },
       }
     );
-    const dropped = Promise.withResolvers<boolean>();
-    // As the Workspace object keeps it: dropped means let go of.
-    const watch: ChatListWatch = new ChatListWatch(listener, "person-1", () => {
-      watch[Symbol.dispose]();
-      dropped.resolve(true);
-    });
-    watch.push({ chats: [], archived: 0 });
-    await dropped.promise;
 
-    expect({ calls, letGo }).toStrictEqual({ calls: 1, letGo: 1 });
+    await workspace(env, personalWorkspaceId(ann.userId)).watchChats(
+      ann.userId,
+      listener
+    );
+    await startedChat(ann, "And another");
+
+    await until(() => {
+      expect(titles.at(-1)).toStrictEqual(["And another"]);
+    });
+    expect(titles[0]).toStrictEqual(["Kept the old way"]);
+  });
+
+  it("is followed the old way while the person's object still runs the code of the release before, which takes no socket", async () => {
+    const ann = await person();
+    const object = workspace(env, personalWorkspaceId(ann.userId));
+    // As the code before had it: no `fetch`, so opening a socket throws.
+    await runInDurableObject(object, (instance) => {
+      // SAFETY: an object's prototype holds its methods.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      const methods = Object.getPrototypeOf(instance) as {
+        fetch: (request: Request) => Response;
+      };
+      const original = methods.fetch;
+      methods.fetch = () => {
+        throw new TypeError("Handler does not export a fetch() function.");
+      };
+      onTestFinished(() => {
+        methods.fetch = original;
+      });
+    });
+    const tab = await deviceOf(ann);
+
+    const follower = await followList(tab.chats);
+    await startedChat(ann, "Heard all the same");
+
+    await until(() => {
+      expect(follower.rows().map(({ title }) => title)).toStrictEqual([
+        "Heard all the same",
+      ]);
+    });
+  });
+
+  it("ends its follows when the person's chats are erased, letting go of the page's callback, which follows again", async () => {
+    const ann = await person();
+    const released = { now: false };
+    const tab = await deviceOf(ann);
+    await tab.chats.watchList(
+      Object.assign(
+        (update: ChatListUpdate) => {
+          void update;
+        },
+        {
+          [Symbol.dispose]: () => {
+            released.now = true;
+          },
+        }
+      )
+    );
+    const object = workspace(env, personalWorkspaceId(ann.userId));
+    await until(async () => {
+      await expect(listSockets(object)).resolves.toBe(1);
+    });
+
+    await object.erasePerson(ann.userId);
+
+    await until(() => {
+      expect(released.now).toBeTruthy();
+    });
+    await expect(listSockets(object)).resolves.toBe(0);
+  });
+
+  it("sends nothing more once the connection was told to read its session again and the session is gone", async () => {
+    const ann = await person();
+    const own = await startedChat(ann, "Ann's own");
+    const follower = await followList(ann.api.chats);
+    await until(() => {
+      expect(follower.rows()).toHaveLength(1);
+    });
+    const object = workspace(env, personalWorkspaceId(ann.userId));
+    // The reading stays fresh: only the telling makes the connection look.
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?")
+      .bind(ann.userId)
+      .run();
+    const seen = follower.updates.length;
+
+    await object.identityChanged();
+    await expect(ann.closed).resolves.toBe(sessionEndedCloseCode);
+    // Its agent starts working, which the list would show.
+    await runInDurableObject(object, (instance) => {
+      instance.turnRunning(chatIdSchema.parse(own.id), true);
+    });
+    await scheduler.wait(200);
+
+    expect(follower.updates).toHaveLength(seen);
+  });
+
+  it("pushes out a person's oldest follow of their list past the most, saying it was displaced, and nobody else's", async () => {
+    const ann = await person();
+    const released: boolean[] = [];
+    const holds: Awaited<ReturnType<Person["api"]["chats"]["watchList"]>>[] =
+      [];
+    // Ten follows a connection, as core allows: six tabs of theirs.
+    for (let tab = 0; tab < 6; tab += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one tab after the other
+      const { chats } = await deviceOf(ann);
+      for (let follow = 0; follow < 10 && holds.length < 51; follow += 1) {
+        const at = released.length;
+        released.push(false);
+        // oxlint-disable-next-line no-await-in-loop -- the oldest first
+        const hold = await chats.watchList(
+          Object.assign(
+            (update: ChatListUpdate) => {
+              void update;
+            },
+            {
+              [Symbol.dispose]: () => {
+                released[at] = true;
+              },
+            }
+          )
+        );
+        holds.push(hold);
+      }
+    }
+
+    await until(() => {
+      expect(released.indexOf(true)).toBe(0);
+    });
+    expect({
+      released: released.filter(Boolean).length,
+      endedBy: await Promise.all(
+        [holds[0], holds[1], holds[50]].map(
+          async (hold) => await hold?.endedBy()
+        )
+      ),
+    }).toStrictEqual({ released: 1, endedBy: ["displaced", null, null] });
   });
 
   it("lets go of a chat a page follows once it is deleted, quietly, never following it again", async () => {
