@@ -244,11 +244,11 @@ describe("a chat's export from its Workspace", () => {
     });
   });
 
-  it("hands over a page of messages up to its bytes, the first however large, and says where the next goes on", async () => {
+  it("hands over a page of messages up to its bytes, and says where the next goes on", async () => {
     const chat = await chatFor();
-    // Three messages of millions of characters, kept as a long chat keeps
-    // them: past a page's bytes together, and the first alone.
-    const sizes = [5_000_000, 2_500_000, 2_500_000];
+    // Three messages near a row's most and a short one, kept as a long
+    // chat keeps them: past a page's bytes together.
+    const sizes = [1_900_000, 1_900_000, 1_900_000, 10];
     await runInDurableObject(chat.stub, (_instance, state) => {
       for (const size of sizes) {
         state.storage.sql.exec(
@@ -272,6 +272,6 @@ describe("a chat's export from its Workspace", () => {
       after = handed?.next ?? null;
     }
 
-    expect(pages.map((page) => page.length)).toStrictEqual([1, 1, 1]);
+    expect(pages.map((page) => page.length)).toStrictEqual([2, 2]);
   });
 });

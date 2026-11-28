@@ -953,8 +953,8 @@ const exportPageMax = 200;
 /**
  * Most bytes of messages one page of `exportMessages` hands over, past
  * its first: far under the 32 MiB an object's RPC carries. One message is
- * at most what a whole chat holds (`maxChatChars`, 16 MB at 4 bytes a
- * character), so a page of one always fits.
+ * one row, at most the few MB the object's SQLite keeps in a row, so a
+ * page of one always fits.
  */
 const exportPageBytes = 4 * 1024 * 1024;
 
