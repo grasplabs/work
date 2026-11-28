@@ -65,6 +65,10 @@ describe("text a Markdown renderer is given", () => {
       "[x](https://a\n".repeat(openers + 1),
     ],
     [
+      "nesting after a bare carriage return, a line ending of its own",
+      `safe\r${"> ".repeat(depth + 1)}deep`,
+    ],
+    [
       "emphasis in a fence that never closes, which counts as text",
       `\`\`\`\n${"*a".repeat(openers + 1)}`,
     ],

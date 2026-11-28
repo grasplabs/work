@@ -122,7 +122,8 @@ export const withinMarkdownLimits = (text: string): boolean => {
   if (text.length > markdownLimits.characters) {
     return false;
   }
-  const lines = text.split("\n");
+  // Every line ending CommonMark has, as a parser splits the lines.
+  const lines = text.split(/\r\n|\r|\n/u);
   // Once a fence is never closed, its text and what follows count as text.
   let fencesClose = true;
   let openers = 0;
@@ -132,10 +133,11 @@ export const withinMarkdownLimits = (text: string): boolean => {
       ? fenceOpening.exec(line)?.groups?.fence
       : undefined;
     if (fence !== undefined) {
-      const closing = lines.findIndex(
-        (later, at) => at > index && closes(later, fence)
-      );
-      if (closing === -1) {
+      let closing = index + 1;
+      while (closing < lines.length && !closes(lines[closing] ?? "", fence)) {
+        closing += 1;
+      }
+      if (closing === lines.length) {
         fencesClose = false;
       } else {
         index = closing;
