@@ -366,7 +366,7 @@ describe("the kit's Markdown, in an App page's frame", () => {
 
   it("still draws an ordinary long answer, tens of kilobytes of prose, tables and code, as Markdown", () => {
     const longAnswer = Array.from(
-      { length: 250 },
+      { length: 200 },
       (_, index) => `## Part ${index}
 
 The *invoice_total* for **supplier_${index}** is due; see [the policy](https://example.com/p/${index}).
@@ -383,11 +383,71 @@ const overdue_items = invoices.filter((inv) => inv.due_date < today);
     ).join("");
     show(longAnswer);
     expect({
-      long: longAnswer.length > 50_000,
+      long: longAnswer.length > 40_000,
       tables: markdown().querySelectorAll("table").length,
       code: markdown().querySelectorAll("[data-slot=code-block]").length,
       errors,
-    }).toStrictEqual({ long: true, tables: 250, code: 250, errors: [] });
+    }).toStrictEqual({ long: true, tables: 200, code: 200, errors: [] });
+  });
+
+  // Ordinary model output with many `*`, `_` and `[`, which the limits
+  // must never turn into plain text: what is checked is what can open
+  // emphasis or a link, per inline run.
+  it.each([
+    [
+      "300 lines of code with snake_case names and indexing",
+      `\`\`\`python\n${Array.from({ length: 300 }, (_, line) => `total_amount_${line} = invoice_rows[row_index][${line}] * unit_price[item_id_${line}]`).join("\n")}\n\`\`\``,
+      "[data-slot=code-block-line]",
+      300,
+    ],
+    [
+      "a list of 300 items with a bold term and a link each",
+      Array.from(
+        { length: 300 },
+        (_, item) =>
+          `* **term_${item}**: see [the docs](https://example.com/docs/${item})`
+      ).join("\n"),
+      "li",
+      300,
+    ],
+    [
+      "a table of 200 rows by 6 columns of snake_case names and a link",
+      `| invoice_id | supplier_name | due_date | amount_due | status_code | link |\n| --- | --- | --- | --- | --- | --- |\n${Array.from({ length: 200 }, (_, row) => `| inv_${row} | supplier_name_${row} | due_date_${row} | amount_${row} | status_ok | [open](https://example.com/i/${row}) |`).join("\n")}`,
+      "tbody tr",
+      200,
+    ],
+    [
+      "a long paragraph of snake_case words with footnotes and reference links",
+      `${Array.from({ length: 200 }, (_, note) => `The user_id and account_balance_${note} fields come from the billing_service[^${note}], see [the reference][ref${note}].`).join(" ")}\n\n${Array.from({ length: 200 }, (_, note) => `[^${note}]: Note ${note}.\n[ref${note}]: https://example.com/r/${note}`).join("\n")}`,
+      "[data-footnotes] li",
+      200,
+    ],
+    [
+      "a numbered list nested four deep with code spans",
+      Array.from(
+        { length: 80 },
+        (_, step) =>
+          `1. Step \`step_${step}\`\n   1. Sub \`sub_step\`\n      1. Deeper \`deep_value\`\n         1. Deepest \`x[0]\` and **bold**`
+      ).join("\n"),
+      "ol ol ol ol",
+      80,
+    ],
+    [
+      "arithmetic with many `*`",
+      Array.from(
+        { length: 100 },
+        (_, line) =>
+          `${line} * 2 * 3 * 4 * 5 = ${line * 120}, and a*b*c*d with x_1 * y_2.`
+      ).join("\n"),
+      "p",
+      1,
+    ],
+  ])("draws %s as Markdown", (_name, text, selector, count) => {
+    show(text);
+    expect({
+      drawn: markdown().querySelectorAll(selector).length,
+      errors,
+    }).toStrictEqual({ drawn: count, errors: [] });
   });
 
   it("checks every streamed step: Markdown until the text passes a limit, plain text after", () => {

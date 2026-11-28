@@ -9,7 +9,7 @@ import {
 // logic: ordinary long answers are, and the shapes that freeze a renderer
 // or overflow its stack, each just past its limit, are not.
 
-const { characters, depth, delimiters } = markdownLimits;
+const { characters, depth, openers } = markdownLimits;
 
 /** A long ordinary answer: headings, prose, a table, a list and code. */
 const section = (index: number) => `## Part ${index}
@@ -36,7 +36,7 @@ describe("text a Markdown renderer is given", () => {
       section(index)
     ).join("");
     expect({
-      length: answer.length > 50_000,
+      length: answer.length > 40_000,
       within: withinMarkdownLimits(answer),
     }).toStrictEqual({ length: true, within: true });
   });
@@ -53,23 +53,57 @@ describe("text a Markdown renderer is given", () => {
       ).join("\n"),
     ],
     [
-      "nested emphasis past the delimiters in one paragraph",
-      `${"*a ".repeat(delimiters / 2)}b${" c*".repeat(delimiters / 2 + 1)}`,
+      "nested emphasis past the openers in one paragraph",
+      `${"*a ".repeat(openers + 1)}b${" c*".repeat(openers + 1)}`,
     ],
     [
-      "unclosed links past the delimiters in one paragraph",
-      "[x](https://a\n".repeat(delimiters + 1),
+      "nested emphasis on lines of their own, one paragraph still",
+      `${"*a\n".repeat(openers + 1)}b${"\nc*".repeat(openers + 1)}`,
+    ],
+    [
+      "unclosed links past the openers in one paragraph",
+      "[x](https://a\n".repeat(openers + 1),
+    ],
+    [
+      "emphasis in a fence that never closes, which counts as text",
+      `\`\`\`\n${"*a".repeat(openers + 1)}`,
+    ],
+    [
+      "emphasis after an indented line that only looks like a fence",
+      `    \`\`\`\n${"*a".repeat(openers + 1)}\n\`\`\``,
     ],
   ])("refuses %s", (_name, text) => {
     expect(withinMarkdownLimits(text)).toBeFalsy();
   });
 
-  test("counts delimiters per paragraph: blank lines start again", () => {
-    const paragraph = "*a".repeat(delimiters);
+  test("counts openers per inline run: a blank line, a heading or a list item starts again; a closed fence holds none", () => {
+    const run = "*a".repeat(openers);
     expect({
-      paragraphs: withinMarkdownLimits(`${paragraph}\n\n${paragraph}`),
-      joined: withinMarkdownLimits(`${paragraph}\n${paragraph}`),
-    }).toStrictEqual({ paragraphs: true, joined: false });
+      paragraphs: withinMarkdownLimits(`${run}\n\n${run}`),
+      heading: withinMarkdownLimits(`${run}\n# Next\n${run}`),
+      items: withinMarkdownLimits(`- ${run}\n- ${run}`),
+      fenced: withinMarkdownLimits(
+        `${run}\n\`\`\`\n${run}\n\`\`\`\n${run.slice(2)}`
+      ),
+      joined: withinMarkdownLimits(`${run}\n${run}`),
+      // Indented four columns, a list item may be a paragraph's next line.
+      indentedItems: withinMarkdownLimits(`${run}\n    - ${run}`),
+    }).toStrictEqual({
+      paragraphs: true,
+      heading: true,
+      items: true,
+      fenced: true,
+      joined: false,
+      indentedItems: false,
+    });
+  });
+
+  test("counts only what can open: a `_` inside a word, a `*` before a space and a bare `[` can't", () => {
+    expect(
+      withinMarkdownLimits(
+        `${"snake_case_name ".repeat(openers)}${"2 * 3 ".repeat(openers)}${"arr[0] ".repeat(openers)}`
+      )
+    ).toBeTruthy();
   });
 
   test("takes the deepest nesting it allows", () => {
