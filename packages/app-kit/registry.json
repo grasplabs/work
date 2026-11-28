@@ -73,5 +73,9 @@
     "src/lib/utils.ts": "14300d758170c270c75b057f38fedb3793a5920ea872f0477e29fb131185e8a7",
     "src/styles.css": "9bde270cb8d0493a24091df8ae292e3a2b3484f91d738fa70a037866fe206d48"
   },
-  "own": ["src/components/data-table.tsx", "src/hooks/use-settled.ts"]
+  "own": [
+    "src/components/data-table.tsx",
+    "src/components/markdown.tsx",
+    "src/hooks/use-settled.ts"
+  ]
 }

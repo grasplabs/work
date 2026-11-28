@@ -16,6 +16,7 @@
     "@base-ui/react": "catalog:",
     "@fontsource-variable/geist": "catalog:",
     "@grasp-os/runtime": "workspace:*",
+    "@grasp-os/shared": "workspace:*",
     "@shadcn/react": "catalog:",
     "@tanstack/react-form": "catalog:",
     "class-variance-authority": "catalog:",
@@ -26,11 +27,11 @@
     "lucide-react": "catalog:",
     "react-day-picker": "catalog:",
     "react-is": "catalog:",
-    "react-markdown": "catalog:",
     "react-resizable-panels": "catalog:",
     "recharts": "catalog:",
     "shadcn": "catalog:",
     "shiki": "catalog:",
+    "streamdown": "catalog:",
     "tw-animate-css": "catalog:"
   },
   "devDependencies": {

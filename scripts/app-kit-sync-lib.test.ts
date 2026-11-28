@@ -40,13 +40,16 @@ const problems = (
   );
 
 describe("the App kit against the registry", () => {
-  it("passes a kit that is what the registry installs, and its own files", () => {
+  it("passes a kit that is what the registry installs, and its own files, with their listed changes", () => {
     expect(
-      problems({
-        "src/components/button.tsx": registry,
-        "src/components/card.tsx": registry,
-        "src/hooks/use-settled.ts": "own",
-      })
+      problems(
+        {
+          "src/components/button.tsx": registry,
+          "src/components/card.tsx": registry,
+          "src/hooks/use-settled.ts": "own",
+        },
+        [{ ...listed, path: "src/hooks/use-settled.ts" }]
+      )
     ).toStrictEqual([]);
   });
 
@@ -70,7 +73,7 @@ describe("the App kit against the registry", () => {
           "src/components/button.tsx": registry,
           "src/components/stat.tsx": "a Grasp part",
         },
-        [listed]
+        [listed, { ...listed, path: "src/components/stat.tsx" }]
       )
     ).toStrictEqual([
       expect.stringContaining(
@@ -78,6 +81,9 @@ describe("the App kit against the registry", () => {
       ),
       expect.stringContaining("src/components/button.tsx is listed"),
       "src/components/card.tsx is pinned but missing.",
+      expect.stringContaining(
+        "src/components/stat.tsx is listed in local-changes.json but is neither"
+      ),
     ]);
   });
 });

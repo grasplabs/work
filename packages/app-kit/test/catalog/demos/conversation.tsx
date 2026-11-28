@@ -1,6 +1,6 @@
 // Demos of the kit's components for conversations and the work behind
-// them: messages in bubbles, their attachments, markers, a trace of steps
-// and code. One per component, for the kit's accessibility checks
+// them: messages in bubbles, their attachments, markers, a trace of steps,
+// code and a model's answer in Markdown. One per component, for the kit's accessibility checks
 // (test/kit.browser.test.tsx).
 import {
   Attachment,
@@ -18,6 +18,7 @@ import {
   CodeBlockLine,
   CodeBlockTitle,
 } from "@grasp-os/app-kit/components/code-block";
+import { Markdown } from "@grasp-os/app-kit/components/markdown";
 import {
   Marker,
   MarkerContent,
@@ -84,6 +85,41 @@ const CodeBlockDemo = () => {
     </CodeBlock>
   );
 };
+
+const answer = `Two invoices are **overdue**:
+
+| Supplier | Days late |
+| --- | --- |
+| Kantoorhuis Utrecht | 12 |
+| Drukkerij Noord | 3 |
+
+\`\`\`ts
+const overdue = invoices.filter((invoice) => invoice.due < today);
+\`\`\`
+`;
+
+// A model's answer in a ghost bubble, as the registry's message-markdown
+// example shows it.
+const MarkdownDemo = () => (
+  <div className="flex flex-col gap-6">
+    <Message align="end">
+      <MessageContent>
+        <Bubble>
+          <BubbleContent>Which invoices are overdue?</BubbleContent>
+        </Bubble>
+      </MessageContent>
+    </Message>
+    <Message>
+      <MessageContent>
+        <Bubble variant="ghost">
+          <BubbleContent>
+            <Markdown>{answer}</Markdown>
+          </BubbleContent>
+        </Bubble>
+      </MessageContent>
+    </Message>
+  </div>
+);
 
 const MarkerDemo = () => (
   <div className="flex flex-col gap-4">
@@ -165,6 +201,7 @@ export const conversationDemos = {
   attachment: AttachmentDemo,
   bubble: BubbleDemo,
   "code-block": CodeBlockDemo,
+  markdown: MarkdownDemo,
   marker: MarkerDemo,
   message: MessageDemo,
   "message-scroller": MessageScrollerDemo,
