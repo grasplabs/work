@@ -28,12 +28,14 @@ import {
   MAX_SIGNATURE_BYTES,
   RELEASE_SIGNATURE_FILE,
   signatureKey,
-  signReleaseManifest,
 } from "@grasp-os/shared/release-signature";
-import type { ReleaseSigningJwk } from "@grasp-os/shared/release-signature";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { testReleaseSigningKey } from "../../packages/shared/test/release-signing-keys.ts";
+import {
+  signReleaseManifest,
+  testReleaseSigningKey,
+} from "../../packages/shared/test/release-signing-keys.ts";
+import type { ReleaseSigningJwk } from "../../packages/shared/test/release-signing-keys.ts";
 import { builds, fixtureModelFiles, info } from "./fixture-release.ts";
 import { generateManifest, writeRelease } from "./manifest-lib.ts";
 

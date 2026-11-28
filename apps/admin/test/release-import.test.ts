@@ -6,16 +6,16 @@ import {
   sha256OfBytes,
 } from "@grasp-os/shared/release";
 import { nextReleaseId as nextPublishedId } from "@grasp-os/shared/release-id";
-import {
-  signatureKey,
-  signReleaseManifest,
-} from "@grasp-os/shared/release-signature";
+import { signatureKey } from "@grasp-os/shared/release-signature";
 import { createScheduledController } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { testReleaseSigningKey } from "../../../packages/shared/test/release-signing-keys.ts";
+import {
+  signReleaseManifest,
+  testReleaseSigningKey,
+} from "../../../packages/shared/test/release-signing-keys.ts";
 import { alertEventSchema } from "../src/alerts/alert.ts";
 import { adminDatabase } from "../src/db/act.ts";
 import {

@@ -23,17 +23,4 @@ export const optionalSecrets: ReadonlySet<string> = new Set([
   "STRIPE_RESTRICTED_KEY",
   "ATTIO_READ_KEY",
   "DISCORD_ALERTS_WEBHOOK",
-  "RELEASE_SIGNING_KEY",
-]);
-
-/**
- * Secrets that never pass through 1Password or CI: someone puts each in
- * the store by hand, Deploy platform's copy neither loads nor writes it
- * (scripts/store-secrets-lib.ts), and a deploy binds it once the store
- * has it, as an optional one. The admin's release signing key
- * (apps/admin/src/releases/sign.ts): a key CI could read, it could take
- * away and sign with long after.
- */
-export const handKeptSecrets: ReadonlySet<string> = new Set([
-  "RELEASE_SIGNING_KEY",
 ]);

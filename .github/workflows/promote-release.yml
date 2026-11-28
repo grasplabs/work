@@ -8,12 +8,12 @@
 # hand from main with the release's id (`YY.MM.N`, such as 26.10.42, as the
 # staging admin shows it) once staging's clients run it well; production
 # gets it under the same id. It builds nothing: the manifest's signature
-# is checked when it's fetched (a release the staging admin didn't sign,
+# is checked when it's fetched (a release CI's sign-release didn't sign,
 # or that changed since, is refused: production takes signed releases
-# alone), the
-# release against its manifest, and both again before it's uploaded;
-# production's admin checks them again on import. A release already in
-# production's bucket stays as it is.
+# alone), the release against its manifest, and both again before it's
+# uploaded; production's admin checks them again on import. A release
+# already in production's bucket with the same manifest stays as it is;
+# one with another manifest under that id fails the promotion.
 #
 # It runs in the production GitHub environment, whose required reviewers
 # are the gate: a second person approves every promotion. Its R2 key, from

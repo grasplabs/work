@@ -26,39 +26,48 @@
  * write to a published manifest with 409, which counts as taken, as 412
  * does.
  * Right before it goes its signature (@grasp-os/shared/release-signature),
- * at the manifest's hash: CI's publish has the staging admin sign the
- * manifest as stamped with each id it tries (signer-lib.ts); Promote
- * release's copies the one its download fetched and checked, and refuses
- * a release that has none that verifies.
+ * at the manifest's hash, from the release directory
+ * (`RELEASE_SIGNATURE_FILE`): a release without one that verifies
+ * against the keys this checkout trusts is refused before anything is
+ * uploaded. Promote release's download leaves the one it fetched and
+ * checked there; CI's publish, the one its sign-release job made.
+ * Already published under its id with other bytes, nothing is published
+ * and it fails.
  *
- * With --assign-id (CI's publish) the release gets its id here, from the
- * bucket (@grasp-os/shared/release-id): the next `YY.MM.N` after the ids
- * a listing of the month finds, claimed by writing its manifest only if
- * absent. When another publish claimed that id first, it takes the next
- * one, so two publishes never share an id. Before each claim it writes
- * the id to `commits/<sha>`, so a commit's manifest is only ever at the
- * id its marker names: a re-run of the commit's publish reads the marker
- * and that one manifest, and publishes nothing again when the manifest is
- * the commit's. The marker is written only over the one last read or
- * written (its ETag), or only if absent, so two runs of one commit, or a
- * late write of its own, never leave it naming a lost id. No other
- * manifest is read: past a listing page per 1,000 releases of the month,
- * a publish asks the same of the bucket however many releases it holds.
- * It publishes only while the commit is main's head (--head, which CI
- * asks GitHub for right before): a re-run of a push main has moved past
- * publishes nothing, rather than an older commit under a newer id.
- * Without it (Promote release) the release keeps the id it has.
+ * CI publishes in three jobs (.github/workflows/ci.yml), as the signing
+ * key is in a job of its own that runs none of this code
+ * (sign-manifest.ts). First, with --stage (stage-release), the release
+ * gets its id here, from the bucket (@grasp-os/shared/release-id): the
+ * next `YY.MM.N` after the ids a listing of the month finds. Its blobs go
+ * up, the id is written to `commits/<sha>`, and the manifest stamped with
+ * it is written to the file --stage names; no manifest is published.
+ * Then sign-release signs that file, and publish-release publishes it as
+ * above, under that id: the manifest's conditional write is the claim. A
+ * commit's manifest is so only ever at the id its marker names: a re-run
+ * of the commit's publish reads the marker and that one manifest, and
+ * stages nothing again when the manifest is the commit's. The marker is
+ * written only over the one read before (its ETag), or only if absent,
+ * so two runs of one commit never leave it naming a lost id. Pushes to
+ * main run one at a time (ci.yml's concurrency group), so no other
+ * publish claims the id in between; if anything does, publish-release
+ * fails and the next merge publishes. No other manifest is read: past a
+ * listing page per 1,000 releases of the month, a publish asks the same
+ * of the bucket however many releases it holds.
+ * Each step publishes only while the commit is main's head (--head,
+ * which CI asks GitHub for right before): a re-run of a push main has
+ * moved past publishes nothing, rather than an older commit under a
+ * newer id. Without --stage (Promote release, and CI's last step) the
+ * release keeps the id it has.
  *
  * With --dry-run it verifies the release and says what it would upload,
  * without credentials or network.
  *
  * Env: R2_ENDPOINT (https://<account id>.eu.r2.cloudflarestorage.com),
- *      R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY; with --assign-id,
- *      the signer's (signer-lib.ts)
- * Usage: vp run release:upload --release <dir> [--assign-id --head <sha>] [--dry-run]
+ *      R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
+ * Usage: vp run release:upload --release <dir> [--stage <manifest file>] [--head <sha>] [--dry-run]
  */
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
@@ -86,21 +95,15 @@ import { stampReleaseId } from "./assign-lib.ts";
 import { REQUESTS_AT_ONCE, releasesBucketFromEnv } from "./bucket-lib.ts";
 import type { ReleasesBucket } from "./bucket-lib.ts";
 import { verifyRelease } from "./manifest-lib.ts";
-import { releaseSignerFromEnv } from "./signer-lib.ts";
 
 const HTTP_NOT_FOUND = 404;
 const HTTP_CONFLICT = 409;
 const HTTP_PRECONDITION_FAILED = 412;
-/**
- * Most ids one publish tries: each one another publish claimed first
- * costs one. Far more than publishes ever overlap.
- */
-const MAX_ID_ATTEMPTS = 20;
 
 const { values: args } = parseArgs({
   options: {
     release: { type: "string" },
-    "assign-id": { type: "boolean", default: false },
+    stage: { type: "string" },
     head: { type: "string" },
     "dry-run": { type: "boolean", default: false },
   },
@@ -108,8 +111,8 @@ const { values: args } = parseArgs({
 if (args.release === undefined) {
   throw new Error("--release <dir> is required");
 }
-if (args["assign-id"] && !args["dry-run"] && args.head === undefined) {
-  throw new Error("--assign-id needs --head <main's head commit>");
+if (args.stage !== undefined && !args["dry-run"] && args.head === undefined) {
+  throw new Error("--stage needs --head <main's head commit>");
 }
 const releaseDir = path.resolve(args.release);
 
@@ -202,16 +205,15 @@ const putIfAbsent = async (
 };
 
 /**
- * Stores `signature`, the signature file of `stampedBytes` (a manifest as
- * it's about to be published), at its key, only if absent: there already,
- * it must be these bytes, which signing the same manifest again gives.
+ * Stores `signature`, the manifest's signature file, at its key, only if
+ * absent: there already, it must be these bytes, which signing the same
+ * manifest again gives.
  */
 const putSignature = async (
   bucket: ReleasesBucket,
-  stampedBytes: Uint8Array,
   signature: Buffer
 ): Promise<void> => {
-  const key = signatureKey(sha256Hex(stampedBytes));
+  const key = signatureKey(sha256Hex(manifestBytes));
   const held = await putIfAbsent(bucket, key, signature, "application/json");
   if (held !== undefined) {
     assertStored(key, held, sha256Base64(signature));
@@ -339,9 +341,10 @@ const uploadBlobs = async (bucket: ReleasesBucket): Promise<void> => {
 };
 
 /**
- * The release directory's signature of its manifest, as its download
- * fetched it, once it verifies. Throws for one without, or whose
- * signature doesn't verify: nothing is uploaded.
+ * The release directory's signature of its manifest, as Promote
+ * release's download fetched it or CI's sign-release made it, once it
+ * verifies. Throws for one without, or whose signature doesn't verify:
+ * nothing is uploaded.
  */
 const verifiedSignature = async (): Promise<Buffer> => {
   const file = path.join(releaseDir, RELEASE_SIGNATURE_FILE);
@@ -360,17 +363,16 @@ const verifiedSignature = async (): Promise<Buffer> => {
 };
 
 /**
- * Publishes the release under the id it has (Promote release), its
- * signature (`signature`, checked) first. Published already, by an
- * earlier attempt: it stands.
+ * Publishes the release under the id it has, its signature (`signature`,
+ * checked) first: the manifest's write, only if absent, is the claim.
+ * Published already with these bytes, by an earlier attempt: it stands.
+ * With other bytes, another release has the id: nothing is published.
  */
 const publishAsBuilt = async (
   bucket: ReleasesBucket,
-  signature: Buffer | undefined
+  signature: Buffer
 ): Promise<void> => {
-  if (signature !== undefined) {
-    await putSignature(bucket, manifestBytes, signature);
-  }
+  await putSignature(bucket, signature);
   const published = manifestKey(manifest.releaseId);
   const held = await putIfAbsent(
     bucket,
@@ -379,8 +381,9 @@ const publishAsBuilt = async (
     "application/json"
   );
   if (held !== undefined && held !== sha256Base64(manifestBytes)) {
-    console.warn(`::warning::${published} is already published; left as it is`);
-    return;
+    throw new Error(
+      `${published} holds another manifest: release ${manifest.releaseId} is another's; nothing published`
+    );
   }
   console.info(`Published ${published}`);
 };
@@ -449,19 +452,19 @@ const readMarker = async (
 };
 
 /**
- * Writes `id` to the commit's marker, only over the marker this publish
- * last read or wrote (`etag`), or only if absent when it found none.
- * Resolves with the new ETag, or with the id the commit is published as
- * when another run of the commit changed the marker meanwhile and that
- * id's manifest is the commit's. Changed to the same id, the marker is
- * this write's own (its answer lost) or a twin run's on the same id, whose
- * claim this one's then meets: either way it goes on to the claim.
+ * Writes `id` to the commit's marker, only over the marker read before
+ * the upload (`etag`), or only if absent when there was none. Resolves
+ * with undefined, or with the id the commit is published as when another
+ * run of the commit changed the marker meanwhile and that id's manifest
+ * is the commit's. Changed to the same id, the marker is this write's own
+ * (its answer lost) or a twin run's on the same id, whose claim this
+ * one's then meets.
  */
 const writeMarker = async (
   bucket: ReleasesBucket,
   id: string,
   etag: string | undefined
-): Promise<{ etag: string } | { publishedAs: string }> => {
+): Promise<string | undefined> => {
   const bytes = Buffer.from(`${id}\n`);
   const put = await bucket.fetch(bucket.url(markerKey), {
     method: "PUT",
@@ -473,17 +476,17 @@ const writeMarker = async (
     },
   });
   if (put.ok) {
-    return { etag: etagOf(put, "PUT") };
+    return undefined;
   }
   if (put.status !== HTTP_PRECONDITION_FAILED) {
     throw new Error(`PUT ${markerKey}: ${put.status} ${await put.text()}`);
   }
   const now = await readMarker(bucket);
   if (now?.id === id) {
-    return { etag: now.etag };
+    return undefined;
   }
   if (now !== undefined && (await isThisCommits(bucket, now.id))) {
-    return { publishedAs: now.id };
+    return now.id;
   }
   throw new Error(
     `${markerKey} changed under this publish (it names ${now?.id ?? "nothing"}): another publish of ${manifest.commit} is under way; nothing published`
@@ -491,119 +494,72 @@ const writeMarker = async (
 };
 
 /**
- * Publishes the release under the next id of the month (CI's publish):
- * each attempt names its id in the commit's marker (over `etag`, the
- * marker as read before the upload), has the manifest as stamped with it
- * signed (`sign`; one the signer says is published already counts as
- * claimed by then) and stores the signature, then claims the id by writing
- * the manifest only if absent, and moves on to the next id when another
- * publish has it, its signature left for no manifest.
+ * Stages the release under the month's next id (CI's stage-release):
+ * names it in the commit's marker (over `etag`, the marker as read before
+ * the upload), then writes the manifest stamped with it to `out`, for
+ * sign-release to sign and publish-release to publish.
  */
-const publishWithNextId = async (
+const stageNextId = async (
   bucket: ReleasesBucket,
   etag: string | undefined,
-  sign: (
-    releaseId: string,
-    manifestBytes: Buffer
-  ) => Promise<Buffer | undefined>
+  out: string
 ): Promise<void> => {
   const now = new Date();
-  const taken = new Set(await bucket.listIds(releaseMonthPrefix(now)));
-  let markerTag = etag;
-  for (let attempt = 1; attempt <= MAX_ID_ATTEMPTS; attempt += 1) {
-    const id = nextReleaseId(taken, now);
-    taken.add(id);
-    const stamped = stampReleaseId(manifestBytes, id);
-    const published = manifestKey(id);
-    // The marker first, so the commit's manifest is only ever at the id
-    // its marker names.
-    // oxlint-disable-next-line no-await-in-loop -- one id at a time, until one is ours
-    const named = await writeMarker(bucket, id, markerTag);
-    if ("publishedAs" in named) {
-      console.warn(
-        `::warning::${manifest.commit} was published meanwhile, as release ${named.publishedAs}, by another run; nothing published again`
-      );
-      return;
-    }
-    markerTag = named.etag;
-    // oxlint-disable-next-line no-await-in-loop -- one id at a time, until one is ours
-    const signature = await sign(id, stamped.manifestBytes);
-    if (signature === undefined) {
-      // Published since the listing: by an earlier try of this commit, or
-      // another publish, whose id this one leaves.
-      // oxlint-disable-next-line no-await-in-loop -- only when the id was taken
-      if (await isThisCommits(bucket, id)) {
-        console.info(`Published ${published}: release ${id}`);
-        return;
-      }
-      console.info(`Release ${id} is another publish's; trying the next id`);
-      continue;
-    }
-    // oxlint-disable-next-line no-await-in-loop -- one id at a time, until one is ours
-    await putSignature(bucket, stamped.manifestBytes, signature);
-    // The manifest is the claim, only if absent. Found there already, it's
-    // this commit's when an earlier try or attempt put it there: a lost
-    // answer, or a build of the same commit, whose bytes may differ.
-    const claimed =
-      // oxlint-disable-next-line no-await-in-loop -- one id at a time, until one is ours
-      (await putIfAbsent(
-        bucket,
-        published,
-        stamped.manifestBytes,
-        "application/json"
-      )) === undefined ||
-      // oxlint-disable-next-line no-await-in-loop -- only when the id was taken
-      (await isThisCommits(bucket, id));
-    if (claimed) {
-      console.info(`Published ${published}: release ${id}`);
-      return;
-    }
-    console.info(`Release ${id} is another publish's; trying the next id`);
+  const id = nextReleaseId(await bucket.listIds(releaseMonthPrefix(now)), now);
+  const publishedAs = await writeMarker(bucket, id, etag);
+  if (publishedAs !== undefined) {
+    console.warn(
+      `::warning::${manifest.commit} was published meanwhile, as release ${publishedAs}, by another run; nothing staged`
+    );
+    return;
   }
-  throw new Error(
-    `Found no free release id in ${MAX_ID_ATTEMPTS} tries; nothing published`
+  mkdirSync(path.dirname(out), { recursive: true });
+  writeFileSync(out, stampReleaseId(manifestBytes, id).manifestBytes);
+  console.info(`Staged release ${id} of ${manifest.commit} in ${out}`);
+};
+
+/**
+ * Uploads every blob R2 lacks, checking the model files the directory
+ * doesn't carry before and every one after, as the import will.
+ */
+const uploadRelease = async (bucket: ReleasesBucket): Promise<void> => {
+  await assertModelFilesStored(
+    bucket,
+    manifest.modelFiles.filter(({ r2Key }) => !blobs.has(r2Key))
   );
+  await uploadBlobs(bucket);
+  await assertModelFilesStored(bucket, manifest.modelFiles);
 };
 
 if (args["dry-run"]) {
   console.info(
-    args["assign-id"]
-      ? `Dry run: release ${manifest.releaseId} verified; would upload whichever of its ${blobs.size} blobs R2 lacks, then publish it as the month's next release`
-      : `Dry run: release ${manifest.releaseId} verified; would upload whichever of its ${blobs.size} blobs R2 lacks, then ${manifestKey(manifest.releaseId)}`
+    args.stage === undefined
+      ? `Dry run: release ${manifest.releaseId} verified; would upload whichever of its ${blobs.size} blobs R2 lacks, then ${manifestKey(manifest.releaseId)}`
+      : `Dry run: release ${manifest.releaseId} verified; would upload whichever of its ${blobs.size} blobs R2 lacks, then stage it as the month's next release`
   );
-} else if (args["assign-id"] && args.head !== manifest.commit) {
+} else if (args.head !== undefined && args.head !== manifest.commit) {
   // Main has moved on since this run started: the newer push publishes
   // its own release, which carries this commit's changes.
   console.info(
-    `::notice::Not publishing ${manifest.commit}: main's head is ${String(args.head)} now, which publishes its own release`
+    `::notice::Not publishing ${manifest.commit}: main's head is ${args.head} now, which publishes its own release`
   );
-} else {
+} else if (args.stage === undefined) {
   // Before anything is uploaded: a release that isn't signed as it must
-  // be, or a signer that isn't set, stops it here.
-  const signature = args["assign-id"] ? undefined : await verifiedSignature();
-  const sign = args["assign-id"] ? releaseSignerFromEnv() : undefined;
+  // be stops here.
+  const signature = await verifiedSignature();
   const bucket = releasesBucketFromEnv();
-  const marker = args["assign-id"] ? await readMarker(bucket) : undefined;
-  const earlier =
-    marker !== undefined && (await isThisCommits(bucket, marker.id))
-      ? marker.id
-      : undefined;
-  if (earlier === undefined) {
-    // Before anything is uploaded, the files the directory doesn't carry;
-    // after, every one, as the import will check them.
-    await assertModelFilesStored(
-      bucket,
-      manifest.modelFiles.filter(({ r2Key }) => !blobs.has(r2Key))
-    );
-    await uploadBlobs(bucket);
-    await assertModelFilesStored(bucket, manifest.modelFiles);
-    await (sign === undefined
-      ? publishAsBuilt(bucket, signature)
-      : publishWithNextId(bucket, marker?.etag, sign));
-  } else {
+  await uploadRelease(bucket);
+  await publishAsBuilt(bucket, signature);
+} else {
+  const bucket = releasesBucketFromEnv();
+  const marker = await readMarker(bucket);
+  if (marker !== undefined && (await isThisCommits(bucket, marker.id))) {
     // A re-run of the commit's publish: the release it published stands.
     console.warn(
-      `::warning::${manifest.commit} is already published, as release ${earlier}; nothing published again`
+      `::warning::${manifest.commit} is already published, as release ${marker.id}; nothing staged again`
     );
+  } else {
+    await uploadRelease(bucket);
+    await stageNextId(bucket, marker?.etag, args.stage);
   }
 }

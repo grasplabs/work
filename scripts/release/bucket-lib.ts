@@ -3,8 +3,7 @@
  * its keys' URLs, signed requests, and the ids of the releases under
  * `releases/`.
  *
- * Every request goes through `fetch` here, with one retry policy (the
- * release signer's too, signer-lib.ts, through `sendWithRetries`): a
+ * Every request goes through `fetch` here, with one retry policy: a
  * request that fails on the network (a reset connection, a timeout) or
  * that R2 answers with a 5xx or 429 is sent again, up to `ATTEMPTS` times,
  * after a backoff with full jitter. The answer is read whole inside the
@@ -82,66 +81,7 @@ const describe = (error: unknown): string => {
 const backoff = (attempt: number): number =>
   Math.random() * Math.min(BACKOFF_CAP_MS, BACKOFF_MS * 2 ** (attempt - 1));
 
-/**
- * `send`s a request until it gets an answer that isn't transient or runs
- * out of tries (the policy above), its answer read whole inside each try.
- * `what` names it in the logs; `init` is what it sends, for its time
- * allowance.
- */
-export const sendWithRetries = async (
-  what: string,
-  init: RequestInit | undefined,
-  send: (signal: AbortSignal) => Promise<Response>
-): Promise<Response> => {
-  const sent = init?.body instanceof Uint8Array ? init.body.byteLength : 0;
-  for (let attempt = 1; ; attempt += 1) {
-    const controller = new AbortController();
-    const giveUpAfter = (bytes: number): NodeJS.Timeout => {
-      const ms = allowance(bytes);
-      return setTimeout(() => {
-        controller.abort(
-          new Error(`no answer within ${Math.round(ms / MS_PER_SECOND)} s`)
-        );
-      }, ms);
-    };
-    let timer = giveUpAfter(sent);
-    let failure: string;
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- one try at a time
-      const response = await send(controller.signal);
-      clearTimeout(timer);
-      timer = giveUpAfter(
-        Number(response.headers.get("content-length") ?? "0") || 0
-      );
-      // oxlint-disable-next-line no-await-in-loop -- read inside the try, so a drop mid-body is retried
-      const body = await response.arrayBuffer();
-      if (!isTransient(response.status) || attempt === ATTEMPTS) {
-        return new Response(body.byteLength === 0 ? null : body, {
-          status: response.status,
-          statusText: response.statusText,
-          headers: response.headers,
-        });
-      }
-      failure = String(response.status);
-    } catch (error) {
-      if (attempt === ATTEMPTS) {
-        throw new Error(`${what}: ${describe(error)}, ${ATTEMPTS} tries`, {
-          cause: error,
-        });
-      }
-      failure = describe(error);
-    } finally {
-      clearTimeout(timer);
-    }
-    console.warn(
-      `${what}: ${failure}; trying again (${attempt + 1} of ${ATTEMPTS})`
-    );
-    // oxlint-disable-next-line no-await-in-loop -- the backoff before the next try
-    await sleep(backoff(attempt));
-  }
-};
-
-export const requireEnv = (name: string): string => {
+const requireEnv = (name: string): string => {
   const value = process.env[name];
   if (value === undefined || value === "") {
     throw new Error(`${name} is required`);
@@ -199,13 +139,59 @@ export const releasesBucketFromEnv = (): ReleasesBucket => {
   });
 
   const base = `${endpoint}/${bucket}`;
-  const fetch = async (url: string, init?: RequestInit): Promise<Response> =>
-    await sendWithRetries(
-      // As the logs name it: the key, or a listing's query.
-      `${init?.method ?? "GET"} ${url.slice(base.length + 1)}`,
-      init,
-      async (signal) => await client.fetch(url, { ...init, signal })
-    );
+  const fetch = async (url: string, init?: RequestInit): Promise<Response> => {
+    // As the logs name it: the key, or a listing's query.
+    const what = `${init?.method ?? "GET"} ${url.slice(base.length + 1)}`;
+    const sent = init?.body instanceof Uint8Array ? init.body.byteLength : 0;
+    for (let attempt = 1; ; attempt += 1) {
+      const controller = new AbortController();
+      const giveUpAfter = (bytes: number): NodeJS.Timeout => {
+        const ms = allowance(bytes);
+        return setTimeout(() => {
+          controller.abort(
+            new Error(`no answer within ${Math.round(ms / MS_PER_SECOND)} s`)
+          );
+        }, ms);
+      };
+      let timer = giveUpAfter(sent);
+      let failure: string;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one try at a time
+        const response = await client.fetch(url, {
+          ...init,
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        timer = giveUpAfter(
+          Number(response.headers.get("content-length") ?? "0") || 0
+        );
+        // oxlint-disable-next-line no-await-in-loop -- read inside the try, so a drop mid-body is retried
+        const body = await response.arrayBuffer();
+        if (!isTransient(response.status) || attempt === ATTEMPTS) {
+          return new Response(body.byteLength === 0 ? null : body, {
+            status: response.status,
+            statusText: response.statusText,
+            headers: response.headers,
+          });
+        }
+        failure = String(response.status);
+      } catch (error) {
+        if (attempt === ATTEMPTS) {
+          throw new Error(`${what}: ${describe(error)}, ${ATTEMPTS} tries`, {
+            cause: error,
+          });
+        }
+        failure = describe(error);
+      } finally {
+        clearTimeout(timer);
+      }
+      console.warn(
+        `${what}: ${failure}; trying again (${attempt + 1} of ${ATTEMPTS})`
+      );
+      // oxlint-disable-next-line no-await-in-loop -- the backoff before the next try
+      await sleep(backoff(attempt));
+    }
+  };
 
   const listIds = async (idPrefix = ""): Promise<string[]> => {
     const ids: string[] = [];

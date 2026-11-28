@@ -15,7 +15,7 @@ import { text } from "node:stream/consumers";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { handKeptSecrets, optionalSecrets } from "./optional-secrets.ts";
+import { optionalSecrets } from "./optional-secrets.ts";
 
 /** What the stand-in takes: a create's secrets, and an update's fields. */
 const createdSchema = z.array(
@@ -74,18 +74,12 @@ const required = [
   "GOOGLE_CLIENT_SECRET",
   "COMPOSIO_API_KEY",
 ];
-/** The optional secrets 1Password holds: not those kept by hand. */
-const optional = [...optionalSecrets].filter(
-  (name) => !handKeptSecrets.has(name)
-);
+const optional = [...optionalSecrets];
 
-/**
- * An env with every secret set to `value-<NAME>`, as 1Password names them,
- * and those kept by hand too, which a copy must never write.
- */
+/** An env with every secret set to `value-<NAME>`, as 1Password names them. */
 const everySecret = (): Record<string, string> =>
   Object.fromEntries(
-    [...required, ...optionalSecrets].map((name) => [name, `value-${name}`])
+    [...required, ...optional].map((name) => [name, `value-${name}`])
   );
 
 describe("copying the runtime secrets into the Secrets Store", () => {
@@ -175,7 +169,7 @@ describe("copying the runtime secrets into the Secrets Store", () => {
       ...secrets,
     });
 
-  it("names every secret the admin and router bind but those kept by hand, by the name 1Password keeps", async () => {
+  it("names every secret the admin and router bind, by the name 1Password keeps", async () => {
     const printed = await run(["names", "staging"], { PATH: process.env.PATH });
     const names = printed.trim().split(" ");
     expect(names.toSorted()).toStrictEqual(
@@ -183,7 +177,7 @@ describe("copying the runtime secrets into the Secrets Store", () => {
     );
   });
 
-  it("writes a staging run's secrets only under _STAGING names, and production's under their own, never one kept by hand", async () => {
+  it("writes a staging run's secrets only under _STAGING names, and production's under their own", async () => {
     await copy("staging", everySecret());
     const staging = [...store.keys()];
     store.clear();

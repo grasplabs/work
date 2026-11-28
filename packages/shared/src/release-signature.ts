@@ -6,16 +6,20 @@
  * release's id too, so a signed manifest can't be published again under
  * another one.
  *
+ * CI signs it in a job of its own, `sign-release` in
+ * .github/workflows/ci.yml, which alone holds the private key
+ * (scripts/release/sign-manifest.ts); everything else only verifies, with
+ * the code here.
+ *
  * It's a small JSON file of its own, beside the manifest rather than in
  * it, so the manifest stays byte for byte what's signed and no verifier
  * has to rebuild a canonical form: in the releases bucket at
  * `signatureKey(<the manifest's SHA-256>)`, written before the manifest,
  * so a manifest is never there without it; in a release directory
- * (Promote release's download, an on-premises install's copy) as
- * `RELEASE_SIGNATURE_FILE` beside `manifest.json`. Keyed by the
- * manifest's hash, not its id: CI's publish signs each id it tries to
- * claim, and one another publish claims first leaves only a signature no
- * manifest has, never one under that publish's id.
+ * (CI's publish, Promote release's download, an on-premises install's
+ * copy) as `RELEASE_SIGNATURE_FILE` beside `manifest.json`. Keyed by the
+ * manifest's hash, not its id: a publish that loses its id leaves only a
+ * signature no manifest has, never one under that id.
  *
  * Every release must be signed: one without, or whose signature doesn't
  * verify, is refused. Releases imported before signing began are never
@@ -33,7 +37,7 @@
  */
 import { z } from "zod";
 
-import { fromBase64Url, toBase64Url } from "./encoding.ts";
+import { fromBase64Url } from "./encoding.ts";
 import type { Bytes } from "./release.ts";
 
 /** Where a manifest's signature is in the releases bucket, by the manifest's SHA-256 (hex). */
@@ -62,39 +66,15 @@ const encoder = new TextEncoder();
 /**
  * What's signed: the manifest's bytes behind a fixed context, so a
  * signature made for anything else with the key never passes for one.
+ * CI's signer (scripts/release/sign-manifest.ts) builds the same bytes
+ * with Node alone; its tests verify what it signs here.
  */
-const signedBytes = (manifestBytes: Uint8Array): Bytes => {
+export const releaseSignedBytes = (manifestBytes: Uint8Array): Bytes => {
   const context = encoder.encode("grasp-release-manifest\n");
   const signed = new Uint8Array(context.length + manifestBytes.length);
   signed.set(context);
   signed.set(manifestBytes, context.length);
   return signed;
-};
-
-/** An Ed25519 private key as a JWK, as the admin keeps its signing key. */
-export interface ReleaseSigningJwk {
-  kty: "OKP";
-  crv: "Ed25519";
-  /** The public key, base64url. */
-  x: string;
-  /** The private key, base64url. */
-  d: string;
-}
-
-/** The signature file for `manifestBytes`, made with `jwk`. Ed25519 is deterministic: the same bytes each time. */
-export const signReleaseManifest = async (
-  manifestBytes: Uint8Array,
-  jwk: ReleaseSigningJwk
-): Promise<Bytes> => {
-  const key = await crypto.subtle.importKey("jwk", jwk, ED25519, false, [
-    "sign",
-  ]);
-  const signature = new Uint8Array(
-    await crypto.subtle.sign(ED25519, key, signedBytes(manifestBytes))
-  );
-  return encoder.encode(
-    JSON.stringify({ key: jwk.x, signature: toBase64Url(signature) })
-  );
 };
 
 const parsedSignature = (
@@ -146,7 +126,7 @@ export const releaseSignatureProblem = async (
       ED25519,
       key,
       fromBase64Url(parsed.signature),
-      signedBytes(manifestBytes)
+      releaseSignedBytes(manifestBytes)
     );
   } catch {
     valid = false;

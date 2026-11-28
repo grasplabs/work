@@ -7,7 +7,6 @@
  */
 import {
   adminDatabaseName,
-  adminHost,
   clientsNamespace,
   platformAccountId,
   platformR2Endpoint,
@@ -25,7 +24,6 @@ if (stage === undefined) {
 }
 const names: Record<string, string> = {
   admin: platformWorkerName("admin", stage),
-  adminHost: adminHost(stage),
   router: platformWorkerName("router", stage),
   adminDatabase: adminDatabaseName(stage),
   releasesBucket: releasesBucketName(stage),

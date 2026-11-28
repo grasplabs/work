@@ -9,7 +9,7 @@ import { storeSecretName } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
 
 import { parseJsonc } from "./jsonc.ts";
-import { handKeptSecrets, optionalSecrets } from "./optional-secrets.ts";
+import { optionalSecrets } from "./optional-secrets.ts";
 
 /** A secret a Worker binds: its binding name, as 1Password keeps it, and its store name. */
 export interface SecretBinding {
@@ -26,8 +26,7 @@ const field = (value: unknown, key: string): unknown =>
 /**
  * Every secret the configs `texts` (each Worker's wrangler.jsonc) bind in
  * `stage`, once each, in order: the top level's for production,
- * `env.staging`'s own for staging, as wrangler reads them. Not those kept
- * by hand (`handKeptSecrets`), which 1Password never holds.
+ * `env.staging`'s own for staging, as wrangler reads them.
  */
 export const stageSecretBindings = (
   texts: readonly string[],
@@ -42,11 +41,7 @@ export const stageSecretBindings = (
     for (const secret of Array.isArray(list) ? list : []) {
       const binding = field(secret, "binding");
       const storeName = field(secret, "secret_name");
-      if (
-        typeof binding === "string" &&
-        typeof storeName === "string" &&
-        !handKeptSecrets.has(binding)
-      ) {
+      if (typeof binding === "string" && typeof storeName === "string") {
         found.set(binding, storeName);
       }
     }

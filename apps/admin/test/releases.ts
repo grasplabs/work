@@ -22,13 +22,13 @@ import {
   nextReleaseId as nextPublishedId,
   parsePublishedReleaseId,
 } from "@grasp-os/shared/release-id";
-import {
-  signatureKey,
-  signReleaseManifest,
-} from "@grasp-os/shared/release-signature";
+import { signatureKey } from "@grasp-os/shared/release-signature";
 import { env } from "cloudflare:workers";
 
-import { testReleaseSigningKey } from "../../../packages/shared/test/release-signing-keys.ts";
+import {
+  signReleaseManifest,
+  testReleaseSigningKey,
+} from "../../../packages/shared/test/release-signing-keys.ts";
 
 const encoder = new TextEncoder();
 
@@ -301,7 +301,7 @@ export const putBlobs = async (
   );
 };
 
-/** Stores the signature of `manifestText`, as the admin signs it for CI. */
+/** Stores the signature of `manifestText`, as CI signs and publishes it. */
 export const putSignature = async (manifestText: string): Promise<void> => {
   const bytes = encoder.encode(manifestText);
   await env.RELEASES.put(

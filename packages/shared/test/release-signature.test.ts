@@ -3,13 +3,13 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   releaseSignatureProblem,
   releaseSignatureSchema,
-  signReleaseManifest,
 } from "../src/release-signature.ts";
-import type { ReleaseSigningJwk } from "../src/release-signature.ts";
 import {
   releaseSigningKeys,
+  signReleaseManifest,
   testReleaseSigningKey,
 } from "./release-signing-keys.ts";
+import type { ReleaseSigningJwk } from "./release-signing-keys.ts";
 
 const encoder = new TextEncoder();
 
