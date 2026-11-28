@@ -6,6 +6,7 @@ import { beforeAll, describe, expect, it } from "vite-plus/test";
 
 import { CoreConnection } from "./core-connection.ts";
 import { loadFromCore, notLoadedText } from "./load-from-core.tsx";
+import { coreStandIn } from "./test-core.ts";
 
 // What a page says when its read from core fails, over the tab's real
 // connection to a stand-in core: a read the connection drops under is core
@@ -24,18 +25,9 @@ const tabWhoseRead = (read: () => Promise<unknown>): CoreConnection =>
         whoami: async () => await Promise.resolve({ userId: "one" }),
         chats: { list: read },
       };
-      const stub = {
+      return coreStandIn({
         authenticate: async () => await Promise.resolve(session),
-        onRpcBroken: () => {
-          // Read failures here are the read's own.
-        },
-        [Symbol.dispose]: () => {
-          // Nothing to let go of.
-        },
-      };
-      // SAFETY: a stand-in for the parts of core's API the page reads.
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      return stub as never;
+      }).api;
     },
     watchPage: () => {
       // The page never comes back here.

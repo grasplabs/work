@@ -35,6 +35,8 @@ import {
   sharedWithQueries,
   unreachableRevocations,
   whenLetGo,
+  untoldPeople,
+  whenSignedOut,
 } from "./page-revocation.ts";
 import { openRpc, outcome } from "./sign-in.ts";
 
@@ -223,6 +225,7 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
         ...env,
         DB: awayAfterTheChange(),
         APPS: unreachableRevocations(env.APPS),
+        WORKSPACES: untoldPeople(env.WORKSPACES),
       },
     });
 
@@ -255,6 +258,7 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
         ...env,
         DB: awayAfterTheChange(),
         APPS: unreachableRevocations(env.APPS),
+        WORKSPACES: untoldPeople(env.WORKSPACES),
       },
     });
 
@@ -284,11 +288,15 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
       coreEnv: { ...env, DB: promotedBeforeTheChange(removed.userId) },
     });
 
+    const before = follower.received.length;
     await core.authenticate().members.remove(removed.userId);
 
-    await expect(whenLetGo(follower)).resolves.toStrictEqual({
+    await expect(
+      whenSignedOut(follower, removed.closed, before)
+    ).resolves.toStrictEqual({
       last: "auth.unauthenticated",
       released: true,
+      dataAfter: 0,
     });
   });
 
@@ -328,6 +336,7 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
         ...env,
         DB: awayAfterTheChange(),
         APPS: unreachableRevocations(env.APPS),
+        WORKSPACES: untoldPeople(env.WORKSPACES),
       },
     });
 
@@ -386,6 +395,7 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
         ...env,
         DB: awayAfterTheChange(),
         APPS: unreachableRevocations(env.APPS),
+        WORKSPACES: untoldPeople(env.WORKSPACES),
       },
     });
 

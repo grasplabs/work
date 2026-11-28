@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { retryAccessRevocations } from "../src/access-revocations.ts";
 import { appHost } from "../src/durable-objects.ts";
+import { sessionEndedCloseCode } from "../src/rpc.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
 import { apiOf } from "./notes-client-app.ts";
 import type { Opened, Pages } from "./page-client.ts";
@@ -155,6 +156,43 @@ export const promotedBeforeTheChange = (userId: string): D1Database => {
     },
   });
 };
+
+/**
+ * The people's objects behind `namespace`, none of which can be told that
+ * someone's session or role changed (identity-changes.ts): what is left to
+ * clear a page is the App's own revocation, as when that telling is lost.
+ */
+export const untoldPeople = (namespace: Env["WORKSPACES"]): Env["WORKSPACES"] =>
+  new Proxy(namespace, {
+    get: (target, property): unknown => {
+      if (property === "getByName") {
+        return (name: string) =>
+          new Proxy(target.getByName(name), {
+            get: (stub, method): unknown => {
+              if (method === "identityChanged") {
+                return async () => {
+                  await Promise.resolve();
+                  throw new Error("The person's object can't be reached.");
+                };
+              }
+              const value: unknown = Reflect.get(stub, method);
+              if (typeof value !== "function") {
+                return value;
+              }
+              // As `unreachableRevocations`: called through, never bound.
+              return (...args: unknown[]): unknown =>
+                Reflect.apply(value, stub, args);
+            },
+          });
+      }
+      const value: unknown = Reflect.get(target, property);
+      if (typeof value !== "function") {
+        return value;
+      }
+      const bound: unknown = value.bind(target);
+      return bound;
+    },
+  });
 
 /**
  * The App hosts' namespace as a connection that can't reach them to tell
@@ -324,6 +362,35 @@ export const whenLetGo = async (follower: Follower) => {
     last: titlesOf(follower.received.at(-1)),
     released: follower.state.released,
   };
+};
+
+/**
+ * What a removed person's page is left with: its query refused as signed
+ * out, or its whole connection ended as signed out (`closed`), which the
+ * tab answers by stopping every page on it (core-connection.ts), whichever
+ * came first.
+ */
+export const whenSignedOut = async (
+  follower: Follower,
+  closed: Promise<number>,
+  /** How many pushes the page had when the person was removed. */
+  before: number
+) => {
+  const letGo = await whenLetGo(follower);
+  // Nothing of the App reached the page after the removal.
+  const dataAfter = follower.received
+    .slice(before)
+    .filter(({ result }) => result.ok).length;
+  if (letGo.last === "auth.unauthenticated") {
+    return { ...letGo, dataAfter };
+  }
+  const code = await Promise.race([
+    closed,
+    scheduler.wait(deliveryWait.timeout).then(() => 0),
+  ]);
+  return code === sessionEndedCloseCode
+    ? { ...letGo, last: "auth.unauthenticated", dataAfter }
+    : { ...letGo, dataAfter };
 };
 
 /** How long `slowToFollow` holds each connection the App's host takes on. */

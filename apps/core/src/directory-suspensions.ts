@@ -87,6 +87,23 @@ const systemEntry = (action: string): string =>
   );
 
 /**
+ * Whom the read that started at `now` suspended (`suspensionStatements`):
+ * signed out in its batch.
+ */
+export const suspendedAt = async (env: Env, now: Date): Promise<string[]> => {
+  const rows = await drizzle(env.DB)
+    .select({ userId: members.userId })
+    .from(members)
+    .where(
+      and(
+        eq(members.organizationId, organizationId),
+        eq(members.suspendedAt, now)
+      )
+    );
+  return rows.map(({ userId }) => userId);
+};
+
+/**
  * The statements that suspend and lift `kind`'s tied members as the read's
  * rows say, each only while `holds` does (the read's claim), stamped `now`.
  * In order: each lifting recorded, then made; each suspension recorded,

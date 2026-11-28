@@ -233,8 +233,13 @@ import type { InstructionContext } from "./instruction-files.ts";
 import { chatTurnPurpose } from "./model-spend.ts";
 import { modelSettings, models } from "./models.ts";
 import type { OutsideTextNote } from "./outside-text.ts";
-import { personalWorkspaceId } from "./personal-workspace.ts";
+import { acceptConnection, recheckConnections } from "./person-connections.ts";
+import {
+  personalWorkspaceId,
+  personOfWorkspace,
+} from "./personal-workspace.ts";
 import type { WorkContext } from "./restricted.ts";
+import { watcherHandlers } from "./socket-watchers.ts";
 import { outsideReadOf } from "./ungranted-reads.ts";
 import { retireUnseen } from "./unseen-memories.ts";
 
@@ -7423,6 +7428,42 @@ export class Workspace extends DurableObject<Env> {
       )
       .toArray();
     return row?.chars ?? 0;
+  }
+
+  /**
+   * A connection of the person's opens its socket to their object
+   * (person-connections.ts): what tells it to read its session again.
+   */
+  override fetch(request: Request): Response {
+    return acceptConnection(
+      this.ctx,
+      request,
+      personOfWorkspace(this.ctx.id.name) ?? ""
+    );
+  }
+
+  /**
+   * The person's session or who they are may have changed (signed out,
+   * removed, a new role or team; identity-changes.ts): every connection of
+   * theirs reads its session again now.
+   */
+  identityChanged(): void {
+    recheckConnections(this.ctx);
+  }
+
+  // oxlint-disable-next-line class-methods-use-this -- the Hibernation API's handler
+  override webSocketMessage(socket: WebSocket): void {
+    watcherHandlers.message(socket);
+  }
+
+  // oxlint-disable-next-line class-methods-use-this -- the Hibernation API's handler
+  override webSocketClose(socket: WebSocket, code: number): void {
+    watcherHandlers.close(socket, code);
+  }
+
+  // oxlint-disable-next-line class-methods-use-this -- the Hibernation API's handler
+  override webSocketError(socket: WebSocket): void {
+    watcherHandlers.error(socket);
   }
 
   #transcript(chatId: ChatId): Message[] {

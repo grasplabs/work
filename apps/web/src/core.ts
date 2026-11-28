@@ -4,15 +4,38 @@ import { t } from "@lingui/core/macro";
 import { newWebSocketRpcSession } from "capnweb";
 import type { RpcStub } from "capnweb";
 
+/** The close code core ends a connection with once its session ended (core's rpc.ts). */
+export const sessionEndedCloseCode = 4401;
+
+/** How each connection closed, once it has: its close code. */
+const closeCodes = new WeakMap<RpcStub<CoreApi>, { code?: number }>();
+
+/**
+ * Whether `api`'s connection was closed by core because its session ended
+ * (signed out, revoked, removed): never connected again, the page ends.
+ */
+export const endedBySignOut = (api: RpcStub<CoreApi>): boolean =>
+  closeCodes.get(api)?.code === sessionEndedCloseCode;
+
 /**
  * Opens a Cap'n Web session with core, on the origin this page came from.
  * The browser sends the session cookie with it, which says who the
- * connection is for as long as it lasts.
+ * connection is for as long as it lasts. How it closes is kept
+ * (`endedBySignOut`).
  */
 export const connectCore = (): RpcStub<CoreApi> => {
   const url = new URL("/rpc", window.location.href);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  return newWebSocketRpcSession<CoreApi>(url.href);
+  const socket = new WebSocket(url.href);
+  // Heard before Cap'n Web hears the close, so the code is known by the
+  // time the connection says it broke.
+  const closed: { code?: number } = {};
+  socket.addEventListener("close", ({ code }) => {
+    closed.code = code;
+  });
+  const api = newWebSocketRpcSession<CoreApi>(socket);
+  closeCodes.set(api, closed);
+  return api;
 };
 
 /** How long a read from core may take before core counts as unreachable. */

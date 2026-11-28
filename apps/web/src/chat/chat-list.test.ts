@@ -306,21 +306,33 @@ describe("following the person's list whatever fails, until they sign out", () =
 
 /**
  * Following the list on a stand-in connection whose core lets go of every
- * follow as soon as it is made, saying why (`endedBy`): how many follows
- * were made.
+ * follow, saying why (`endedBy`): as soon as it is made, or, for a follow
+ * `lasting` gives a time for (by its number, from 1), once that long has
+ * passed. When each follow was made, from the start, by the faked clock.
  */
-const followedLetGo = (endedBy: "displaced" | null) => {
-  let follows = 0;
+const followedLetGo = (
+  endedBy: "displaced" | null,
+  lasting: (made: number) => number | null = () => null
+) => {
+  const startedAt = Date.now();
+  const madeAt: number[] = [];
   const chats = {
     watchList: async (
       onUpdate: ((update: ChatListUpdate) => void) & Partial<Disposable>
     ) => {
-      follows += 1;
+      madeAt.push(Date.now() - startedAt);
       const made = subscription(endedBy);
-      // Core lets go of it at once, as one pushed out or gone does.
-      queueMicrotask(() => {
-        onUpdate[Symbol.dispose]?.();
-      });
+      const lasts = lasting(madeAt.length);
+      if (lasts === null) {
+        // Core lets go of it at once, as one pushed out or gone does.
+        queueMicrotask(() => {
+          onUpdate[Symbol.dispose]?.();
+        });
+      } else {
+        setTimeout(() => {
+          onUpdate[Symbol.dispose]?.();
+        }, lasts);
+      }
       return await Promise.resolve(made.stub);
     },
   };
@@ -346,29 +358,60 @@ const followedLetGo = (endedBy: "displaced" | null) => {
       // Never refused here.
     }
   );
-  return { stop, follows: () => follows };
+  return { stop, follows: () => madeAt.length, madeAt };
+};
+
+/**
+ * Lets `ms` of faked time pass, a tenth of a second at a time, the stubs'
+ * messages all through before each step: so whatever they start waiting
+ * for starts at the time they were sent, never a step late.
+ */
+const passed = async (ms: number): Promise<void> => {
+  for (let at = 0; at < ms; at += 100) {
+    // oxlint-disable-next-line no-await-in-loop -- one step after the messages before it
+    await delivered();
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    await delivered();
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    await vi.advanceTimersByTimeAsync(100);
+  }
+  await delivered();
 };
 
 describe("following again once core let go of a follow", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("waits longer each time a follow ends soon after it began, so no end ever makes a tight loop", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    // The jitter's draw, fixed: each pause half its ceiling.
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
     const letGo = followedLetGo(null);
 
-    for (let tick = 0; tick < 30; tick += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- time goes on a tenth of a second at a time
-      await vi.advanceTimersByTimeAsync(100);
-      // oxlint-disable-next-line no-await-in-loop -- see above
-      await delivered();
-    }
+    await passed(31_000);
     letGo.stop();
 
-    // Three seconds: at once, then within 1, then within 2 more at most.
-    expect(letGo.follows()).toBeLessThanOrEqual(4);
+    // At once, then after half of 1, 2, 4, 8 and 15 seconds, and 15 again.
+    expect(letGo.madeAt).toStrictEqual([
+      0, 500, 1500, 3500, 7500, 15_000, 22_500, 30_000,
+    ]);
+  });
+
+  it("follows again at once after a follow that lasted, then waits longer again", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    // The third follow lasts the 30 s a steady one does; every other ends at once.
+    const letGo = followedLetGo(null, (made) => (made === 3 ? 30_000 : null));
+
+    await passed(32_500);
+    letGo.stop();
+
+    // At once after it: a timer of no time, which the faked clock runs a
+    // millisecond on. Then half of 1 s again.
+    expect(letGo.madeAt).toStrictEqual([0, 500, 1500, 31_501, 32_001]);
   });
 
   it("follows one pushed out by the person's other follows (displaced) again only once the page comes back to the front", async () => {

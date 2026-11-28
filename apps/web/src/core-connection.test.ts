@@ -7,6 +7,7 @@ import {
   describe,
   expect,
   it,
+  onTestFinished,
   vi,
 } from "vite-plus/test";
 
@@ -24,6 +25,7 @@ import type { HostCheck, SessionEnded } from "./core-connection.ts";
 import { CoreTimeoutError } from "./core.ts";
 import { tabLink } from "./pages/tab-link.ts";
 import { keepChatLink, pendingChatLink } from "./settings/chat-link.ts";
+import { coreStandIn } from "./test-core.ts";
 
 // The tab's one connection to core (spec 11.2), shared by the shell and
 // every App frame, with a stand-in for core: what each new connection
@@ -57,10 +59,14 @@ interface Fake {
   disposed: boolean;
   /** Breaks it, as a dropped socket does. */
   break: () => void;
+  /** Breaks it as core does once the session ended (close code 4401). */
+  endSession: () => void;
   /** Stops it answering anything, without saying so, as a socket the network died under. */
   silence: () => void;
   /** Answers every ping it held back since, as a socket that recovers. */
   speak: () => void;
+  /** Can't be asked for a ping at all: asking throws, as calling what isn't there does. */
+  losePing: () => void;
   readonly session: object;
 }
 
@@ -79,6 +85,8 @@ const tab = (answers: Answer[]) => {
     hostTakesMs: 0,
   };
   const opened: Fake[] = [];
+  /** The stand-in connections core closed as their session ended. */
+  const signedOut = new WeakSet<object>();
   const ended: string[] = [];
   /** What the tab asked core, by name, on any connection. */
   const asked: string[] = [];
@@ -118,6 +126,11 @@ const tab = (answers: Answer[]) => {
         break: () => {
           broken?.();
         },
+        endSession: () => {
+          // oxlint-disable-next-line no-use-before-define -- set below, before anyone ends it
+          signedOut.add(stub);
+          broken?.();
+        },
         silence: () => {
           silent = true;
         },
@@ -127,10 +140,14 @@ const tab = (answers: Answer[]) => {
             pong();
           }
         },
+        losePing: () => {
+          // oxlint-disable-next-line no-use-before-define -- set below, before anyone loses it
+          Reflect.deleteProperty(standIn, "ping");
+        },
         session,
       };
       opened.push(fake);
-      const stub = {
+      const { api: stub, standIn } = coreStandIn({
         authenticate: async () => {
           await (typeof answer === "object" ? answer.held : undefined);
           if (answer === "down") {
@@ -162,16 +179,15 @@ const tab = (answers: Answer[]) => {
         [Symbol.dispose]: () => {
           fake.disposed = true;
         },
-      };
-      // SAFETY: a stand-in for the parts of core's API the connection uses.
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      return stub as never;
+      });
+      return stub;
     },
     watchPage: (onBack, onOffline) => {
       back = onBack;
       offline = onOffline;
     },
     clock: { now: () => Date.now(), visible: () => page.visible },
+    signedOut: (api) => signedOut.has(api),
     checkHost: async () => {
       const said = Promise.withResolvers<HostCheck>();
       setTimeout(() => {
@@ -403,6 +419,21 @@ describe("the tab's one connection to core", () => {
     await expect(refusal(frame.link.session())).resolves.toBe(
       "auth.unauthenticated"
     );
+  });
+
+  it("stops every frame and ends the page the moment core closes the connection as signed out, connecting no more", async () => {
+    const { core, opened, ended } = tab([one]);
+    await core.session();
+    const frame = frameOn(core);
+
+    opened[0]?.endSession();
+
+    expect({ told: frame.told, ended, opened: opened.length }).toStrictEqual({
+      told: ["signed-out"],
+      ended: ["page reloads"],
+      opened: 1,
+    });
+    await expect(refusal(core.session())).resolves.toBe("auth.unauthenticated");
   });
 
   it("tells every frame, and still reloads, when stopping one of them throws", async () => {
@@ -643,6 +674,40 @@ describe("the tab's one connection to core", () => {
         reach: "reachable",
       }
     );
+  });
+
+  it("lets go of a connection it can't even ask whether it still answers as the page comes back, and connects again, with nothing left unhandled", async () => {
+    const { core, opened, comeBack } = tab([one]);
+    await core.session();
+    vi.spyOn(Math, "random").mockReturnValue(1);
+    const unhandled: unknown[] = [];
+    const note = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", note);
+    onTestFinished(() => {
+      process.off("unhandledRejection", note);
+    });
+    opened[0]?.losePing();
+
+    comeBack();
+    await vi.advanceTimersByTimeAsync(0);
+    const lookedAt = { disposed: opened[0]?.disposed, reach: core.reach };
+    // Connected again after its first pause.
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect({
+      lookedAt,
+      opened: opened.length,
+      reach: core.reach,
+      unhandled,
+    }).toStrictEqual({
+      lookedAt: { disposed: true, reach: "unreachable" },
+      opened: 2,
+      reach: "reachable",
+      unhandled: [],
+    });
+    await expect(core.session()).resolves.toBe(opened[1]?.session);
   });
 
   it("tries at once when the page comes back, once per pause however often it does", async () => {

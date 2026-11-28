@@ -79,9 +79,10 @@ import type { Took, TranscriptionSessionNote } from "./store.ts";
 //   but `start` is read until it.
 // - Keep listening once that no longer holds (GRA-361, L7, L8): the link
 //   and its session, or the session of whoever is signed in, is checked
-//   again every `sessionRecheckMs` while the socket is open, as `/rpc`'s
-//   connections are, and a socket ends once it fails, or once the check
-//   can't be made.
+//   again every `sessionRecheckMs` while the socket is open (it carries
+//   audio all the while, so it is always in use, as a `/rpc` connection
+//   is while it is asked or sent something), and a socket ends once it
+//   fails, or once the check can't be made.
 // - Lend someone's cookie to another site: browsers send cookies with
 //   any WebSocket upgrade, so the upgrade must come from the deployment's
 //   own origin (`isOwnOrigin`), as `/rpc`'s.

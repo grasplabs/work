@@ -11,6 +11,7 @@ import {
   outcome,
   signedIn,
   signedInApi,
+  untilConnected,
   whoami,
 } from "./sign-in.ts";
 
@@ -91,15 +92,14 @@ describe("a person's own sessions", { timeout: 60_000 }, () => {
     );
   });
 
-  it("end one, which closes its open connections within seconds and is audited, leaving this one signed in", async () => {
+  it("end one, which closes its open connections at once and is audited, leaving this one signed in", async () => {
     const { me, otherBrowser, elsewhere } = await onTwoBrowsers();
     const there = await openRpc(otherBrowser);
-    const thereApi = there.core.authenticate();
+    await untilConnected(me.userId, 2);
 
     const audited = await auditedDuring(async () => {
       await expect(me.api.sessions.end(elsewhere.id)).resolves.toBe("ended");
     });
-    using _clock = letSessionRecheckPass();
 
     expect(audited).toStrictEqual([
       expect.objectContaining({
@@ -108,10 +108,11 @@ describe("a person's own sessions", { timeout: 60_000 }, () => {
         target: { type: "session", id: elsewhere.id },
       }),
     ]);
-    await expect(outcome(thereApi.whoami())).resolves.toBe(
+    // Told by the person's object: the clock never moved on.
+    await expect(there.closed).resolves.toBe(sessionEndedCloseCode);
+    await expect(outcome(whoami(otherBrowser))).resolves.toBe(
       "auth.unauthenticated"
     );
-    await expect(there.closed).resolves.toBe(sessionEndedCloseCode);
     await expect(me.api.sessions.list()).resolves.toStrictEqual([
       expect.objectContaining({ current: true }),
     ]);

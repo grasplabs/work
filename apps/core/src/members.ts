@@ -76,6 +76,7 @@ import { directoryPlacementOf } from "./directory-placement.ts";
 import { directoryKinds } from "./directory-ties.ts";
 import { emailHashOf, erasedAddress } from "./erased-people.ts";
 import { guestsOf, inviteGuest } from "./guest-members.ts";
+import { identityChanged } from "./identity-changes.ts";
 import { teamsWithMembers } from "./organization-teams.ts";
 import {
   erasePerson,
@@ -495,6 +496,7 @@ const removeMember = async (
     if (!(removed || (await isRemoved(env, target)))) {
       throw refusal(by, roleErrors.create("role.forbidden"));
     }
+    identityChanged(env, [target]);
     await tellKept(env, kept);
   } else if (!(await isRemoved(env, target))) {
     throw refusal(by, memberErrors.create("member.not_found"));
@@ -536,9 +538,13 @@ const revokeMemberSessions = async (
     ),
   ]);
   // Nothing ended: they had no session, or the admin no longer is one.
-  if (ended.length === 0 && !(await stillAdmin(env, by.userId))) {
-    throw refusal(by, roleErrors.create("role.forbidden"));
+  if (ended.length === 0) {
+    if (!(await stillAdmin(env, by.userId))) {
+      throw refusal(by, roleErrors.create("role.forbidden"));
+    }
+    return;
   }
+  identityChanged(env, [target]);
 };
 
 /**
@@ -679,6 +685,7 @@ const setMemberRole = async (
     revocationsOf(db, reached, [target.data], storedEvent(event.id)),
   ]);
   if (changed) {
+    identityChanged(env, [target.data]);
     await tellKept(env, kept);
     return;
   }

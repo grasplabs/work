@@ -63,6 +63,7 @@ import {
   isErasedSubject,
   subjectsOf,
 } from "../erased-people.ts";
+import { identityChanged } from "../identity-changes.ts";
 import { mayComeIn, memberMayBeIn, staffMayStay } from "../onboarding/gate.ts";
 import { onboardingStore } from "../onboarding/store.ts";
 import { keepSignInAddress } from "../source-readers.ts";
@@ -1156,6 +1157,15 @@ const refuseUnlessGuest = async (
   }
 };
 
+/** Who is in team `teamId` now. */
+const teamMemberIds = async (env: Env, teamId: string): Promise<string[]> => {
+  const rows = await drizzle(env.DB)
+    .select({ userId: teamMembers.userId })
+    .from(teamMembers)
+    .where(eq(teamMembers.teamId, teamId));
+  return rows.map(({ userId }) => userId);
+};
+
 const createAuth = (
   env: Env,
   config: SignInConfig,
@@ -1163,6 +1173,8 @@ const createAuth = (
   ssoOf: typeof sso
 ) => {
   const db = drizzle(env.DB);
+  /** Who was in each team being deleted, read before it goes (`beforeDeleteTeam`). */
+  const leavingTeam = new Map<string, string[]>();
   // Guests' one way in (guest-codes.ts): never a member's, never a user
   // made. Codes are kept hashed, and mailed by core alone.
   const codes = emailOTP({
@@ -1360,6 +1372,16 @@ const createAuth = (
             }
           },
         },
+        // Signing out (and any other session Better Auth ends): the open
+        // connections of that person read their sessions again now, so
+        // the tab signed out of closes in their other tabs too
+        // (identity-changes.ts).
+        delete: {
+          // oxlint-disable-next-line require-await
+          after: async (session) => {
+            identityChanged(env, [session.userId]);
+          },
+        },
       },
     },
     hooks: {
@@ -1462,12 +1484,21 @@ const createAuth = (
               false
             );
           },
+          // Their teams are part of who they are: their open connections
+          // answer with the new ones from the next call (identity-changes.ts).
+          // oxlint-disable-next-line require-await
+          afterAddTeamMember: async ({ teamMember }) => {
+            identityChanged(env, [teamMember.userId]);
+          },
           afterRemoveTeamMember: async ({ teamMember }) => {
+            identityChanged(env, [teamMember.userId]);
             await teamAccessMayHaveDropped(env, teamMember.teamId, [
               teamMember.userId,
             ]);
           },
           afterDeleteTeam: async ({ team }) => {
+            identityChanged(env, leavingTeam.get(team.id) ?? []);
+            leavingTeam.delete(team.id);
             await teamGone(env, team.id);
           },
           // The onboarding's staff list names these same teams (GRA-2055,
@@ -1497,6 +1528,9 @@ const createAuth = (
                 message: "The team is on the staff list.",
               });
             }
+            // Its members' teams change with it: read before it goes,
+            // told once it went (`afterDeleteTeam`, identity-changes.ts).
+            leavingTeam.set(team.id, await teamMemberIds(env, team.id));
           },
           // A name the staff list gives a team it hasn't made yet stays its
           // own (GRA-2055, `refuseNameOnListUnmade`).

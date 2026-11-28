@@ -11,6 +11,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { sessions } from "./db/core/schema.ts";
+import { identityChanged } from "./identity-changes.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -98,7 +99,12 @@ export class SessionsRpc extends CoreRpcTarget implements SessionsApi {
           target: { type: "session", id: parsed.data },
         }),
       ]);
-      return ended.length === 0 ? "not_found" : "ended";
+      if (ended.length === 0) {
+        return "not_found";
+      }
+      // The ended session's open connections close (identity-changes.ts).
+      identityChanged(this.#env, [person.userId]);
+      return "ended";
     });
   }
 }

@@ -32,10 +32,11 @@ import {
 } from "./db/core/schema.ts";
 import { groupStatements, mappedGroupsRead } from "./directory-group-reads.ts";
 import type { GroupRead } from "./directory-group-reads.ts";
-import { suspensionStatements } from "./directory-suspensions.ts";
+import { suspendedAt, suspensionStatements } from "./directory-suspensions.ts";
 import {
   jsonValuesOf,
   keptIn,
+  leftIn,
   placementStatements,
   readPlacementOf,
 } from "./directory-teams.ts";
@@ -47,6 +48,7 @@ import {
 } from "./directory-ties.ts";
 import type { DirectoryKind } from "./directory-ties.ts";
 import { subjectHashOf, subjectKeyVersion } from "./erased-people.ts";
+import { identityChanged } from "./identity-changes.ts";
 import { connectionOf } from "./onboarding/directory.ts";
 
 // The organization's directory, read once a day (GRA-2056, slice 1; the
@@ -520,6 +522,15 @@ const apply = async (
     ),
   ]);
   await tellKept(env, keptIn(results[1 + own.length + placing.revocation]));
+  // Whom the read suspended now: signed out in its batch, their open
+  // connections close (identity-changes.ts). The read landed whatever
+  // comes of this; a connection reads its session within seconds anyway.
+  identityChanged(env, leftIn(results[1 + own.length + placing.leaves]));
+  try {
+    identityChanged(env, await suspendedAt(env, startedAt));
+  } catch (error) {
+    log.warn("directory.suspensions_untold", errorFields(error));
+  }
 };
 
 /**

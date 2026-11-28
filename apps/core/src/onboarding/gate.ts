@@ -26,6 +26,7 @@ import { auditedBatch, outboxed, outboxedIfChanged } from "../audit-outbox.ts";
 import { signInConfig } from "../auth/config.ts";
 import { activeMember } from "../auth/membership-sql.ts";
 import { onboardingGate, sessions, users } from "../db/core/schema.ts";
+import { identityChanged } from "../identity-changes.ts";
 import { closesOn } from "./rules.ts";
 import { onboardingStore } from "./store.ts";
 
@@ -306,6 +307,20 @@ const staffUntil = (
     : staff.until;
 };
 
+/**
+ * When a staff session's access ends by itself, by the deployment's
+ * config (`staffUntil`): the admin's window, or 7 days after Grasp's go
+ * for the onboarding scope. Undefined without staff access.
+ */
+export const staffEndsAt = async (env: Env): Promise<number | undefined> => {
+  const staff = signInConfig(env)?.staff;
+  if (staff === undefined) {
+    return undefined;
+  }
+  const { openedAt } = await stored(env);
+  return Date.parse(staffUntil(staff, openedAt));
+};
+
 /** The gate, with how much Grasp knows by `view` of the onboarding. */
 export const gateView = async (
   env: Env,
@@ -379,7 +394,7 @@ export const closeGate = async (
         ? isAdminMember
         : or(inArray(sql`lower(${users.email})`, config.admins), isAdminMember)
     );
-  await auditedBatch(env, db, [
+  const results = await auditedBatch(env, db, [
     db
       .insert(onboardingGate)
       .values({ id: gateRow, closedAt: now, threshold })
@@ -398,8 +413,13 @@ export const closeGate = async (
       .delete(sessions)
       .where(
         and(eq(sessions.staff, false), not(inArray(sessions.userId, admins)))
-      ),
+      )
+      .returning({ userId: sessions.userId }),
   ]);
+  identityChanged(
+    env,
+    results[2].map(({ userId }) => userId)
+  );
 };
 
 /**
@@ -415,7 +435,7 @@ export const endStaffAccess = async (
   const db = drizzle(env.DB);
   const now = new Date();
   const { threshold } = await stored(env);
-  await auditedBatch(env, db, [
+  const [, ended] = await auditedBatch(env, db, [
     db
       .insert(onboardingGate)
       .values({ id: gateRow, closedAt: null, threshold, staffEndedAt: now })
@@ -423,7 +443,10 @@ export const endStaffAccess = async (
         target: onboardingGate.id,
         set: { staffEndedAt: now },
       }),
-    db.delete(sessions).where(eq(sessions.staff, true)),
+    db
+      .delete(sessions)
+      .where(eq(sessions.staff, true))
+      .returning({ userId: sessions.userId }),
     outboxed(db, {
       actor: by,
       action: "onboarding.staff_access.ended",
@@ -431,6 +454,10 @@ export const endStaffAccess = async (
       detail: {},
     }),
   ]);
+  identityChanged(
+    env,
+    ended.map(({ userId }) => userId)
+  );
 };
 
 /**
@@ -452,7 +479,7 @@ export const openGate = async (
   reason: GateOpening = "go"
 ): Promise<void> => {
   const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
+  const results = await auditedBatch(env, db, [
     db
       .update(onboardingGate)
       // Grasp's go is given once: opening again keeps its time, so closing
@@ -470,8 +497,15 @@ export const openGate = async (
       target: { type: "deployment", id: gateRow },
       detail: { reason },
     }),
-    db.delete(sessions).where(eq(sessions.interview, true)),
+    db
+      .delete(sessions)
+      .where(eq(sessions.interview, true))
+      .returning({ userId: sessions.userId }),
   ]);
+  identityChanged(
+    env,
+    results[2].map(({ userId }) => userId)
+  );
 };
 
 /** Sets how much Grasp has to know before the gate is ready to open. */
