@@ -340,6 +340,13 @@ const sparedBlobs = async (
   if (keys.length === 0) {
     return spared;
   }
+  // The imported ids first, then the blobs they name: an import records a
+  // release's blobs before the release, so one imported by the first read
+  // has its blobs in the second, and one not imported by then is among
+  // the manifests read below. The other order misses a release whose
+  // import ends between the two.
+  const importedRows = await db.select({ id: releases.id }).from(releases);
+  const imported = new Set(importedRows.map(({ id }) => id));
   for (let at = 0; at < keys.length; at += KEYS_PER_LOOKUP) {
     // oxlint-disable-next-line no-await-in-loop -- a page of keys at a time
     const rows = await db
@@ -352,8 +359,6 @@ const sparedBlobs = async (
       spared.add(key);
     }
   }
-  const importedRows = await db.select({ id: releases.id }).from(releases);
-  const imported = new Set(importedRows.map(({ id }) => id));
   const wanted = new Set(keys);
   const listed = await idsUnder(bucket, "");
   for (const id of listed.filter((each) => !imported.has(each))) {
