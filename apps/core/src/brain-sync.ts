@@ -126,9 +126,9 @@ import { erasureBegan, plainPrincipalOf } from "./source-readers.ts";
 
 /**
  * Most subrequests one run of the clock spends on native sync: the same
- * share of Workers' limit per invocation as the shared store's erasures
- * (shared-reads.ts `brainCallsPerTick`, which states the limit and the
- * share). What is left waits for the next run.
+ * as the shared store's erasures (shared-reads.ts `brainCallsPerTick`,
+ * which states the limit the admin sets and how the share is sized).
+ * What is left waits for the next run.
  */
 export const syncCallsPerTick = brainCallsPerTick;
 

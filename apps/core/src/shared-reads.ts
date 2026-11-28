@@ -82,14 +82,15 @@ const hashSchema = z.string().regex(/^[0-9a-f]{64}$/u);
 /**
  * How many calls to the Brain's store one run of the clock spends on
  * erasures at most, one a record. The platform's own limit is Workers'
- * subrequests per invocation: 10,000 by default on Workers Paid, as
- * Cloudflare's Workers limits page states it (checked 17 November 2026;
- * D1 queries count too; on-prem workerd has none). Erasures take a tenth
- * of it, and native sync another tenth (brain-sync.ts); the other 8,000
- * are left for the clock's other tasks in the same invocation (the audit
+ * subrequests per invocation (D1 queries count too; on-prem workerd has
+ * none): the admin sets 1,000,000 on every client upload (the admin's
+ * deploy/upload.ts `workerLimits`), where Cloudflare's default on Workers
+ * Paid is 10,000. The shares here stay sized to that default, a tenth for
+ * erasures and another for native sync (brain-sync.ts), so one run of the
+ * clock does as much work as before and the room the raised limit gives
+ * is left to the clock's other tasks in the same invocation (the audit
  * drain, the Brain's work queue and hand-overs, the onboarding's and the
- * uploads' owed work), which is an estimate, not a measurement: each
- * takes a few dozen calls a tick today. Every erasure
+ * uploads' owed work), each a few dozen calls a tick today. Every erasure
  * under way shares it (`completeOwedErasures`); what is left is erased by
  * the next run, so any number is erased in the end.
  */
