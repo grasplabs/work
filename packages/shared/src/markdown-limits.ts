@@ -17,11 +17,12 @@
  *   Past it, even ordinary Markdown takes more than a second: what it
  *   draws grows with it.
  * - `delimiters`: everything in the text that can delimit inline Markdown:
- *   `*`, `_`, `~` and `` ` ``, and each `](` (a link's address) and `[^`
- *   (a footnote). A delimiter whose neighbours both are blanks (`2 * 3`, a
- *   list's bullet) can't open or close anything, nor can a `_` inside a
- *   word (`snake_case`): those don't count. Unclosed delimiters are
- *   rescanned, in quadratic time, and nested ones overflow the stack.
+ *   `*`, `_`, `~`, `` ` `` and every `[` (a link, an image, a reference or
+ *   a footnote, closed or not). A `*`, `_` or `~` whose neighbours both
+ *   are blanks (`2 * 3`, a list's bullet) can't open or close anything,
+ *   nor can a `_` inside a word (`snake_case`): those don't count.
+ *   Unclosed delimiters and brackets are rescanned, in quadratic time, and
+ *   nested ones overflow the stack.
  * - `footnotes`: each `[^`, again on its own: footnote definitions over
  *   indented lines are quadratic in micromark at a fraction of the
  *   delimiters.
@@ -79,11 +80,11 @@ export const withinMarkdownLimits = (text: string): boolean => {
     const character = text.charAt(index);
     const before = text[index - 1] ?? " ";
     const after = text[index + 1] ?? " ";
-    if (character === "[" && after === "^") {
-      footnotes += 1;
+    if (character === "[") {
       delimiters += 1;
-    } else if (character === "]" && after === "(") {
-      delimiters += 1;
+      if (after === "^") {
+        footnotes += 1;
+      }
     } else if (character === "`") {
       delimiters += 1;
     } else if (

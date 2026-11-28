@@ -37,7 +37,7 @@ import type { ExtraProps, StreamdownProps } from "streamdown";
 //   of its App), so Streamdown's link, a button whose dialog opens or
 //   copies the address, would do nothing.
 // - Text past @grasp-os/shared's `markdownLimits` (very large or
-//   pathological: deep nesting, thousands of emphasis, code or link marks)
+//   pathological: deep nesting, thousands of emphasis, code or bracket marks)
 //   shows as plain text, as does text Streamdown throws on: untrusted
 //   text must not freeze or crash the page for whoever opens it.
 // A page can't switch the first two off: the props that would replace or widen

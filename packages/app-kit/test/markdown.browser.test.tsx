@@ -349,6 +349,11 @@ describe("the kit's Markdown, in an App page's frame", () => {
       `${"[^a]:\n    ".repeat(2000)}x`,
     ],
     ["nested footnote definitions", "[^a]: [^b]: ".repeat(3000)],
+    ["unmatched brackets", `${"[".repeat(29_000)}${"]".repeat(29_000)}[b]`],
+    ["unmatched image brackets", `${"![".repeat(20_000)}${"]".repeat(20_000)}`],
+    ["reference-style brackets", "[a][b]".repeat(9950)],
+    ["nested brackets", `${"[".repeat(20_000)}${"]".repeat(20_000)}`],
+    ["brackets closed by words", `${"[".repeat(20_000)}${"a]".repeat(10_000)}`],
     ["nested lists", `${"- ".repeat(10_000)}deep`],
     [
       "lists nested by indentation",
@@ -456,6 +461,12 @@ const overdue_items = invoices.filter((inv) => inv.due_date < today);
       `\`\`\`js\n${Array.from({ length: 150 }, (_, line) => `const pattern_${line} = /^(?:[a-z_]\\w*|\\d+)\\s*(?:\\*\\*|[*+?])?.*?$/u;`).join("\n")}\n\`\`\``,
       "[data-slot=code-block-line]",
       150,
+    ],
+    [
+      "300 lines of Python heavy on indexing and list literals",
+      `\`\`\`python\n${Array.from({ length: 300 }, (_, line) => `grid[row][col] = [values[i], weights[i][0], [x[k] for k in keys[${line}]]]`).join("\n")}\n\`\`\``,
+      "[data-slot=code-block-line]",
+      300,
     ],
     [
       "arithmetic with many `*`",

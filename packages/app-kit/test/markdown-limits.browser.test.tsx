@@ -68,6 +68,11 @@ const pairs = [
   ["[^a]:\n    ", ""],
   ["[^a]: ", ""],
   ["`a", ""],
+  ["[", "]"],
+  ["![", "]"],
+  ["[a][b]", ""],
+  ["][", ""],
+  ["[", "a]"],
 ] as const;
 /** What may, or only seems to, end a block or a line. */
 const separators = [

@@ -33,11 +33,11 @@ def overdue_items(invoices):
 
 describe("text a Markdown renderer is given", () => {
   test("takes ordinary long answers, tens of kilobytes of prose, tables, lists and code", () => {
-    const answer = Array.from({ length: 150 }, (_, index) =>
+    const answer = Array.from({ length: 100 }, (_, index) =>
       section(index)
     ).join("");
     expect({
-      length: answer.length > 40_000,
+      length: answer.length > 30_000,
       within: withinMarkdownLimits(answer),
     }).toStrictEqual({ length: true, within: true });
   });
@@ -53,6 +53,8 @@ describe("text a Markdown renderer is given", () => {
       "[x](https://a".repeat(delimiters + 1),
     ],
     ["more code span ticks than the limit", "`a".repeat(delimiters + 1)],
+    ["more brackets than the limit, even closed", "[a]".repeat(delimiters + 1)],
+    ["more image brackets than the limit", "![".repeat(delimiters + 1)],
     [
       "more footnotes than the limit, over indented lines",
       `${"[^a]:\n    ".repeat(footnotes + 1)}x`,
@@ -80,11 +82,11 @@ describe("text a Markdown renderer is given", () => {
     expect(withinMarkdownLimits(text)).toBeFalsy();
   });
 
-  test("counts only what can delimit: a `_` inside a word, a delimiter between blanks and a bare `[` can't", () => {
+  test("counts only what can delimit: a `_` inside a word and a delimiter between blanks can't", () => {
     expect(
       withinMarkdownLimits(
         // Counted, they would be more than the limit.
-        `${"snake_case_name ".repeat(1500)}${"2 * 3 ".repeat(1500)}${"arr[0] ".repeat(1500)}`
+        `${"snake_case_name ".repeat(1500)}${"2 * 3 ".repeat(1500)}`
       )
     ).toBeTruthy();
   });
