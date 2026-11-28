@@ -22,11 +22,11 @@ CREATE TABLE \`notes\` (
 );`;
 
 /** The data changes and other errors of `next`, a migration a branch adds. */
-const judged = (next: string): string[] =>
+const judged = (next: string, before = base): string[] =>
   checkDatabase(
     "db",
     [
-      { idx: 0, tag: "0000_base", sql: base },
+      { idx: 0, tag: "0000_base", sql: before },
       { idx: 1, tag: "0001_next", sql: next },
     ],
     {
@@ -153,6 +153,30 @@ UPDATE \`chats\` SET \`summary\` = \`title\` || ' by ' || \`owner_id\`;`)
         "CREATE TABLE `chat_regions` AS SELECT json_set(`region`.`value`, '$.ok', 1) AS `value` FROM `chats`, json_each(`chats`.`title`) AS `region`;"
       )
     ).toStrictEqual([]);
+  });
+
+  it("refuses losing one of two equal rows of a table without a primary key", () => {
+    expect(
+      judged(
+        `CREATE TABLE \`__new_marks\` (\`c\` text NOT NULL);
+INSERT INTO \`__new_marks\` SELECT DISTINCT \`c\` FROM \`marks\`;
+DROP TABLE \`marks\`;
+ALTER TABLE \`__new_marks\` RENAME TO \`marks\`;`,
+        "CREATE TABLE `marks` (`c` text NOT NULL, CONSTRAINT \"cs\" CHECK(`c` IN ('x', 'y')));"
+      )
+    ).toStrictEqual(["delete rows marks (1 of 3 rows gone)"]);
+  });
+
+  it("keeps a table that takes only JSON strings when another needs a list", () => {
+    expect(
+      judged(
+        `CREATE TABLE \`regions\` AS SELECT json_set(\`region\`.\`value\`, '$.ok', 1) AS \`value\` FROM \`chats\`, json_each(\`chats\`.\`title\`) AS \`region\`;--> statement-breakpoint
+DELETE FROM \`labels\`;`,
+        `${base}
+--> statement-breakpoint
+CREATE TABLE \`labels\` (\`id\` text PRIMARY KEY NOT NULL, \`name\` text NOT NULL, CONSTRAINT "plain" CHECK(json_type(\`name\`) = 'text'));`
+      )
+    ).toStrictEqual(["delete rows labels (3 of 3 rows gone)"]);
   });
 
   it("passes a change its marker names, and refuses a marker for no change", () => {

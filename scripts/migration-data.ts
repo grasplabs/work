@@ -345,7 +345,14 @@ export const seed = (
     const done: Row[] = [];
     let refusal: string | undefined;
     for (let row = 0; row < ROWS; row += 1) {
-      for (const attempt of attempts(table, row, written, tables, style)) {
+      // Text of another shape falls back to a JSON string, so a table that
+      // takes only strings is not left empty for the shape.
+      for (const attempt of [
+        ...attempts(table, row, written, tables, style),
+        ...(style === "string"
+          ? []
+          : attempts(table, row, written, tables, "string")),
+      ]) {
         try {
           insert.run(...table.columns.map(({ name }) => attempt[name] ?? null));
           done.push(attempt);
@@ -436,14 +443,17 @@ export const dataChanges = (
     const findBy = key.length > 0 ? key : kept;
     let lost = 0;
     const changed = new Map<string, { rows: number; detail: string }>();
+    // Each row found again once: of two equal rows, one may be lost.
+    const unmatched = new Set(now.rows);
     for (const old of oldRows) {
-      const match = now.rows.find((row) =>
+      const match = [...unmatched].find((row) =>
         findBy.every((column) => same(row[column], old[column]))
       );
       if (match === undefined) {
         lost += 1;
         continue;
       }
+      unmatched.delete(match);
       for (const column of kept) {
         if (!same(match[column], old[column])) {
           const moved = kept.find(

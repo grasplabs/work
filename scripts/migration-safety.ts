@@ -670,7 +670,7 @@ const replayOnRows = (
   migrations: readonly Migration[],
   added: number,
   style: TextStyle
-): Map<number, Change[] | string> => {
+): { results: Map<number, Change[] | string>; skipped: Skipped[] } => {
   const results = new Map<number, Change[] | string>();
   const db = new DatabaseSync(":memory:");
   try {
@@ -680,7 +680,7 @@ const replayOnRows = (
       db.exec(asDeployed(sql));
     }
     db.exec("PRAGMA foreign_keys = ON");
-    seed(db, style);
+    const { skipped } = seed(db, style);
     for (const { idx, sql } of migrations.filter(
       (migration) => migration.idx >= added
     )) {
@@ -695,39 +695,50 @@ const replayOnRows = (
       }
       results.set(idx, dataChanges(before, db));
     }
+    return { results, skipped };
   } finally {
     db.close();
   }
-  return results;
 };
+
+/** Whether every migration of a replay applied to its rows. */
+const appliesToRows = ({
+  results,
+}: {
+  results: ReadonlyMap<number, Change[] | string>;
+}): boolean =>
+  ![...results.values()].some((result) => typeof result === "string");
 
 /**
  * The database as main has it (`migrations` before `added`), with a few
  * rows in every table, and what the branch's migrations do to them: what
- * each changes of the rows before it, or why it does not apply to them.
+ * each changes of the rows before it, or why it does not apply to them,
+ * and the tables those rows left out that JSON string text would not.
  */
 const dataOfAdded = (
   migrations: readonly Migration[],
   added: number
-): Map<number, Change[] | string> => {
-  const none = new Map<number, Change[] | string>();
+): { results: Map<number, Change[] | string>; leftOut: Skipped[] } => {
   if (!migrations.some(({ idx }) => idx >= added)) {
-    return none;
+    return { results: new Map(), leftOut: [] };
   }
   // Text is written as a JSON string first; a migration that reads it as
   // an object or a list gets those, so it is not refused for the rows'
   // shape alone.
-  const tries = TEXT_STYLES.map((style) =>
+  const [first, ...others] = TEXT_STYLES.map((style) =>
     replayOnRows(migrations, added, style)
   );
-  return (
-    tries.find(
-      (results) =>
-        ![...results.values()].some((result) => typeof result === "string")
-    ) ??
-    tries[0] ??
-    none
-  );
+  if (first === undefined) {
+    return { results: new Map(), leftOut: [] };
+  }
+  const chosen = appliesToRows(first)
+    ? first
+    : (others.find(appliesToRows) ?? first);
+  const skippedFirst = new Set(first.skipped.map(({ table }) => table));
+  return {
+    results: chosen.results,
+    leftOut: chosen.skipped.filter(({ table }) => !skippedFirst.has(table)),
+  };
 };
 
 /**
@@ -754,7 +765,12 @@ export const checkDatabase = (
   { from, now, indexedBy, added }: Judging
 ): { errors: string[]; skipped: Skipped[] } => {
   const errors: string[] = [];
-  const data = dataOfAdded(migrations, added);
+  const { results: data, leftOut } = dataOfAdded(migrations, added);
+  if (leftOut.length > 0) {
+    errors.push(
+      `${dir}: the branch's migrations apply only to rows whose text is JSON of another shape, which ${leftOut.map(({ table, reason }) => `${table} (${reason})`).join(", ")} refuse: what they do to those tables is not checked.`
+    );
+  }
   const db = new DatabaseSync(":memory:");
   try {
     for (const { idx, tag, sql } of migrations) {
