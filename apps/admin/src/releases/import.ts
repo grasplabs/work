@@ -174,7 +174,7 @@ export const MAX_BLOB_BYTES = 25 * 1024 * 1024;
  * hashing a static file holds its base64 too (a third more), so what's
  * read stays well inside the Worker's 128 MB.
  */
-const READ_BYTES_AT_ONCE = MAX_BLOB_BYTES;
+export const READ_BYTES_AT_ONCE = MAX_BLOB_BYTES;
 
 /**
  * Blobs checked a batch at a time, in the manifest's order: each batch's
@@ -345,7 +345,7 @@ const asError = (error: unknown): Error =>
  * together, the others in the order they came as weight frees up; a task
  * heavier than that alone.
  */
-const gate = (capacity: number) => {
+export const gate = (capacity: number) => {
   let free = capacity;
   const waiting: { weight: number; wake: () => void }[] = [];
   return async <T>(bytes: number, task: () => Promise<T>): Promise<T> => {

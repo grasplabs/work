@@ -351,44 +351,53 @@ describe("CI's publish through the staging admin", () => {
     });
   });
 
-  it("never deletes a blob an imported release names on a new manifest's word, and gives that manifest no id", async () => {
-    // A module of its own, which an imported release names.
-    const release = await buildRelease(
-      {
-        notes: "feat(core): kept",
-        core: `export default { kept: "${crypto.randomUUID()}" };`,
-      },
-      "dev-build"
-    );
-    await putBlobs(release);
-    const module = release.manifest.workers.core?.modules[0];
-    await db
-      .insert(releaseBlobs)
-      .values({ releaseId: "26.10.3", blobKey: module?.r2Key ?? "" });
-    // A manifest of a commit CI may publish, naming that module at another
-    // size: a token for main's commit doesn't vouch for what it names.
-    const lying = {
-      ...release.manifest,
-      workers: {
-        ...release.manifest.workers,
-        core: {
-          ...release.manifest.workers.core,
-          modules: [{ ...module, size: (module?.size ?? 0) + 1 }],
+  it.each(["imported", "published, not imported yet"])(
+    "never deletes a blob a release %s names on a new manifest's word, and gives that manifest no id",
+    async (state) => {
+      // A module of its own, which a release names.
+      const release = await buildRelease(
+        {
+          notes: "feat(core): kept",
+          core: `export default { kept: "${crypto.randomUUID()}" };`,
         },
-      },
-    };
-    const status = await statusOf(
-      "start",
-      JSON.stringify(lying),
-      await githubToken(publishClaims(release.manifest.commit))
-    );
-    const stored = await env.RELEASES.head(module?.r2Key ?? "");
+        "dev-build"
+      );
+      await putBlobs(release);
+      const module = release.manifest.workers.core?.modules[0];
+      if (state === "imported") {
+        await db
+          .insert(releaseBlobs)
+          .values({ releaseId: "26.10.3", blobKey: module?.r2Key ?? "" });
+      } else {
+        // Its manifest is up, and its import hasn't started.
+        const id = `26.09.${String(Math.floor(Math.random() * 90_000) + 10_000)}`;
+        await env.RELEASES.put(manifestKey(id), stamped(release, id));
+      }
+      // A manifest of a commit CI may publish, naming that module at another
+      // size: a token for main's commit doesn't vouch for what it names.
+      const lying = {
+        ...release.manifest,
+        workers: {
+          ...release.manifest.workers,
+          core: {
+            ...release.manifest.workers.core,
+            modules: [{ ...module, size: (module?.size ?? 0) + 1 }],
+          },
+        },
+      };
+      const status = await statusOf(
+        "start",
+        JSON.stringify(lying),
+        await githubToken(publishClaims(release.manifest.commit))
+      );
+      const stored = await env.RELEASES.head(module?.r2Key ?? "");
 
-    expect({ status, kept: stored?.size }).toStrictEqual({
-      status: 409,
-      kept: module?.size,
-    });
-  });
+      expect({ status, kept: stored?.size }).toStrictEqual({
+        status: 409,
+        kept: module?.size,
+      });
+    }
+  );
 
   it("takes the manifest stamped with the commit's id as CI signed it, stores the signature, audited, and gives the manifest's link carrying its SHA-256", async () => {
     const release = await built("feat(core): signed");
@@ -586,6 +595,41 @@ describe("CI's publish through the staging admin", () => {
       linkAgain: true,
       signed: null,
     });
+  });
+
+  it("refuses at finish, by its head and before reading it, a static file a leaked link put larger than the manifest says, and deletes it", async () => {
+    const release = await buildRelease(
+      {
+        notes: "feat(core): oversized",
+        assets: { "/index.html": `<html>${crypto.randomUUID()}</html>` },
+      },
+      "dev-build"
+    );
+    const plan = await start(release);
+    const id = "id" in plan ? plan.id : "";
+    await putBlobs(release);
+    const [asset] = Object.values(release.manifest.assets);
+    // Far more than the manifest names: a leaked link takes up to 5 GiB.
+    await env.RELEASES.put(asset?.r2Key ?? "", new Uint8Array(1024 * 1024));
+    const manifest = stamped(release, id);
+    const reads: string[] = [];
+    const get = env.RELEASES.get.bind(env.RELEASES);
+    vi.spyOn(env.RELEASES, "get").mockImplementation(async (key, options) => {
+      reads.push(key);
+      return await get(key, options);
+    });
+    const status = await statusOf(
+      "finish",
+      manifest,
+      await githubToken(publishClaims(release.manifest.commit)),
+      await signed(manifest)
+    );
+
+    expect({
+      status,
+      read: reads.includes(asset?.r2Key ?? ""),
+      deleted: (await env.RELEASES.head(asset?.r2Key ?? "")) === null,
+    }).toStrictEqual({ status: 409, read: false, deleted: true });
   });
 
   it("gives no manifest link once a model file the release names is gone since start, as retention may delete one", async () => {

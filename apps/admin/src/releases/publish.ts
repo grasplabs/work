@@ -71,6 +71,7 @@ import {
 } from "@grasp-os/shared/names";
 import {
   blobsOf,
+  blobSize,
   checkBlob,
   checksOf,
   commitKey,
@@ -99,12 +100,19 @@ import { z } from "zod";
 
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
-import { auditEvents, releaseBlobs } from "../db/schema.ts";
+import { auditEvents, releaseBlobs, releases } from "../db/schema.ts";
 import { optionalStoreSecret } from "../deploy/context.ts";
 import { boundedBytes } from "../request-body.ts";
 import { publishRunOf } from "./github-oidc.ts";
 import type { PublishRun } from "./github-oidc.ts";
-import { checkedBefore, MAX_MANIFEST_BYTES } from "./import.ts";
+import {
+  checkedBefore,
+  gate,
+  MAX_BLOB_BYTES,
+  MAX_BLOBS_PER_RELEASE,
+  MAX_MANIFEST_BYTES,
+  READ_BYTES_AT_ONCE,
+} from "./import.ts";
 
 /** Where CI publishes. */
 export const releasePublishPath = "/release-publish";
@@ -152,12 +160,21 @@ const parsedAs = <T>(schema: z.ZodType<T>, text: string): T | undefined => {
   }
 };
 
-/** The manifest `bytes` hold, or undefined for anything else. */
+/**
+ * The manifest `bytes` hold, or undefined for anything else: one whose
+ * blobs aren't at their content addresses, or more or larger than the
+ * import reads (`blobsOf`, `MAX_BLOBS_PER_RELEASE`, `MAX_BLOB_BYTES`).
+ */
 const manifestIn = (bytes: Uint8Array): ReleaseManifest | undefined => {
   try {
-    return releaseManifestSchema.parse(
+    const manifest = releaseManifestSchema.parse(
       JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes))
     );
+    const blobs = blobsOf(manifest);
+    return blobs.length <= MAX_BLOBS_PER_RELEASE &&
+      blobs.every((blob) => blobSize(blob) <= MAX_BLOB_BYTES)
+      ? manifest
+      : undefined;
   } catch {
     return undefined;
   }
@@ -230,9 +247,12 @@ const putHeaders = (
   ...(contentType === undefined ? {} : { "content-type": contentType }),
 });
 
-/** Every id with anything under `releases/` this month, by a listing of the month. */
-const monthIds = async (bucket: R2Bucket, now: Date): Promise<string[]> => {
-  const prefix = `releases/${releaseMonthPrefix(now)}`;
+/** Every id with anything under `releases/<idPrefix>`, by a listing. */
+const idsUnder = async (
+  bucket: R2Bucket,
+  idPrefix: string
+): Promise<string[]> => {
+  const prefix = `releases/${idPrefix}`;
   const ids: string[] = [];
   let cursor: string | undefined;
   do {
@@ -251,6 +271,10 @@ const monthIds = async (bucket: R2Bucket, now: Date): Promise<string[]> => {
   } while (cursor !== undefined);
   return ids;
 };
+
+/** Every id with anything under `releases/` this month. */
+const monthIds = async (bucket: R2Bucket, now: Date): Promise<string[]> =>
+  await idsUnder(bucket, releaseMonthPrefix(now));
 
 /**
  * The commit's release as the bucket has it: the id its marker names, and
@@ -299,15 +323,22 @@ const isThisMonths = (id: string, now: Date): boolean =>
 const KEYS_PER_LOOKUP = 50;
 
 /**
- * Of `keys`, those a release the admin imported, or is importing, names
- * (`release_blobs`, src/releases/blobs.ts): blobs a signed release relies
- * on, never deleted here on a new manifest's word.
+ * Of `keys`, those a release relies on, never deleted here on a new
+ * manifest's word: one the admin imported or is importing names
+ * (`release_blobs`, src/releases/blobs.ts), or one a manifest published
+ * under `releases/` but not imported yet names (the minute or so between
+ * its manifest going up and its import starting). Looked for only when
+ * something is about to be deleted, which is rare.
  */
-const namedByReleases = async (
+const sparedBlobs = async (
+  bucket: R2Bucket,
   db: AdminDatabase,
   keys: readonly string[]
 ): Promise<Set<string>> => {
-  const named = new Set<string>();
+  const spared = new Set<string>();
+  if (keys.length === 0) {
+    return spared;
+  }
   for (let at = 0; at < keys.length; at += KEYS_PER_LOOKUP) {
     // oxlint-disable-next-line no-await-in-loop -- a page of keys at a time
     const rows = await db
@@ -317,26 +348,44 @@ const namedByReleases = async (
         inArray(releaseBlobs.blobKey, keys.slice(at, at + KEYS_PER_LOOKUP))
       );
     for (const { key } of rows) {
-      named.add(key);
+      spared.add(key);
     }
   }
-  return named;
+  const importedRows = await db.select({ id: releases.id }).from(releases);
+  const imported = new Set(importedRows.map(({ id }) => id));
+  const wanted = new Set(keys);
+  const listed = await idsUnder(bucket, "");
+  for (const id of listed.filter((each) => !imported.has(each))) {
+    // oxlint-disable-next-line no-await-in-loop -- the few not imported yet
+    const object = await bucket.get(manifestKey(id));
+    // oxlint-disable-next-line no-await-in-loop -- the few not imported yet
+    const bytes = object === null ? undefined : await object.arrayBuffer();
+    const manifest =
+      bytes === undefined ? undefined : manifestIn(new Uint8Array(bytes));
+    for (const { key } of manifest === undefined ? [] : blobsOf(manifest)) {
+      if (wanted.has(key)) {
+        spared.add(key);
+      }
+    }
+  }
+  return spared;
 };
-
-/** Blobs read back at once at finish: the largest is 25 MiB, held with its base64. */
-const READS_AT_ONCE = 2;
 
 /**
  * Why the bucket doesn't hold `manifest`'s blobs as it names them;
- * undefined when it does. Each must be there; and each the import would
- * read whole (one the newest imported release didn't check the same way,
- * `checkedBefore`: whatever this publish's links put, and anything a
- * leaked link or an interrupted run left) is read back and hashed first
- * (`checkBlob`), so no link, nor CI, gets other bytes signed for. One
- * that doesn't match is deleted, so the next start gives a link for it
- * again, and nothing left behind wedges publishing; unless a release the
- * admin imported names it (`namedByReleases`): then the manifest is what's
- * wrong, and the blob stays.
+ * undefined when it does. Each must be there, at its size and, where R2
+ * kept one, its SHA-256, by the head (`storedBlobProblem`), before
+ * anything is read: an object a leaked link put at another size is never
+ * read. Each the import would read whole (one the newest imported release
+ * didn't check the same way, `checkedBefore`: whatever this publish's
+ * links put, and anything a leaked link or an interrupted run left) is
+ * read back and hashed (`checkBlob`), as the import reads: refused unless
+ * still at its size, and at most `READ_BYTES_AT_ONCE` held at once
+ * (`gate`). So no link, nor CI, gets other bytes published. One that
+ * doesn't match is deleted, so the next start gives a link for it again
+ * and nothing left behind wedges publishing; unless a release relies on
+ * it (`sparedBlobs`): then the manifest is what's wrong, and the blob
+ * stays.
  */
 const blobsProblem = async (
   bucket: R2Bucket,
@@ -344,43 +393,65 @@ const blobsProblem = async (
   manifest: ReleaseManifest
 ): Promise<string | undefined> => {
   const before = await checkedBefore(db);
-  const kept = await namedByReleases(
-    db,
-    blobsOf(manifest).map(({ key }) => key)
-  );
   const heads = await mapConcurrently(
     blobsOf(manifest),
     HEADS_AT_ONCE,
-    async (blob) => ({ blob, head: await bucket.head(blob.key) })
+    async (blob) => ({ blob, head: await stored(bucket, blob.key) })
   );
   const missing = heads.find(({ head }) => head === null);
   if (missing !== undefined) {
     return `${missing.blob.key} is missing`;
   }
-  const failures = await mapConcurrently(
-    heads.filter(({ blob }) =>
-      checksOf(blob).some((check) => before.get(blob.key)?.has(check) !== true)
-    ),
-    READS_AT_ONCE,
-    async ({ blob }): Promise<string | undefined> => {
-      const object = await bucket.get(blob.key);
-      const bytes =
-        object === null
-          ? undefined
-          : new Uint8Array(await object.arrayBuffer());
-      let failure: string | undefined;
-      try {
-        await checkBlob(blob, bytes);
-      } catch (error) {
-        failure = error instanceof Error ? error.message : String(error);
+  const whole = gate(READ_BYTES_AT_ONCE);
+  const checks = await mapConcurrently(
+    heads,
+    HEADS_AT_ONCE,
+    async ({
+      blob,
+      head,
+    }): Promise<{ key: string; failure: string } | undefined> => {
+      const seen = storedBlobProblem(blob, head);
+      if (seen !== undefined) {
+        return { key: blob.key, failure: `${blob.key} ${seen}` };
       }
-      if (failure !== undefined && !kept.has(blob.key)) {
-        await bucket.delete(blob.key);
+      if (
+        checksOf(blob).every(
+          (check) => before.get(blob.key)?.has(check) === true
+        )
+      ) {
+        return undefined;
       }
-      return failure;
+      const size = blobSize(blob);
+      return await whole(size, async () => {
+        const object = await bucket.get(blob.key);
+        if (object?.size !== size) {
+          await object?.body.cancel();
+          return { key: blob.key, failure: `${blob.key} isn't at its size` };
+        }
+        let failure: string | undefined;
+        try {
+          await checkBlob(blob, new Uint8Array(await object.arrayBuffer()));
+        } catch (error) {
+          failure = error instanceof Error ? error.message : String(error);
+        }
+        return failure === undefined ? undefined : { key: blob.key, failure };
+      });
     }
   );
-  return failures.find((failure) => failure !== undefined);
+  const failed = checks.filter((check) => check !== undefined);
+  const spared = await sparedBlobs(
+    bucket,
+    db,
+    failed.map(({ key }) => key)
+  );
+  await Promise.all(
+    failed
+      .filter(({ key }) => !spared.has(key))
+      .map(async ({ key }) => {
+        await bucket.delete(key);
+      })
+  );
+  return failed[0]?.failure;
 };
 
 /** `?step=start`: the release's id, and links for the blobs the bucket lacks. */
@@ -422,12 +493,13 @@ const start = async (env: Env, ask: Ask): Promise<Response> => {
   );
   // One stored at another size, or SHA-256, than the manifest names (left
   // by an interrupted run or a leaked link) goes, and gets a link again;
-  // never one a release the admin imported names, on a new manifest's word.
+  // never one a release relies on (`sparedBlobs`), on a new manifest's word.
   const wrong = held.filter(
     ({ blob, head }) =>
       head !== null && storedBlobProblem(blob, head) !== undefined
   );
-  const kept = await namedByReleases(
+  const kept = await sparedBlobs(
+    env.RELEASES,
     adminDatabase(env.DB),
     wrong.map(({ blob }) => blob.key)
   );
@@ -435,7 +507,7 @@ const start = async (env: Env, ask: Ask): Promise<Response> => {
   if (disputed !== undefined) {
     return answer(
       409,
-      `${disputed.blob.key} is an imported release's, and isn't what this manifest says`
+      `${disputed.blob.key} is a published release's, and isn't what this manifest says`
     );
   }
   await Promise.all(
@@ -490,7 +562,8 @@ const finish = async (env: Env, ask: Ask): Promise<Response> => {
   const unsigned = await releaseSignatureProblem(
     bytes,
     ask.signature,
-    releaseSigningKeys
+    releaseSigningKeys,
+    manifest.releaseId
   );
   if (unsigned !== undefined || ask.signature === undefined) {
     return answer(

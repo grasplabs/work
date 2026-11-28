@@ -22,6 +22,13 @@ import { requireEnv, sendWithRetries } from "./bucket-lib.ts";
 
 const HTTP_UNAVAILABLE = 503;
 /**
+ * How long a step's answer may take: start heads every blob and finish
+ * reads back every one the import would read, about 1,200 for a release
+ * nothing before it checked (a cold publish), at most 25 MiB in memory at
+ * once. A try given up on starts over, so it must fit in one.
+ */
+const ANSWER_MS = 10 * 60 * 1000;
+/**
  * While the admin answers 503 after a round of tries (bucket-lib.ts's,
  * a few seconds), it's asked again after `UNAVAILABLE_WAIT_MS`, up to
  * `UNAVAILABLE_ROUNDS` rounds: past the admin's 30 seconds of answering
@@ -106,7 +113,8 @@ export const releasePublisherFromEnv = () => {
     return await sendWithRetries(
       `POST ${url.pathname}?step=${step}`,
       init,
-      async (signal) => await fetch(url, { ...init, signal })
+      async (signal) => await fetch(url, { ...init, signal }),
+      ANSWER_MS
     );
   };
 

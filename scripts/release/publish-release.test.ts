@@ -209,7 +209,8 @@ describe("publishing a release as CI does, through the staging admin", () => {
     const problem = await releaseSignatureProblem(
       body,
       typeof sent === "string" ? Buffer.from(sent, "base64url") : undefined,
-      releaseSigningKeys
+      releaseSigningKeys,
+      releaseId
     );
     if (problem !== undefined) {
       response

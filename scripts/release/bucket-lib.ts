@@ -88,18 +88,20 @@ const backoff = (attempt: number): number =>
  * `send`s a request until it gets an answer that isn't transient or runs
  * out of tries (the policy above), its answer read whole inside each try.
  * `what` names it in the logs; `init` is what it sends, for its time
- * allowance.
+ * allowance, which is at least `leastMs` (for an answer that takes the
+ * other side a while to make).
  */
 export const sendWithRetries = async (
   what: string,
   init: RequestInit | undefined,
-  send: (signal: AbortSignal) => Promise<Response>
+  send: (signal: AbortSignal) => Promise<Response>,
+  leastMs = 0
 ): Promise<Response> => {
   const sent = init?.body instanceof Uint8Array ? init.body.byteLength : 0;
   for (let attempt = 1; ; attempt += 1) {
     const controller = new AbortController();
     const giveUpAfter = (bytes: number): NodeJS.Timeout => {
-      const ms = allowance(bytes);
+      const ms = Math.max(leastMs, allowance(bytes));
       return setTimeout(() => {
         controller.abort(
           new Error(`no answer within ${Math.round(ms / MS_PER_SECOND)} s`)
