@@ -495,26 +495,49 @@ describe("a chat's ChatSession", () => {
     }
   );
 
-  it("tells the chat's agent a note once however often it is sent with its ID, and each note with an ID of its own", async () => {
+  it("tells the chat's agent a held call's decision once, though it is sent again after both objects restarted, and another decision too", async () => {
     const { userId } = await signedInWithRole(idp, "user");
     const asking = await chatOf(userId, says("Noted."));
     const { session } = sessionOf(asking, userId);
-    const told = "A note for this chat alone.";
-    const other = "Another note for it.";
-    // Sent again, as a call that broke on its way back is.
-    await session().note(told, "note-1");
-    await session().note(told, "note-1");
-    await session().note(other, "note-2");
-    await asking.ask("Anything new?");
-    // The turn's request: the one its notes went into.
+    // A stub of its own each time: one to an object that restarted stays
+    // broken.
+    const decide = async (id: string) => {
+      await workspace(env, asking.id).heldDecided(
+        asking.chat.id,
+        userId,
+        { id, action: "mail.send" },
+        "confirmed"
+      );
+    };
+    const held = crypto.randomUUID();
+    const other = crypto.randomUUID();
+    await decide(held);
+    // Both objects restart after the notice was kept, and its decider
+    // sends the decision again, as it does when its call broke
+    // (pending-actions.ts).
+    for (const stub of [session(), workspace(env, asking.id)]) {
+      // oxlint-disable-next-line no-await-in-loop -- one restart after the other
+      await runInDurableObject(stub, (_instance, state) => {
+        state.abort("Restarted by the test");
+      }).catch(() => {
+        // Aborting fails the call that aborted: that is the restart.
+      });
+    }
+    await decide(held);
+    await decide(other);
+    await workspace(env, asking.id).ask(asking.chat.id, {
+      text: "Anything new?",
+      model,
+    });
+    // The turn's request: the one its notices went into.
     const body =
       asking.provider.requests
         .map((request) => JSON.stringify(request.body))
-        .find((sent) => sent.includes(told)) ?? "";
+        .find((sent) => sent.includes(held)) ?? "";
     expect({
-      told: body.split(told).length - 1,
-      other: body.split(other).length - 1,
-    }).toStrictEqual({ told: 1, other: 1 });
+      held: body.split(`pending ID ${held}`).length - 1,
+      other: body.split(`pending ID ${other}`).length - 1,
+    }).toStrictEqual({ held: 1, other: 1 });
   });
 
   it("ends a turn whose step pi parked after restarts cut it off, so the chat can be deleted and its person erased", async () => {
