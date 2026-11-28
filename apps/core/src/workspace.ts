@@ -2540,7 +2540,8 @@ export class Workspace extends DurableObject<Env> {
    * for the chat's person: the same request still waiting in the chat is
    * the same hold, so a call made again (a step a restart ran again) is
    * held once. The call that holds it records it (`agent.call`, with the
-   * hold's ID). Refused for a chat that isn't `personId`'s.
+   * hold's ID). Refused for a chat that isn't `personId`'s, and while its
+   * model may still have what an erasure took (`#erasedUnseen`).
    */
   async holdAppCall(
     chatId: unknown,
@@ -2550,6 +2551,7 @@ export class Workspace extends DurableObject<Env> {
   ): Promise<HeldAppCallRow> {
     const chat = this.#ownChat(chatId, personId);
     await this.#lapseHeldAppCalls(chat.id, now);
+    await this.#erasedUnseen(chat);
     const kept = this.ctx.storage.transactionSync(() => {
       const waiting = this.#db
         .select()
@@ -5243,6 +5245,42 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * Refuses holding a write in chat `chat` while its model may still have
+   * what an erasure took before it: a run of the chat resting on an erased
+   * source that no check before a model request withheld yet
+   * (`#withheldRuns` marks it), whose result the request may quote
+   * (`agent.history_revoked`); or while that can't be asked
+   * (`agent.erasure_unchecked`). A write held before the erasure is
+   * withdrawn once it is found (`#dropErasedCopies`).
+   */
+  async #erasedUnseen(chat: Chat): Promise<void> {
+    const unmarked = this.#db
+      .selectDistinct({ sourceId: chatRunSources.sourceId })
+      .from(chatRunSources)
+      .where(
+        and(
+          eq(chatRunSources.chatId, chat.id),
+          isNull(chatRunSources.withheldAt)
+        )
+      )
+      .all()
+      .map(({ sourceId }) => sourceId);
+    let erased: Set<string>;
+    try {
+      erased = await erasedSources(this.env, chat.personId, unmarked);
+    } catch (error) {
+      log.warn("agent.erased_check_failed", {
+        chatId: chat.id,
+        ...errorFields(error),
+      });
+      throw agentErrors.create("agent.erasure_unchecked");
+    }
+    if (erased.size > 0) {
+      throw agentErrors.create("agent.history_revoked");
+    }
+  }
+
+  /**
    * Drops what else chat `chatId` keeps that may quote what its runs
    * `runs` read, found erased (`#replaceErased`), the first time any of
    * them is (`erasedKeyPrefix`): a later erasure drops again, a repeat
@@ -5263,7 +5301,13 @@ export class Workspace extends DurableObject<Env> {
       const counted =
         erasedRunsSchema.safeParse(this.ctx.storage.kv.get(key)).data ?? [];
       const fresh = runs.filter((run) => !counted.includes(run));
-      if (fresh.length === 0) {
+      const held = this.#db
+        .select({ id: chats.id })
+        .from(chats)
+        .where(eq(chats.id, chatId))
+        .get();
+      // Nothing kept for a chat deleted meanwhile.
+      if (fresh.length === 0 || held === undefined) {
         return [];
       }
       this.ctx.storage.kv.put(key, [...counted, ...fresh]);

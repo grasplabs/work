@@ -1,5 +1,6 @@
 import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
 import type { ChatMessage } from "@grasp-os/shared/chat";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -46,7 +47,13 @@ import type { ToolkitServer } from "./mail-server.ts";
 import { answeringProvider, fakeProvider } from "./model-provider.ts";
 import type { FakeProvider, ProviderReply } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
-import { liveNotes, noteTitles, ownSource } from "./notes-app.ts";
+import {
+  callOf,
+  liveNotes,
+  noteTitles,
+  ownSource,
+  writesNote,
+} from "./notes-app.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
 
@@ -730,12 +737,13 @@ describe("what a chat shows of what it read from the Brain", () => {
   );
 
   it(
-    "withdraws a write to an App held for its person once a source its request quotes is erased: never confirmed, carried out, listed or handed over with it, kept nowhere in the chat's object, and its agent told to ask afresh",
+    "withdraws a write to an App held for its person once a source its request quotes is erased: never confirmed, carried out, listed or handed over with it, kept nowhere in the chat's object, held again before its model is kept from it, and its agent told to ask afresh; a write held after is held and runs",
     slow,
     async () => {
       const depot = word();
       const quoted = word();
       const marker = word();
+      const later = `later-${unique()}`;
       const builder = await signedInApi(idp, "builder");
       const { app, release } = await liveNotes(builder);
       const asked = { question: quoted, budget: { tokens: 800 } };
@@ -751,7 +759,8 @@ describe("what a chat shows of what it read from the Brain", () => {
           `export default async (self, env) => { const pack = await env.brain.recall(${JSON.stringify(asked)}); const title = pack.items.map(({ text }) => text).join(" ").slice(0, 200); const answer = await env.apps.call(${JSON.stringify(app)}, new Blob([JSON.stringify({ reference: ${JSON.stringify(reference)}, args: { title } })]).stream()); return "held" in answer ? "held" : "not held"; };`
         ),
         says("It waits for you."),
-        says("Ok.")
+        writesNote(app, release, later),
+        says("That one waits for you.")
       );
       await requestGranted(idp, builder, {
         subject: chats.agent,
@@ -800,6 +809,25 @@ describe("what a chat shows of what it read from the Brain", () => {
       const confirmed = await confirm();
       const listed = await builder.api.chats.heldCalls(chat.id);
       const exported = await chats.stub.exportHeldAppCalls(ref);
+      // Held again by the turn still under way, before its next request
+      // keeps its model from what was erased.
+      const quoting = callOf(release, "notes.create", { title: marker });
+      const heldAgain = await outcome(
+        chats.stub.holdAppCall(
+          chat.id,
+          builder.userId,
+          {
+            agentId: chats.agent.agentId,
+            appId: app,
+            function: "notes.create",
+            kind: reference.kind ?? "mutation",
+            request: quoting,
+            requestHash: await sha256Hex(quoting),
+          },
+          Date.now()
+        )
+      );
+      const written = await noteTitles(builder.userId, app, release);
       const events = await allEvents();
       const ofChat = (action: string) =>
         events.filter(
@@ -815,9 +843,17 @@ describe("what a chat shows of what it read from the Brain", () => {
         { timeout: 10_000 }
       );
       const sentBefore = chats.provider.requests.length;
-      await ask("Thanks.");
+      await ask("Thanks. Note that it waits too.");
       const sentNext = JSON.stringify(
         chats.provider.requests.slice(sentBefore).map(({ body }) => body)
+      );
+      const [after] = await builder.api.chats.heldCalls(chat.id);
+      const afterConfirmed = await outcome(
+        builder.api.chats.confirmHeldCall(
+          chat.id,
+          after?.id ?? "",
+          after?.requestHash ?? ""
+        )
       );
 
       expect({
@@ -829,7 +865,8 @@ describe("what a chat shows of what it read from the Brain", () => {
           status,
           request,
         })),
-        written: await noteTitles(builder.userId, app, release),
+        heldAgain,
+        written,
         events: {
           withdrawn: ofChat("chat.app_call.withdrawn"),
           confirmed: ofChat("chat.app_call.confirmed"),
@@ -837,17 +874,24 @@ describe("what a chat shows of what it read from the Brain", () => {
         toldNext: sentNext.includes(`held ID ${held?.id}), was withdrawn`),
         sentAgain: sentNext.includes(marker),
         kept: await objectHolds(chats.stub, marker),
+        after: after?.request.includes(later),
+        afterConfirmed,
+        writtenAfter: await noteTitles(builder.userId, app, release),
       }).toStrictEqual({
         before: true,
         away: ["agent.erasure_unchecked", "agent.erasure_unchecked"],
         confirmed: "agent.held_call_not_found",
         listed: [],
         exported: [{ status: "withdrawn", request: null }],
+        heldAgain: "agent.history_revoked",
         written: [],
         events: { withdrawn: 1, confirmed: 0 },
         toldNext: true,
         sentAgain: false,
         kept: false,
+        after: true,
+        afterConfirmed: "ok",
+        writtenAfter: [later],
       });
     }
   );

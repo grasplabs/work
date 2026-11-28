@@ -215,7 +215,17 @@ export const turnHeldWrites = async (
         Date.parse(requestedAt) >= since
     )
     .map((held) => ({ at: Date.parse(held.requestedAt), view: viewOf(held) }));
-  const calls = await heldAppCallsIn(env, userId, chat.chatId, platform);
+  let calls: HeldAppCall[] = [];
+  try {
+    calls = await heldAppCallsIn(env, userId, chat.chatId, platform);
+  } catch (error) {
+    // Not listed while what the chat read can't be checked against what
+    // was erased (`Workspace.heldAppCalls`): on a later turn's card then,
+    // and connect's writes on this one now.
+    if (agentErrors.codeOf(error) !== "agent.erasure_unchecked") {
+      throw error;
+    }
+  }
   const toApps = calls.map((call) => ({
     at: Date.parse(call.heldAt),
     view: appViewOf(chat.chatId, call, locale),
