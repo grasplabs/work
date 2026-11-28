@@ -120,6 +120,18 @@ const wordsOf = (
       text: `The deploys of release ${event.releaseId} to ${organization} kept failing for the platform, not the release (${event.code}), so it was set aside and the rollout goes on without it. Retry it on its Setup, or resume the rollout, once what stopped it is fixed.`,
     };
   }
+  if (event.kind === "restore_refused") {
+    return {
+      subject: `Urgent: ${organization} stays on ${event.releaseId}, which failed`,
+      text: `The deploy of release ${event.releaseId} to ${organization} failed (${event.code}), and going back to the release before was refused: that release can't open what this one stored. It may serve broken until a fix is released to it.`,
+    };
+  }
+  if (event.kind === "restore_failed") {
+    return {
+      subject: `Urgent: ${organization} failed ${event.releaseId} and the release before`,
+      text: `The deploy of release ${event.releaseId} to ${organization} failed (${event.code}), and putting the release before back failed its probe too. It may serve nothing: look at its Setup now.`,
+    };
+  }
   return event.kind === "deploy_failed"
     ? {
         subject: `${organization}: deploy of ${event.releaseId} failed`,

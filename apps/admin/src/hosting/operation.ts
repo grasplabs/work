@@ -271,6 +271,19 @@ export const provisionOperationErrorCodes = [
    */
   "release_rolled_back",
   /**
+   * A release that failed once it started installing, and whose restore
+   * to the release before was refused (`canMove`): past a Durable Object
+   * migration, or chats the release before can't read. The client stays
+   * on the release that failed (src/rollout/org-rollout.ts).
+   */
+  "restore_refused",
+  /**
+   * A release that failed once it started installing, and whose restore
+   * to the release before failed too, its probe or before: the client may
+   * serve nothing (src/rollout/org-rollout.ts).
+   */
+  "restore_failed",
+  /**
    * An attempt ended at a step without recording how: its isolate was
    * killed (past its memory or CPU limit) or it timed out. Recorded with
    * the step (`attemptLostCode`).
