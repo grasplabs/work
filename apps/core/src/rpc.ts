@@ -258,6 +258,11 @@ const sessionApi = (
    * of their connections two readings at most, not one per session ended.
    */
   const readNow = coalesced(async (): Promise<void> => {
+    // Closed meanwhile (a reading queued behind the one that closed it):
+    // nobody is left to read for.
+    if (!openHere()) {
+      return;
+    }
     check.forget();
     try {
       await check();
