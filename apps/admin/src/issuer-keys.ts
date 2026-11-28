@@ -32,12 +32,28 @@ const missCooldownMs = 30 * 1000;
  * fetches them itself. `lastMissFetchAt` is when a JWT's unknown key id
  * last made a request try to fetch them again (`missCooldownMs`), recorded
  * before that fetch starts, whether it then succeeds or not; null before
- * any.
+ * any. `lastMissFetchFailed` says that fetch failed: until the cooldown
+ * ends, a JWT naming a key id the kept keys lack may be one the issuer
+ * just rotated in, so it's refused as unavailable for now, never as
+ * forged (`IssuerKeysUnavailableError`).
  */
 const keyCache = new Map<
   string,
-  { keys: JSONWebKeySet; fetchedAt: number; lastMissFetchAt: number | null }
+  {
+    keys: JSONWebKeySet;
+    fetchedAt: number;
+    lastMissFetchAt: number | null;
+    lastMissFetchFailed: boolean;
+  }
 >();
+
+/** An issuer's keys couldn't be fetched: a JWT may be good, and is asked again later. */
+export class IssuerKeysUnavailableError extends Error {
+  constructor(keysUrl: string, cause?: unknown) {
+    super(`${keysUrl} couldn't be fetched`, { cause });
+    this.name = "IssuerKeysUnavailableError";
+  }
+}
 
 const keySetSchema = z.object({
   keys: z.array(z.object({ kty: z.string() }).loose()),
@@ -48,18 +64,30 @@ const keySetSchema = z.object({
  * with the last miss refetch as it was recorded (`lastMissFetchAt`).
  */
 const fetchKeys = async (keysUrl: string): Promise<JSONWebKeySet> => {
-  const response = await fetch(keysUrl, {
-    signal: AbortSignal.timeout(keysTimeoutMs),
-  });
+  let response: Response;
+  try {
+    response = await fetch(keysUrl, {
+      signal: AbortSignal.timeout(keysTimeoutMs),
+    });
+  } catch (error) {
+    throw new IssuerKeysUnavailableError(keysUrl, error);
+  }
   if (!response.ok) {
     await response.body?.cancel();
-    throw new Error(`${keysUrl} answered ${String(response.status)}`);
+    throw new IssuerKeysUnavailableError(
+      `${keysUrl} (${String(response.status)})`
+    );
   }
-  const keys: JSONWebKeySet = keySetSchema.parse(await response.json());
+  const parsed = keySetSchema.safeParse(await response.json());
+  if (!parsed.success) {
+    throw new IssuerKeysUnavailableError(keysUrl, parsed.error);
+  }
+  const keys: JSONWebKeySet = parsed.data;
   keyCache.set(keysUrl, {
     keys,
     fetchedAt: Date.now(),
     lastMissFetchAt: keyCache.get(keysUrl)?.lastMissFetchAt ?? null,
+    lastMissFetchFailed: false,
   });
   return keys;
 };
@@ -76,8 +104,10 @@ export interface IssuerJwt {
  * keys at `keysUrl`: those kept while fresh, else fetched; kept keys that
  * have no key for it are fetched again once, as issuers rotate their
  * keys, at most once every `missCooldownMs`: within it, a JWT naming an
- * unknown key id is refused without a fetch. Throws when it doesn't
- * verify (signature, `iss`, `aud`, expiry).
+ * unknown key id is refused without a fetch, or, when that refetch
+ * failed, as unavailable for now. Throws a jose error when it doesn't
+ * verify (signature, `iss`, `aud`, expiry), and
+ * `IssuerKeysUnavailableError` when the keys couldn't be fetched.
  */
 export const verifyIssuerJwt = async (
   token: string,
@@ -107,13 +137,19 @@ export const verifyIssuerJwt = async (
       current.lastMissFetchAt !== null &&
       now - current.lastMissFetchAt < missCooldownMs
     ) {
-      throw error;
+      throw current.lastMissFetchFailed
+        ? new IssuerKeysUnavailableError(keysUrl, error)
+        : error;
     }
     keyCache.set(keysUrl, { ...current, lastMissFetchAt: now });
-    return await jwtVerify(
-      token,
-      createLocalJWKSet(await fetchKeys(keysUrl)),
-      options
-    );
+    let keys: JSONWebKeySet;
+    try {
+      keys = await fetchKeys(keysUrl);
+    } catch (fetchError) {
+      const latest = keyCache.get(keysUrl) ?? current;
+      keyCache.set(keysUrl, { ...latest, lastMissFetchFailed: true });
+      throw fetchError;
+    }
+    return await jwtVerify(token, createLocalJWKSet(keys), options);
   }
 };

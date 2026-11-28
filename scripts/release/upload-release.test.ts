@@ -91,6 +91,7 @@ const HTTP_BAD_REQUEST = 400;
 const HTTP_FORBIDDEN = 403;
 const HTTP_CONFLICT = 409;
 const HTTP_SERVER_ERROR = 500;
+const HTTP_UNAVAILABLE = 503;
 
 /** The token GitHub gives the run, and what the run asks for it with. */
 const GITHUB_TOKEN = "github-token-for-the-run";
@@ -153,7 +154,7 @@ interface Bucket {
   /** Whether `releases/` and `signatures/` are locked, as production's buckets are. */
   locked: boolean;
   /** How the signer answers: signs with the tests' key, another, or refuses. */
-  signer: "trusted" | "stranger" | "refuses";
+  signer: "trusted" | "stranger" | "refuses" | "unavailable once";
   /** The release ids the signer signed, in order. */
   signed: string[];
 }
@@ -382,6 +383,11 @@ const answeredSigning = async (
     return false;
   }
   const body = await buffer(request);
+  if (bucket.signer === "unavailable once") {
+    bucket.signer = "trusted";
+    response.writeHead(HTTP_UNAVAILABLE).end("Couldn't sign now; try again");
+    return true;
+  }
   if (
     bucket.signer === "refuses" ||
     request.method !== "POST" ||
@@ -848,6 +854,18 @@ describe("publishing a release", () => {
       signed: [id],
       problem: undefined,
       lastPuts: [signature, claim],
+    });
+  });
+
+  it("asks the signer again when it answers 503, as while GitHub's keys can't be fetched, then publishes", async () => {
+    bucket.signer = "unavailable once";
+    const stdout = await publish(buildOf("1".repeat(40)));
+    expect({
+      published: stdout.includes("Published"),
+      signed: bucket.signed,
+    }).toStrictEqual({
+      published: true,
+      signed: [`${releaseMonthPrefix(new Date())}1`],
     });
   });
 

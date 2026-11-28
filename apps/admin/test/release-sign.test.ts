@@ -294,7 +294,7 @@ describe("signing a release for CI's publish", () => {
     });
   });
 
-  it("answers 503, which CI tries again, when GitHub's keys can't be fetched", async () => {
+  it("answers 503, which CI tries again, while GitHub's keys can't be fetched, never 403, and signs once they can", async () => {
     const release = await claimable("feat(core): keys down");
     // A key id the kept keys don't have, as after GitHub rotates them: the
     // admin fetches them again, and GitHub answers 500.
@@ -312,10 +312,33 @@ describe("signing a release for CI's publish", () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {
       // The failed fetch is logged; the test reads the answer.
     });
-    const status = await statusOf(release.manifestText, token);
+    const down = await statusOf(release.manifestText, token);
+    // Asked again within the 30 s after that failed fetch: not fetched
+    // again, and still not taken for a forged token.
+    const retried = await statusOf(release.manifestText, token);
     errors.mockRestore();
+    // Past those 30 s, GitHub serves the rotated key.
+    const later = Date.now() + 31_000;
+    vi.spyOn(Date, "now").mockReturnValue(later);
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      const request = new Request(input, init);
+      await request.body?.cancel();
+      return Response.json({
+        keys: ["rotated-key", keyId].map((kid) => ({
+          ...githubJwk,
+          kid,
+          alg: "RS256",
+          use: "sig",
+        })),
+      });
+    });
+    const recovered = await statusOf(release.manifestText, token);
 
-    expect(status).toBe(503);
+    expect({ down, retried, recovered }).toStrictEqual({
+      down: 503,
+      retried: 503,
+      recovered: 200,
+    });
   });
 
   it("signs nothing on an admin without a key, as production's, nor with a key no verifier trusts", async () => {
