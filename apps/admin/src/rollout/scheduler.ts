@@ -890,16 +890,48 @@ const endedSince = async (db: AdminDatabase, since: Date): Promise<boolean> =>
     .get()) !== undefined;
 
 /**
+ * Whether the fleet has something the pass keeps going by itself, in one
+ * read over indexes: a live rollout (`rollouts_live_channel_idx`), an
+ * active client's deploy out (`client_deploys_deploying_idx`), or a
+ * channel's release without a rollout row, as an older admin's move
+ * leaves it (`rollouts_release_channel_idx`, three channels). An idle
+ * fleet has none: every organization on its target, or waiting for staff.
+ */
+const isBusy = async (db: AdminDatabase): Promise<boolean> => {
+  const row = await db.get<{ busy: number }>(
+    sql`SELECT EXISTS (SELECT 1 FROM ${rollouts} WHERE ${rollouts.status} in ('running', 'halted')) OR EXISTS (SELECT 1 FROM ${clientDeploys} WHERE ${clientDeploys.status} = 'deploying' AND EXISTS (SELECT 1 FROM ${clients} WHERE ${clients.id} = ${clientDeploys.clientId} AND ${clients.status} = 'active')) OR EXISTS (SELECT 1 FROM ${channels} WHERE NOT EXISTS (SELECT 1 FROM ${rollouts} WHERE ${rollouts.releaseId} = ${channels.releaseId} AND ${rollouts.channel} = ${channels.id} AND ${rollouts.status} != 'superseded')) AS busy`
+  );
+  return row?.busy === 1;
+};
+
+/** When a pass runs. */
+export interface PassOptions {
+  /**
+   * Only while the fleet is busy (`isBusy`): the minute's cron, which on
+   * an idle fleet then reads nothing else. Every other trigger, and the
+   * cron once an hour, runs the pass in full (src/server.ts).
+   */
+  onlyWhenBusy?: boolean;
+}
+
+/**
  * The rollout pass, while it holds the lease: once, and once more when a
  * deploy ended as it ran. Nothing while another pass (or an older admin's
- * reconciler) holds it, or while the admin has no CLIENT_DOMAIN, so no
- * client can be deployed.
+ * reconciler) holds it, while the admin has no CLIENT_DOMAIN, so no
+ * client can be deployed, or, asked `onlyWhenBusy`, while the fleet is
+ * idle.
  */
-export const rolloutPass = async (env: Env): Promise<void> => {
+export const rolloutPass = async (
+  env: Env,
+  { onlyWhenBusy = false }: PassOptions = {}
+): Promise<void> => {
   if (clientDomain(env) === null) {
     return;
   }
   const db = adminDatabase(env.DB);
+  if (onlyWhenBusy && !(await isBusy(db))) {
+    return;
+  }
   await withLease(db, "reconciler", passLeaseMs, async (renew) => {
     const since = new Date();
     await passOnce(env, db, renew);
@@ -914,9 +946,12 @@ export const rolloutPass = async (env: Env): Promise<void> => {
  * and an organization's run as it ends, to refill its slot. Never throws:
  * a pass that fails is logged, and the cron runs the next.
  */
-export const runRolloutPass = async (env: Env): Promise<void> => {
+export const runRolloutPass = async (
+  env: Env,
+  options: PassOptions = {}
+): Promise<void> => {
   try {
-    await rolloutPass(env);
+    await rolloutPass(env, options);
   } catch (error) {
     log.error("rollout.pass_failed", { error: errorCode(error) });
   }

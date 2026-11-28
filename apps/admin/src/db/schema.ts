@@ -418,36 +418,45 @@ export const clientWorkers = sqliteTable(
  * The lease is the run's own life: a `deploying` row whose run ended
  * without saying so is settled as failed on the next tick.
  */
-export const clientDeploys = sqliteTable("client_deploys", {
-  clientId: text("client_id")
-    .primaryKey()
-    .references(() => clients.id),
-  /** The release it deploys or deployed: the client's target then. */
-  releaseId: text("release_id")
-    .notNull()
-    .references(() => releases.id),
-  /** The deploy's run (src/rollout/deploy.ts). */
-  runId: text("run_id").notNull(),
-  status: text({ enum: ["deploying", "done", "failed"] }).notNull(),
-  /** Why it failed: a code, never a message or a response body. */
-  error: text(),
-  startedAt: timestamp("started_at").notNull(),
-  /** When it ended; null while it runs. */
-  endedAt: timestamp("ended_at"),
-  /**
-   * The rollout it deploys for; null for a deploy that brings a client
-   * back to its target without a release change (settings, secrets, a
-   * pin), which never counts toward a rollout.
-   */
-  rolloutId: text("rollout_id").references(() => rollouts.id),
-  /**
-   * How many of the client's deploys for this rollout, right before this
-   * one, ended in a platform fault (a 429, a run never created): after a
-   * few in a row the rollout sets the client aside, alerted, and moves on
-   * (src/rollout/plan.ts). 0 outside a rollout.
-   */
-  platformFaults: integer("platform_faults").notNull().default(0),
-});
+export const clientDeploys = sqliteTable(
+  "client_deploys",
+  {
+    clientId: text("client_id")
+      .primaryKey()
+      .references(() => clients.id),
+    /** The release it deploys or deployed: the client's target then. */
+    releaseId: text("release_id")
+      .notNull()
+      .references(() => releases.id),
+    /** The deploy's run (src/rollout/deploy.ts). */
+    runId: text("run_id").notNull(),
+    status: text({ enum: ["deploying", "done", "failed"] }).notNull(),
+    /** Why it failed: a code, never a message or a response body. */
+    error: text(),
+    startedAt: timestamp("started_at").notNull(),
+    /** When it ended; null while it runs. */
+    endedAt: timestamp("ended_at"),
+    /**
+     * The rollout it deploys for; null for a deploy that brings a client
+     * back to its target without a release change (settings, secrets, a
+     * pin), which never counts toward a rollout.
+     */
+    rolloutId: text("rollout_id").references(() => rollouts.id),
+    /**
+     * How many of the client's deploys for this rollout, right before this
+     * one, ended in a platform fault (a 429, a run never created): after a
+     * few in a row the rollout sets the client aside, alerted, and moves on
+     * (src/rollout/plan.ts). 0 outside a rollout.
+     */
+    platformFaults: integer("platform_faults").notNull().default(0),
+  },
+  (table) => [
+    // The deploys out: what the minute's pass asks first (src/rollout/scheduler.ts).
+    index("client_deploys_deploying_idx")
+      .on(table.clientId)
+      .where(sql`${table.status} = 'deploying'`),
+  ]
+);
 
 /**
  * A secret of a client's own that can't be derived, such as its Teams

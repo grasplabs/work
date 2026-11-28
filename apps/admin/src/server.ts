@@ -130,7 +130,12 @@ export default {
     // holds, never keeps the rest from running.
     const tick = at.getUTCMinutes() % TICK_MINUTES === 0;
     await importNow(env, tick ? at : undefined);
-    await runRolloutPass(env);
+    // The pass, beside its own triggers (an import, a staff change): each
+    // minute only while the fleet is busy, refilling the slots runs free,
+    // so an idle one costs one read; in full at each hour's start, for
+    // what nothing tells the admin of (shared secrets copied into the
+    // store, a staff change whose pass met another's lease).
+    await runRolloutPass(env, { onlyWhenBusy: at.getUTCMinutes() !== 0 });
     if (tick) {
       // After the import: a client waiting for a newer release takes it.
       await reconcileProvisioning(env, at);

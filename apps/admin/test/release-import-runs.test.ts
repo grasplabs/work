@@ -134,7 +134,7 @@ const quietly = async <T>(run: () => Promise<T>): Promise<T> => {
 };
 
 describe("what starts an import", () => {
-  it("runs the rollout pass every minute, and retention and provisioning on the fifth minute only", async () => {
+  it("runs the rollout pass in full at each hour's start, and on other minutes only while the fleet is busy, and retention and provisioning on the fifth minute only", async () => {
     const between = recording();
     await quietly(async () => {
       await worker.scheduled(cronAt(1), between.env);
@@ -143,13 +143,20 @@ describe("what starts an import", () => {
     await quietly(async () => {
       await worker.scheduled(cronAt(5), onTick.env);
     });
+    const onHour = recording();
+    await quietly(async () => {
+      await worker.scheduled(cronAt(0), onHour.env);
+    });
 
     expect({
       between: jobsIn(between.statements),
       onTick: jobsIn(onTick.statements),
+      onHour: jobsIn(onHour.statements),
     }).toStrictEqual({
-      between: { retention: false, pass: 1, provisioning: false },
-      onTick: { retention: true, pass: 1, provisioning: true },
+      // No rollout live and nothing out: the pass reads that, and stops.
+      between: { retention: false, pass: 0, provisioning: false },
+      onTick: { retention: true, pass: 0, provisioning: true },
+      onHour: { retention: true, pass: 1, provisioning: true },
     });
   });
 
@@ -165,7 +172,8 @@ describe("what starts an import", () => {
     await holdUntil(new Date(Date.now() + 60_000));
     const held = recording();
     await quietly(async () => {
-      await worker.scheduled(cronAt(5), held.env);
+      // The hour's start: its pass runs in full.
+      await worker.scheduled(cronAt(0), held.env);
       await worker.queue(written(manifestKey(release.id)), held.env);
     });
     const whileHeld = await traceOf(release.id);

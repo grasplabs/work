@@ -807,6 +807,63 @@ describe("shared secrets as desired state", () => {
     });
   });
 
+  it("leaves a change in Secrets Store on an idle fleet to the hourly pass: the minute's pass reads the admin's database once and starts nothing", async () => {
+    const release = await placedRelease("feat(core): runs");
+    await releaseToEdge(env, [release]);
+    const client = await live(release);
+    await using runs = followRuns();
+    // Edge's rollout done, nothing out: the fleet is idle.
+    await runs.converge();
+    await setStoreSecret(
+      env.COMPOSIO_API_KEY,
+      "COMPOSIO_API_KEY",
+      "composio-key-rotated"
+    );
+    const prepared = vi.spyOn(env.DB, "prepare");
+    let statements: number;
+    try {
+      await rolloutPass(env, { onlyWhenBusy: true });
+    } finally {
+      statements = prepared.mock.calls.length;
+      prepared.mockRestore();
+    }
+    const minute = await startedOf(client.clientId);
+
+    // The hour's pass runs in full.
+    await runs.converge();
+
+    expect({
+      statements,
+      minute,
+      hour: await startedOf(client.clientId),
+      deploy: await deployOf(client.clientId),
+    }).toStrictEqual({
+      statements: 1,
+      minute: 0,
+      hour: 1,
+      deploy: { releaseId: release, status: "done", error: null },
+    });
+  });
+
+  it("runs the minute's pass in full while a rollout is live", async () => {
+    const before = await placedRelease("feat(core): before");
+    const client = await live(before);
+    const release = await placedRelease("feat(core): after");
+    await using runs = followRuns();
+    await releaseToEdge(env, [release]);
+
+    await rolloutPass(env, { onlyWhenBusy: true });
+    await runs.settle();
+
+    expect({
+      started: await startedOf(client.clientId),
+      deploy: await deployOf(client.clientId),
+    }).toStrictEqual({
+      started: 1,
+      deploy: { releaseId: release, status: "done", error: null },
+    });
+  });
+
   it("deploys a client again when the store's earlier value is put back", async () => {
     const release = await placedRelease("feat(core): runs");
     await releaseToEdge(env, [release]);
