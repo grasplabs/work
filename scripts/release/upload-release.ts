@@ -340,22 +340,20 @@ const uploadBlobs = async (bucket: ReleasesBucket): Promise<void> => {
 
 /**
  * The release directory's signature of its manifest, as its download
- * fetched it, once it verifies; undefined for a release published before
- * signing began that has none. Throws for one that must be signed and
- * isn't, or whose signature doesn't verify: nothing is uploaded.
+ * fetched it, once it verifies. Throws for one without, or whose
+ * signature doesn't verify: nothing is uploaded.
  */
-const verifiedSignature = async (): Promise<Buffer | undefined> => {
+const verifiedSignature = async (): Promise<Buffer> => {
   const file = path.join(releaseDir, RELEASE_SIGNATURE_FILE);
   const signature = existsSync(file) ? readFileSync(file) : undefined;
   const problem = await releaseSignatureProblem(
-    manifest.releaseId,
     manifestBytes,
     signature,
     releaseSigningKeys
   );
-  if (problem !== undefined) {
+  if (problem !== undefined || signature === undefined) {
     throw new Error(
-      `Release ${manifest.releaseId} ${problem}; nothing published`
+      `Release ${manifest.releaseId} ${problem ?? "isn't signed"}; nothing published`
     );
   }
   return signature;

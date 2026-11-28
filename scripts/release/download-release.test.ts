@@ -27,7 +27,6 @@ import { manifestKey, modelBlobKey } from "@grasp-os/shared/release";
 import {
   MAX_SIGNATURE_BYTES,
   RELEASE_SIGNATURE_FILE,
-  SIGNED_FROM,
   signatureKey,
   signReleaseManifest,
 } from "@grasp-os/shared/release-signature";
@@ -330,12 +329,12 @@ describe("promoting a release from staging's bucket to production's", () => {
   };
 
   it("promotes a release with its signature, which production then holds beside its manifest", async () => {
-    await putInStaging(SIGNED_FROM);
+    await putInStaging("26.12.1");
     const fetched = path.join(dir, "fetched");
-    await download(fetched, SIGNED_FROM);
+    await download(fetched, "26.12.1");
     await upload(PRODUCTION, fetched);
 
-    const stored = buckets.get(PRODUCTION)?.get(manifestKey(SIGNED_FROM));
+    const stored = buckets.get(PRODUCTION)?.get(manifestKey("26.12.1"));
     const signature = signatureKey(sha256(stored) ?? "");
     expect({
       downloaded: readdirSync(fetched).includes(RELEASE_SIGNATURE_FILE),
@@ -343,12 +342,12 @@ describe("promoting a release from staging's bucket to production's", () => {
       signature: sha256(buckets.get(PRODUCTION)?.get(signature)),
     }).toStrictEqual({
       downloaded: true,
-      manifest: sha256(buckets.get(STAGING)?.get(manifestKey(SIGNED_FROM))),
+      manifest: sha256(buckets.get(STAGING)?.get(manifestKey("26.12.1"))),
       signature: sha256(buckets.get(STAGING)?.get(signature)),
     });
   });
 
-  it("promotes nothing that isn't signed, even from before signing began, was changed after it was signed, was signed with a key nobody trusts, or whose signature file is too large to be one", async () => {
+  it("promotes nothing that isn't signed, was changed after it was signed, was signed with a key nobody trusts, or whose signature file is too large to be one", async () => {
     const [unsigned, changed, stranger, oversized] = [
       "26.11.1",
       "26.12.2",

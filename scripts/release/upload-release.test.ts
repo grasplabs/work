@@ -34,7 +34,6 @@ import {
 } from "@grasp-os/shared/release-id";
 import {
   RELEASE_SIGNATURE_FILE,
-  SIGNED_FROM,
   releaseSignatureProblem,
   signatureKey,
   signReleaseManifest,
@@ -545,7 +544,6 @@ describe("publishing a release", () => {
       return "isn't published";
     }
     return await releaseSignatureProblem(
-      id,
       bytes,
       bucket.objects.get(signatureKey(sha256Hex(bytes))),
       releaseSigningKeys
@@ -717,7 +715,7 @@ describe("publishing a release", () => {
     expect(bucket.puts).not.toContain(stray);
   });
 
-  it("publishes a release as it has it only with a signature that verifies, stored right before it, even one from before signing began", async () => {
+  it("publishes a release as it has it only with a signature that verifies, stored right before it", async () => {
     const bytes = readFileSync(path.join(dir, "manifest.json"));
     const signatureFile = path.join(dir, RELEASE_SIGNATURE_FILE);
     const signature = readFileSync(signatureFile);
@@ -736,7 +734,6 @@ describe("publishing a release", () => {
     const signed = await outcomeOf(upload());
 
     expect({
-      beforeSigning: compareReleaseIds(manifest.releaseId, SIGNED_FROM) < 0,
       unsigned: unsigned.includes("isn't signed"),
       mismatched: mismatched.includes("has a signature that doesn't match it"),
       putsBefore,
@@ -744,7 +741,6 @@ describe("publishing a release", () => {
       problem: await signatureProblemOf(manifest.releaseId),
       lastPuts: bucket.puts.slice(-2),
     }).toStrictEqual({
-      beforeSigning: true,
       unsigned: true,
       mismatched: true,
       putsBefore: 0,

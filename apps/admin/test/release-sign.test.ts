@@ -174,7 +174,6 @@ describe("signing a release for CI's publish", () => {
       direct: direct.status,
       status: response.status,
       problem: await releaseSignatureProblem(
-        release.id,
         new TextEncoder().encode(release.manifestText),
         signature,
         releaseSigningKeys
@@ -226,6 +225,13 @@ describe("signing a release for CI's publish", () => {
           "grasplabs/work/.github/workflows/ci.yml@refs/heads/feat/x",
       }),
       pullRequest: await githubToken({ ...claims, event_name: "pull_request" }),
+      byHand: await githubToken({ ...claims, event_name: "workflow_dispatch" }),
+      nightly: await githubToken({ ...claims, event_name: "schedule" }),
+      reusableWorkflow: await githubToken({
+        ...claims,
+        job_workflow_ref:
+          "grasplabs/work/.github/workflows/deploy-platform.yml@refs/heads/main",
+      }),
       productionEnvironment: await githubToken({
         ...claims,
         environment: "production",
@@ -286,6 +292,30 @@ describe("signing a release for CI's publish", () => {
       published: 409,
       tooLarge: 413,
     });
+  });
+
+  it("answers 503, which CI tries again, when GitHub's keys can't be fetched", async () => {
+    const release = await claimable("feat(core): keys down");
+    // A key id the kept keys don't have, as after GitHub rotates them: the
+    // admin fetches them again, and GitHub answers 500.
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      const request = new Request(input, init);
+      await request.body?.cancel();
+      return new Response("unavailable", { status: 500 });
+    });
+    const now = Math.floor(Date.now() / 1000);
+    const token = await new SignJWT(publishClaims(release.manifest.commit))
+      .setProtectedHeader({ alg: "RS256", kid: "rotated-key" })
+      .setIssuedAt(now)
+      .setExpirationTime(now + 300)
+      .sign(githubKeys.privateKey);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {
+      // The failed fetch is logged; the test reads the answer.
+    });
+    const status = await statusOf(release.manifestText, token);
+    errors.mockRestore();
+
+    expect(status).toBe(503);
   });
 
   it("signs nothing on an admin without a key, as production's, nor with a key no verifier trusts", async () => {

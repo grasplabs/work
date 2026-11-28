@@ -7,8 +7,7 @@
  * The manifest is read first, with its signature
  * (@grasp-os/shared/release-signature): a release whose manifest isn't
  * signed by a key Grasp trusts, or was changed since, is refused before
- * anything else is read, so production never gets it. One published
- * before signing began too: production takes signed releases alone.
+ * anything else is read, so production never gets it.
  * Then every blob it names is checked against it as it arrives
  * (`verifyReleaseBlobs`), its model files by their SHA-256 too, so the
  * release can be published to a bucket that lacks them; one that is
@@ -115,7 +114,6 @@ const readSignature = async (): Promise<Bytes | undefined> => {
 };
 const signature = await readSignature();
 const problem = await releaseSignatureProblem(
-  releaseId,
   manifestBytes,
   signature,
   releaseSigningKeys

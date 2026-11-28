@@ -13,10 +13,9 @@
  * recorded with its audit event:
  *
  * - its manifest: signed by a key Grasp trusts, at the signature file
- *   CI stored before it (@grasp-os/shared/release-signature), unless
- *   published before signing began; its id the one its key names, every
- *   blob at its content address, every static file it indexes one a
- *   Worker serves (`blobsOf`);
+ *   CI stored before it (@grasp-os/shared/release-signature); its id the
+ *   one its key names, every blob at its content address, every static
+ *   file it indexes one a Worker serves (`blobsOf`);
  * - each blob the newest imported release whose bundle is kept checked
  *   the same way (the same key, size and, for a static file, extension:
  *   `checksOf`), most of a release, as a merge changes a few files: not
@@ -285,12 +284,6 @@ const readerOf = (store: ImportStore) => {
     /** Whether the run has requests left. */
     spent: (): boolean => left <= 0,
 
-    /** When R2 stored the object at `key`; undefined when there's none. */
-    writtenAt: async (key: string): Promise<Date | undefined> => {
-      const head = await request(async () => await store.head(key), key);
-      return head?.uploaded;
-    },
-
     /** What R2 reports of the object at `key`, or null when there's none. */
     head: async (key: string): Promise<StoredObject | null> => {
       const head = await request(async () => await store.head(key), key);
@@ -512,8 +505,8 @@ const checkModelFiles = async (
 /**
  * Throws unless release `id`'s manifest, `manifestBytes`, verifies with
  * the signature file stored for it (`signatureKey`), against the keys
- * Grasp trusts; one R2 says was published before signing began may have
- * none. Its
+ * Grasp trusts. Every release it imports is signed: one published before
+ * signing began was imported then, and is never checked again. Its
  * error's name, `UnverifiedReleaseError`, is the code its alert carries.
  */
 const checkSignature = async (
@@ -528,15 +521,9 @@ const checkSignature = async (
     `at most ${MAX_SIGNATURE_BYTES}`
   );
   const problem = await releaseSignatureProblem(
-    id,
     manifestBytes,
     signature,
-    releaseSigningKeys,
-    // Only for one without, which only a release before signing began
-    // may be: when R2 stored its manifest.
-    signature === undefined
-      ? await reader.writtenAt(manifestKey(id))
-      : undefined
+    releaseSigningKeys
   );
   if (problem !== undefined) {
     const error = new Error(`Release ${id} ${problem}`);

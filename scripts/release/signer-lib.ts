@@ -81,7 +81,6 @@ export const releaseSignerFromEnv = () => {
     }
     const signature = Buffer.from(await answer.arrayBuffer());
     const problem = await releaseSignatureProblem(
-      releaseId,
       manifestBytes,
       signature,
       releaseSigningKeys

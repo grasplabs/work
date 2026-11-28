@@ -17,10 +17,9 @@
  * claim, and one another publish claims first leaves only a signature no
  * manifest has, never one under that publish's id.
  *
- * Releases published before signing began (`SIGNED_FROM`) have none,
- * and verify unsigned where R2 says their manifest was written by then.
- * Every other must be signed: one without, or whose signature doesn't
- * verify, is refused.
+ * Every release must be signed: one without, or whose signature doesn't
+ * verify, is refused. Releases imported before signing began are never
+ * checked again; one published unsigned and not imported yet never is.
  *
  * Why Ed25519 and not GitHub's artifact attestations (Sigstore): every
  * verifier checks it with Web Crypto alone, in workerd and in Node, and
@@ -35,23 +34,7 @@
 import { z } from "zod";
 
 import { fromBase64Url, toBase64Url } from "./encoding.ts";
-import { compareReleaseIds, parsePublishedReleaseId } from "./release-id.ts";
 import type { Bytes } from "./release.ts";
-
-/**
- * The first release that must be signed: the one after the newest staging
- * published unsigned, 26.11.903, whose manifest R2 says it stored at
- * 00:35:28 UTC on 28 November 2026 (`UNSIGNED_UNTIL`). A release before
- * it verifies unsigned only where R2 says its manifest was written by
- * then: anyone holding the bucket's key can still write a manifest under
- * an old id nobody used, but not backdate it. So only the staging admin's
- * import takes one, of releases it hasn't imported yet; Promote release
- * takes signed releases alone, and production's admin, where a promoted
- * manifest is written later, then imports nothing unsigned. A hard cut,
- * removed once no import is left to take one.
- */
-export const SIGNED_FROM = "26.11.904";
-export const UNSIGNED_UNTIL = new Date("2026-11-28T00:35:29Z");
 
 /** Where a manifest's signature is in the releases bucket, by the manifest's SHA-256 (hex). */
 export const signatureKey = (manifestSha256: string): string =>
@@ -114,16 +97,6 @@ export const signReleaseManifest = async (
   );
 };
 
-/**
- * Whether release `releaseId`, its manifest written at `writtenAt` as R2
- * says, was published before signing began, and may be unsigned.
- */
-const mayBeUnsigned = (releaseId: string, writtenAt?: Date): boolean =>
-  writtenAt !== undefined &&
-  writtenAt < UNSIGNED_UNTIL &&
-  parsePublishedReleaseId(releaseId) !== undefined &&
-  compareReleaseIds(releaseId, SIGNED_FROM) < 0;
-
 const parsedSignature = (
   signatureBytes: Uint8Array
 ): z.infer<typeof releaseSignatureSchema> | undefined => {
@@ -139,24 +112,19 @@ const parsedSignature = (
 };
 
 /**
- * Why release `releaseId`'s manifest, `manifestBytes` as published,
- * doesn't verify with `signatureBytes` (its signature file, undefined
- * when there's none) against `trusted` keys (the caller's
- * `@grasp-os/shared/release-signing-keys`); undefined when it does.
- * Unsigned, it verifies only as one published before signing began
- * (`SIGNED_FROM`), where `writtenAt`, when R2 says it stored the manifest,
- * is given and early enough. A signature that's there is always checked,
- * also on a release that may be unsigned.
+ * Why a manifest, `manifestBytes` as published, doesn't verify with
+ * `signatureBytes` (its signature file, undefined when there's none)
+ * against `trusted` keys (the caller's
+ * `@grasp-os/shared/release-signing-keys`); undefined when it does. An
+ * empty `trusted` verifies nothing.
  */
 export const releaseSignatureProblem = async (
-  releaseId: string,
   manifestBytes: Uint8Array,
   signatureBytes: Uint8Array | undefined,
-  trusted: readonly string[],
-  writtenAt?: Date
+  trusted: readonly string[]
 ): Promise<string | undefined> => {
   if (signatureBytes === undefined) {
-    return mayBeUnsigned(releaseId, writtenAt) ? undefined : "isn't signed";
+    return "isn't signed";
   }
   const parsed = parsedSignature(signatureBytes);
   if (parsed === undefined) {

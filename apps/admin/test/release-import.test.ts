@@ -5,15 +5,10 @@ import {
   moduleKey,
   sha256OfBytes,
 } from "@grasp-os/shared/release";
+import { nextReleaseId as nextPublishedId } from "@grasp-os/shared/release-id";
 import {
-  nextReleaseId as nextPublishedId,
-  parsePublishedReleaseId,
-} from "@grasp-os/shared/release-id";
-import {
-  SIGNED_FROM,
   signatureKey,
   signReleaseManifest,
-  UNSIGNED_UNTIL,
 } from "@grasp-os/shared/release-signature";
 import { createScheduledController } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -1075,45 +1070,18 @@ CREATE TABLE t (id TEXT);`,
     });
   });
 
-  it("imports an unsigned release R2 says was published before signing began, and refuses one under an old id written since", async () => {
-    const n = parsePublishedReleaseId(SIGNED_FROM)?.n ?? 3;
-    const old = SIGNED_FROM.replace(/\d+$/u, String(n - 1));
-    const planted = SIGNED_FROM.replace(/\d+$/u, String(n - 2));
-    for (const id of [old, planted]) {
-      // oxlint-disable-next-line no-await-in-loop -- two, in order
-      const release = await buildRelease({ notes: `feat(core): ${id}` }, id);
-      // oxlint-disable-next-line no-await-in-loop -- two, in order
-      await putBlobs(release);
-      // oxlint-disable-next-line no-await-in-loop -- two, in order
-      await env.RELEASES.put(manifestKey(id), release.manifestText);
-    }
-    // R2 says `old` was stored before signing began; `planted` now, as
-    // anyone holding the bucket's key could under an id nobody used.
-    const before = new Date(UNSIGNED_UNTIL.getTime() - 60_000);
-    const store: ImportStore = {
-      list: async (options) => await env.RELEASES.list(options),
-      get: async (key) => await env.RELEASES.get(key),
-      head: async (key) => {
-        const head = await env.RELEASES.head(key);
-        return key === manifestKey(old) && head !== null
-          ? new Proxy(head, {
-              get: (target, property): unknown =>
-                property === "uploaded"
-                  ? before
-                  : Reflect.get(target, property),
-            })
-          : head;
-      },
-    };
+  it("refuses an unsigned release under an old id nobody used, as anyone holding the bucket's key could write one", async () => {
+    const old = "26.10.999";
+    const release = await buildRelease({ notes: "feat(core): planted" }, old);
+    await putBlobs(release);
+    await env.RELEASES.put(manifestKey(old), release.manifestText);
 
-    const result = await runImport(store);
-    const row = await releaseRow(old);
+    const result = await runImport();
 
     expect({
-      imported: result.imported,
-      failed: result.failed,
-      saved: row?.id,
-    }).toStrictEqual({ imported: [old], failed: [planted], saved: old });
+      failed: result.failed.includes(old),
+      saved: await releaseRow(old),
+    }).toStrictEqual({ failed: true, saved: undefined });
   });
 
   it("reads the whole listing, a page at a time", async () => {
