@@ -7,7 +7,11 @@ import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 import { workspace } from "../src/durable-objects.ts";
 import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { reconnectCloseCode, sessionEndedCloseCode } from "../src/rpc.ts";
-import { recheckedEvery, sessionRecheckMs } from "../src/session-check.ts";
+import {
+  coalesced,
+  recheckedEvery,
+  sessionRecheckMs,
+} from "../src/session-check.ts";
 import { mockIdp } from "./idp.ts";
 import { acmeTenant, clientOrigin } from "./sign-in-config.ts";
 import {
@@ -479,6 +483,62 @@ describe("a reading of the session", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// How a connection takes tellings to read its session again (`coalesced`),
+// as pure logic: many at once, as ending a person's many sessions sends,
+// share their readings.
+describe("tellings to read the session again", () => {
+  it("share two readings however many come while one runs, and start one each when apart", async () => {
+    const runs: { done: () => void }[] = [];
+    const tell = coalesced(async () => {
+      const run = Promise.withResolvers<true>();
+      runs.push({
+        done: () => {
+          run.resolve(true);
+        },
+      });
+      await run.promise;
+    });
+    const finish = async (at: number): Promise<void> => {
+      runs[at]?.done();
+      for (let turn = 0; turn < 5; turn += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- let the run end and the next begin
+        await Promise.resolve();
+      }
+    };
+
+    // Fifty at once: one reading now, and one after it for the rest.
+    for (let told = 0; told < 50; told += 1) {
+      tell();
+    }
+    const whileFirst = runs.length;
+    await finish(0);
+    const afterFirst = runs.length;
+    // More while the second runs: one more after it, for them all.
+    tell();
+    tell();
+    await finish(1);
+    const afterSecond = runs.length;
+    await finish(2);
+    // Apart: one each.
+    tell();
+    await finish(3);
+    tell();
+    await finish(4);
+
+    expect({
+      whileFirst,
+      afterFirst,
+      afterSecond,
+      all: runs.length,
+    }).toStrictEqual({
+      whileFirst: 1,
+      afterFirst: 2,
+      afterSecond: 3,
+      all: 5,
+    });
   });
 });
 
