@@ -266,6 +266,9 @@ const gateway = "grasp";
  */
 const noticeRequestPrefix = (turnId: string): string => `notice:${turnId}:`;
 
+/** What a note's request ID (`note`) is kept under among pi's submissions. */
+const noteRequestPrefix = "note:";
+
 /**
  * How the request ID of a question queued into turn `turnId` begins
  * (`ChatHarness.queueQuestion`), its own or sent again at once (`sendNow`): it is
@@ -2206,8 +2209,10 @@ export class ChatHarness {
    * no turn: pi's write, which the turn under way reads before its next
    * request, and otherwise the next turn does. After a rebase under way,
    * which would otherwise leave it out or put it before older history.
+   * Taken once by `requestId`, however often it is sent, as a call that
+   * broke on its way back is sent again (`callObject`).
    */
-  async note(text: string): Promise<void> {
+  async note(text: string, requestId?: string): Promise<void> {
     while (this.#rebasing !== undefined) {
       try {
         // oxlint-disable-next-line no-await-in-loop -- until no rebase runs
@@ -2219,6 +2224,10 @@ export class ChatHarness {
     await this.#conversation.submit(
       {
         type: "write",
+        requestId:
+          requestId === undefined
+            ? undefined
+            : `${noteRequestPrefix}${requestId}`,
         entry: {
           kind: noteKind,
           model: [{ role: "user", content: text, timestamp: Date.now() }],

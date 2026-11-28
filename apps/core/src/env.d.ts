@@ -182,6 +182,11 @@ interface __BaseEnv_Env {
    */
   RELEASE_READ_MS?: string;
   /**
+   * Tests only: a shorter bound on one seal of a draft, before it is taken
+   * for abandoned (src/draft-runs.ts).
+   */
+  SEAL_WAIT_MS?: string;
+  /**
    * Tests only: lowers how many bytes of text a definition export packages
    * (src/definition-export.ts); never raises it.
    */

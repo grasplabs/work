@@ -11,7 +11,7 @@ import { z } from "zod";
 import { questionDataOf } from "../src/chat-harness.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { personOf } from "../src/connections.ts";
-import { chatSession, workspace } from "../src/durable-objects.ts";
+import { callObject, chatSession, workspace } from "../src/durable-objects.ts";
 import { analysisPurpose } from "../src/turn-recall.ts";
 import {
   chatOf,
@@ -141,6 +141,27 @@ const keptOf = async (
         return stopReason === undefined ? role : `${role}:${stopReason}`;
       })
   );
+
+/** How many attempts `callObject` makes when the first throws `error`. */
+const attemptsAfter = async (error: Error): Promise<number> => {
+  let attempts = 0;
+  try {
+    // oxlint-disable-next-line require-await -- a call that answers at once
+    await callObject(async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw error;
+      }
+    });
+  } catch {
+    // Not retried: the attempts say so.
+  }
+  return attempts;
+};
+
+/** An error as workerd marks it. */
+const platformError = (message: string, marks: Record<string, boolean>) =>
+  Object.assign(new Error(message), marks);
 
 describe("a chat's ChatSession", () => {
   it("takes one question at a time: another turn's is refused before it is taken, and the same turn's joins it", async () => {
@@ -473,6 +494,65 @@ describe("a chat's ChatSession", () => {
       await expect(overran).resolves.toBe("reset");
     }
   );
+
+  it("retries a call whose object reset, or reset for holding its calls too long, and nothing else the platform marks overloaded", async () => {
+    const overrun =
+      "A call to blockConcurrencyWhile() in a Durable Object waited for too long. The call was canceled and the Durable Object was reset.";
+    expect({
+      reset: await attemptsAfter(
+        platformError("Durable Object reset because its code was updated.", {
+          durableObjectReset: true,
+        })
+      ),
+      overloaded: await attemptsAfter(
+        platformError(
+          "Durable Object is overloaded. Too many requests queued.",
+          {
+            overloaded: true,
+          }
+        )
+      ),
+      overrun: await attemptsAfter(
+        platformError(overrun, { durableObjectReset: true, overloaded: true })
+      ),
+      otherOverloadedReset: await attemptsAfter(
+        platformError(
+          "Durable Object's isolate exceeded its memory limit and was reset.",
+          {
+            durableObjectReset: true,
+            overloaded: true,
+          }
+        )
+      ),
+    }).toStrictEqual({
+      reset: 2,
+      overloaded: 1,
+      overrun: 2,
+      otherOverloadedReset: 1,
+    });
+  });
+
+  it("tells the chat's agent a note once however often it is sent with its ID, and each note with an ID of its own", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId, says("Noted."));
+    const { session } = sessionOf(asking, userId);
+    const told = "A note for this chat alone.";
+    const other = "Another note for it.";
+    // Sent again, as a call that broke on its way back is.
+    await session().note(told, "note-1");
+    await session().note(told, "note-1");
+    await session().note(other, "note-2");
+    await asking.ask("Anything new?");
+    // The turn's request: the one its notes went into.
+    const body =
+      asking.provider.requests
+        .map((request) => JSON.stringify(request.body))
+        .find((sent) => sent.includes(told)) ?? "";
+    expect({
+      told: body.split(told).length - 1,
+      other: body.split(other).length - 1,
+    }).toStrictEqual({ told: 1, other: 1 });
+  });
 
   it("ends a turn whose step pi parked after restarts cut it off, so the chat can be deleted and its person erased", async () => {
     const { userId, person: signedIn } = await signedInWithRole(idp, "user");

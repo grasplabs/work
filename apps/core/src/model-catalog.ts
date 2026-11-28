@@ -226,15 +226,35 @@ export const isRouteApi = (api: string): api is RouteApi =>
   Object.hasOwn(adapters, api);
 
 /**
+ * Each API's adapter once this isolate has loaded it, at its first model
+ * request, and never again. Kept as the function, never as a promise of
+ * it: an isolate serves many requests and objects, and a promise belongs
+ * to the one that made it, which then runs or holds whatever another
+ * awaits on it. A load that failed keeps nothing, so the next tries again.
+ */
+const loadedAdapters = new Map<
+  RouteApi,
+  StreamFunction<Api, SimpleStreamOptions>
+>();
+
+/**
  * pi's adapter for `api`. Only the APIs whose adapter takes a custom
  * fetch, so every request goes through the gateway's own (`open`).
  */
 export const adapterFor = async (
   api: RouteApi
 ): Promise<StreamFunction<Api, SimpleStreamOptions>> => {
-  const adapter = await adapters[api]();
+  const kept = loadedAdapters.get(api);
+  if (kept !== undefined) {
+    return kept;
+  }
   // SAFETY: a route's model always speaks its adapter's API (its `api`
   // picks the adapter), which pi's types can't tie together.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return adapter as StreamFunction<Api, SimpleStreamOptions>;
+  const adapter = (await adapters[api]()) as StreamFunction<
+    Api,
+    SimpleStreamOptions
+  >;
+  loadedAdapters.set(api, adapter);
+  return adapter;
 };
