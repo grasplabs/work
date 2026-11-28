@@ -107,7 +107,7 @@ export interface ClientSetup {
   moreReleases: boolean;
   /** The release it should run (src/rollout/desired.ts); null while its channel has none. */
   target: string | null;
-  /** Its last deploy by the reconciler (src/rollout/reconciler.ts); null before any. */
+  /** Its last deploy by the rollout pass (src/rollout/scheduler.ts); null before any. */
   deploy: {
     releaseId: string;
     status: (typeof clientDeploys.status.enumValues)[number];
@@ -211,7 +211,7 @@ const staffWindowSetupOf = async (
   };
 };
 
-/** Client `clientId`'s last deploy by the reconciler. */
+/** Client `clientId`'s last deploy by the rollout pass. */
 const deployOf = async (
   db: AdminDatabase,
   clientId: string

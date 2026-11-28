@@ -4,14 +4,12 @@
  * request comes from, and answer a refusal as its code
  * (`RolloutErrorCode`), which the page words; anything else fails.
  */
-import { log } from "@grasp-os/shared/log";
 import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { adminDatabase } from "../db/act.ts";
 import { deploySecrets, MissingStoreSecretError } from "../deploy/context.ts";
-import { errorCode } from "../deploy/errors.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
 import {
   channelSchema,
@@ -19,17 +17,17 @@ import {
   pinSchema,
   promoteRelease,
   promoteSchema,
-  retryChannel,
+  resumeRollout,
+  resumeSchema,
   retryClient,
   retryClientSchema,
-  retrySchema,
   setClientChannel,
 } from "./channels.ts";
 import { driftOf } from "./drift.ts";
 import type { ClientDrift } from "./drift.ts";
 import { RolloutError } from "./errors.ts";
 import type { RolloutErrorCode } from "./errors.ts";
-import { reconcile } from "./reconciler.ts";
+import { runRolloutPass } from "./scheduler.ts";
 import {
   checkRevocation,
   sharedSecretsStatus,
@@ -44,9 +42,9 @@ export type RolloutChange =
   | { done: false; refused: RolloutErrorCode };
 
 /**
- * Runs `task`, a refusal answered as its code, then the reconciler once,
- * so what staff changed starts deploying now rather than at the cron's
- * next tick. A tick that fails is logged: the cron runs the next.
+ * Runs `task`, a refusal answered as its code, then the rollout pass
+ * once, so what staff changed starts deploying now rather than at the
+ * cron's next minute. A pass that fails is logged: the cron runs the next.
  */
 const change = async (task: () => Promise<void>): Promise<RolloutChange> => {
   try {
@@ -57,11 +55,7 @@ const change = async (task: () => Promise<void>): Promise<RolloutChange> => {
     }
     throw error;
   }
-  try {
-    await reconcile(env);
-  } catch (error) {
-    log.error("reconcile.failed", { error: errorCode(error) });
-  }
+  await runRolloutPass(env);
   return { done: true, refused: null };
 };
 
@@ -74,12 +68,12 @@ export const promoteReleaseFn = createServerFn({ method: "POST" })
       })
   );
 
-export const retryChannelFn = createServerFn({ method: "POST" })
-  .validator(retrySchema)
+export const resumeRolloutFn = createServerFn({ method: "POST" })
+  .validator(resumeSchema)
   .handler(
     async ({ data, context }) =>
       await change(async () => {
-        await retryChannel(env, context.staff, data);
+        await resumeRollout(env, context.staff, data);
       })
   );
 

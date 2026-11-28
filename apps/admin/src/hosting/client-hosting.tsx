@@ -4,7 +4,7 @@
  * it by itself, where its data is kept, its
  * operation, and trying again now once it stopped (src/hosting/placement.ts).
  * Which release it runs once live is its channel's or its pin's, which the
- * reconciler deploys (src/rollout/reconciler.ts): nothing here changes it.
+ * reconciler deploys (src/rollout/scheduler.ts): nothing here changes it.
  */
 import { Button } from "@grasp-os/ui/components/button";
 import { Checkbox } from "@grasp-os/ui/components/checkbox";

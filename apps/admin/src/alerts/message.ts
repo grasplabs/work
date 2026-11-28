@@ -6,6 +6,7 @@
  */
 import "@tanstack/react-start/server-only";
 import type { Channel } from "../rollout/channel-ids.ts";
+import { channelWords } from "../rollout/channel-words.ts";
 import type { AlertEvent } from "./alert.ts";
 import type { AlertMessage } from "./senders.ts";
 
@@ -38,11 +39,15 @@ const linkOf = (env: Env, path: string): string | null =>
 const subjectFor = (env: Env, subject: string): string =>
   env.STAGE === "production" ? subject : `[${env.STAGE}] ${subject}`;
 
-/** The admin's page for `event`: the releases, or the organization's Setup. */
-const pathOf = (event: AlertEvent): string =>
-  "clientId" in event
-    ? `/organizations/${encodeURIComponent(event.clientId)}/setup`
+/** The admin's page for `event`: the organization's Setup, the channels for a rollout, or the releases. */
+const pathOf = (event: AlertEvent): string => {
+  if ("clientId" in event) {
+    return `/organizations/${encodeURIComponent(event.clientId)}/setup`;
+  }
+  return event.kind === "rollout_halted" || event.kind === "rollout_blocked"
+    ? "/platform"
     : "/platform/releases";
+};
 
 /**
  * `event`, which changed at `at`, with the organization it's about and
@@ -82,6 +87,19 @@ const wordsOf = (
   event: AlertEvent,
   name: string | null
 ): { subject: string; text: string } => {
+  if (event.kind === "rollout_halted") {
+    const channel = channelWords[event.channel];
+    return {
+      subject: `${channel} rollout of ${event.releaseId} halted`,
+      text: `The ${channel} rollout of release ${event.releaseId} halted: ${event.failed} organizations failed on it since it started or was last resumed (${event.done} done). Nothing new starts on ${channel} until staff resume it, or promote another release.`,
+    };
+  }
+  if (event.kind === "rollout_blocked") {
+    return {
+      subject: "Rollouts paused by Cloudflare's rate limit",
+      text: `Cloudflare refused the deployer token for making too many requests. No organization starts deploying until ${new Date(event.until).toISOString()}; the runs out wait it out.`,
+    };
+  }
   if (event.kind === "import_failed") {
     return {
       subject: `Release ${event.releaseId} didn't import`,

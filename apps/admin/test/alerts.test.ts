@@ -332,6 +332,51 @@ CREATE TABLE t (id TEXT);`,
     );
   });
 
+  it("tells of a rollout's halt and of a 429 block once each, however often a pass sees them, and of a halt after a resume again", async () => {
+    const mail = mailbox();
+    await switchChannel("mail", true);
+    const halt = {
+      kind: "rollout_halted",
+      rolloutId: "r-alerted",
+      channel: "stable",
+      releaseId: "26.11.7",
+      done: 4,
+      failed: 3,
+      since: 1000,
+    } as const;
+    const block = {
+      kind: "rollout_blocked",
+      until: Date.UTC(2026, 10, 28, 10, 5),
+    } as const;
+
+    await alert(db, halt);
+    await alert(db, block);
+    await deliver(mail.env);
+    await alert(db, halt);
+    await alert(db, block);
+    await deliver(mail.env);
+    // Resumed at 2000, and halted again.
+    await alert(db, { ...halt, failed: 4, since: 2000 });
+    await deliver(mail.env);
+
+    expect(
+      mail.sent.map(({ subject, text }) => ({ subject, text }))
+    ).toStrictEqual([
+      {
+        subject: "Stable rollout of 26.11.7 halted",
+        text: "The Stable rollout of release 26.11.7 halted: 3 organizations failed on it since it started or was last resumed (4 done). Nothing new starts on Stable until staff resume it, or promote another release.",
+      },
+      {
+        subject: "Rollouts paused by Cloudflare's rate limit",
+        text: "Cloudflare refused the deployer token for making too many requests. No organization starts deploying until 2026-11-28T10:05:00.000Z; the runs out wait it out.",
+      },
+      {
+        subject: "Stable rollout of 26.11.7 halted",
+        text: "The Stable rollout of release 26.11.7 halted: 4 organizations failed on it since it started or was last resumed (4 done). Nothing new starts on Stable until staff resume it, or promote another release.",
+      },
+    ]);
+  });
+
   it("never tells a channel switched on after the change, nor one switched off since", async () => {
     const mail = mailbox();
     await withWebhook();

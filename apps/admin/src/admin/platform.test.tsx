@@ -422,7 +422,7 @@ describe("Platform's Offboarded and Releases", () => {
   });
 });
 
-/** Beta: on 39.01.09, three companies following it, two of them failed, 39.01.10 to promote. */
+/** Beta: on 39.01.09, three companies following it, two of them failed and its rollout halted, 39.01.10 to promote. */
 const beta: ChannelProgress = {
   channel: "beta",
   releaseId: "39.01.09",
@@ -430,7 +430,7 @@ const beta: ChannelProgress = {
   total: 3,
   upToDate: 1,
   following: 3,
-  failed: true,
+  halted: true,
   clients: [
     {
       id: "a",
@@ -467,7 +467,7 @@ const openPlatform = async () => {
     fetchPlatform: { channels: [beta], history: [], events: [] },
     fetchChannels: [beta],
     promoteReleaseFn: { done: true, refused: null },
-    retryChannelFn: { done: true, refused: null },
+    resumeRolloutFn: { done: true, refused: null },
   });
   const sent = (fn: string) =>
     page.calls.filter((call) => call.fn === fn).map((call) => call.data);
@@ -530,19 +530,19 @@ describe("moving a channel's companies", () => {
     });
   });
 
-  it("retries a channel's failed deploys only once staff confirm, naming how many companies try again", async () => {
+  it("resumes a channel's halted rollout only once staff confirm, naming how many companies try again", async () => {
     const page = await openPlatform();
-    await press(() => betaPanel(page.container), "Retry");
+    await press(() => betaPanel(page.container), "Resume");
     const words = question()?.textContent ?? "";
-    await press(() => question() ?? document, "Retry");
-    await until(() => page.sent("retryChannelFn").length > 0);
+    await press(() => question() ?? document, "Resume");
+    await until(() => page.sent("resumeRolloutFn").length > 0);
 
     expect({
-      title: words.includes("Retry Beta’s failed deploys?"),
+      title: words.includes("Resume Beta’s rollout?"),
       reach: words.includes(
         "2 companies on Beta whose deploy failed try again, each with the release it was being given"
       ),
-      sent: page.sent("retryChannelFn"),
+      sent: page.sent("resumeRolloutFn"),
     }).toStrictEqual({ title: true, reach: true, sent: [{ channel: "beta" }] });
   });
 
@@ -559,13 +559,13 @@ describe("moving a channel's companies", () => {
     };
     const outcomes = [
       ...(await askAndLeave("Promote")),
-      ...(await askAndLeave("Retry")),
+      ...(await askAndLeave("Resume")),
     ];
 
     expect({
       outcomes,
       promoted: page.sent("promoteReleaseFn"),
-      retried: page.sent("retryChannelFn"),
+      resumed: page.sent("resumeRolloutFn"),
     }).toStrictEqual({
       outcomes: [
         { open: false },
@@ -574,7 +574,7 @@ describe("moving a channel's companies", () => {
         { open: false },
       ],
       promoted: [],
-      retried: [],
+      resumed: [],
     });
   });
 });
@@ -584,7 +584,7 @@ describe("Platform's figure of who is up to date", () => {
     const stable: ChannelProgress = {
       ...beta,
       channel: "stable",
-      failed: false,
+      halted: false,
       total: 2,
       upToDate: 1,
       following: 1,

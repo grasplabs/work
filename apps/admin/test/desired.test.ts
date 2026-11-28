@@ -2,8 +2,6 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   isSecretsBehind,
-  parallelDeploys,
-  planChannel,
   promotableReleases,
   promotionRefusal,
   stateOf,
@@ -16,8 +14,7 @@ import type { ClientFacts, Promotion } from "../src/rollout/desired.ts";
 // - a release skipping a channel (Edge straight to Stable);
 // - a channel unable to go back to a release it had;
 // - a pinned client deployed to its channel's release;
-// - a failed client deployed again before staff retry;
-// - more than the cap deploying on one channel at once.
+// - a failed client deployed again before staff retry.
 
 const releases = { edge: "26.11.3", beta: "26.11.2", stable: "26.11.1" };
 
@@ -92,7 +89,12 @@ describe("where a client stands", () => {
       stateOf(
         client({
           running: "26.10.9",
-          deploy: { releaseId: "26.11.1", status: "deploying", error: null },
+          deploy: {
+            releaseId: "26.11.1",
+            status: "deploying",
+            error: null,
+            rolloutId: null,
+          },
         }),
         releases
       )
@@ -104,7 +106,12 @@ describe("where a client stands", () => {
       stateOf(
         client({
           running: "26.10.9",
-          deploy: { releaseId: "26.11.1", status: "failed", error: "x" },
+          deploy: {
+            releaseId: "26.11.1",
+            status: "failed",
+            error: "x",
+            rolloutId: null,
+          },
         }),
         releases
       )
@@ -114,35 +121,17 @@ describe("where a client stands", () => {
       stateOf(
         client({
           running: "26.10.9",
-          deploy: { releaseId: "26.10.8", status: "failed", error: "x" },
+          deploy: {
+            releaseId: "26.10.8",
+            status: "failed",
+            error: "x",
+            rolloutId: null,
+          },
         }),
         releases
       )
     ).toBe("waiting");
     expect(stateOf(client(), { ...releases, stable: null })).toBe("no_release");
-  });
-});
-
-describe("a channel's plan", () => {
-  const waiting = (count: number): ClientFacts[] =>
-    Array.from({ length: count }, (_, index) =>
-      client({ id: `c${String(index).padStart(3, "0")}`, running: "26.10.9" })
-    );
-
-  it(`starts at most ${parallelDeploys} at once, counting those out`, () => {
-    expect(planChannel(waiting(40), releases, 0, false).start).toHaveLength(
-      parallelDeploys
-    );
-    expect(planChannel(waiting(40), releases, 3, false).start).toHaveLength(
-      parallelDeploys - 3
-    );
-    expect(
-      planChannel(waiting(40), releases, parallelDeploys, false).start
-    ).toStrictEqual([]);
-  });
-
-  it("starts nothing once the channel failed", () => {
-    expect(planChannel(waiting(3), releases, 0, true).start).toStrictEqual([]);
   });
 });
 

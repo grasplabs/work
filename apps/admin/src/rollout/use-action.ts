@@ -12,6 +12,9 @@ const refusals: Readonly<Record<RolloutErrorCode, string>> = {
     "The channel's release changed how chats are stored, and that release can't read them: release a fix instead.",
   channel_changed:
     "The channel changed just now: look at it again before promoting.",
+  previous_channel_halted:
+    "That release's rollout halted on the channel before: resume it there, or promote a fix, first.",
+  not_halted: "The channel's rollout isn't halted: there's nothing to resume.",
   unknown_client: "There's no such company.",
 };
 

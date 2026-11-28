@@ -124,8 +124,8 @@ export interface GridRow {
    * yet (src/rollout/deploy.ts, `deploy.fail`), and how many imported
    * releases it is behind the one it should run (its pin, or its
    * channel's), counted from the oldest any of its Workers runs, and why
-   * the reconciler couldn't act on its channel at its last tick, if it
-   * couldn't (src/rollout/reconciler.ts).
+   * why nothing new deploys on its channel, if nothing does: its
+   * rollout halted (src/rollout/scheduler.ts).
    */
   rollout: {
     failed: { releaseId: string; error: string | null } | null;
@@ -274,7 +274,7 @@ const failedDeploys = async (
   );
 };
 
-/** Why the reconciler couldn't act on each channel at its last tick, by channel. */
+/** Why nothing new deploys on each channel where nothing does, by channel. */
 const stoppedChannels = async (
   db: AdminDatabase
 ): Promise<Map<Channel, string>> => {

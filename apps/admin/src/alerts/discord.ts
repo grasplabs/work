@@ -193,8 +193,36 @@ const contentOf = (
   facts: AlertFacts
 ): { what: string; about: string; next: string; fields: DiscordField[] } => {
   const { event, organization } = facts;
-  const release = field("Release", plain(event.releaseId, limits.fieldValue));
   const stage = field("Stage", plain(facts.stage, limits.fieldValue));
+  if (event.kind === "rollout_blocked") {
+    return {
+      what: "Rollouts paused",
+      about: "Cloudflare's rate limit",
+      next: "No organization starts deploying until the block ends; the runs out wait it out.",
+      fields: [
+        field("Until", relative(new Date(event.until))),
+        field("Since", relative(facts.at)),
+        stage,
+      ],
+    };
+  }
+  const release = field("Release", plain(event.releaseId, limits.fieldValue));
+  if (event.kind === "rollout_halted") {
+    const channel = channelWords[event.channel];
+    return {
+      what: "Rollout halted",
+      about: `${channel} ${event.releaseId}`,
+      next: `Nothing new starts on ${channel} until staff resume it, or promote another release.`,
+      fields: [
+        field("Channel", channel),
+        release,
+        field("Failed", String(event.failed)),
+        field("Done", String(event.done)),
+        field("Since", relative(facts.at)),
+        stage,
+      ],
+    };
+  }
   if (event.kind === "import_failed") {
     return {
       what: "Release didn't import",
@@ -257,7 +285,9 @@ export const embedOf = (facts: AlertFacts): DiscordEmbed => {
   const title = `${facts.test ? "Test: " : ""}${what}: `;
   const failed =
     facts.event.kind === "import_failed" ||
-    facts.event.kind === "deploy_failed";
+    facts.event.kind === "deploy_failed" ||
+    facts.event.kind === "rollout_halted" ||
+    facts.event.kind === "rollout_blocked";
   const lines = [
     ...(facts.test ? [testLine, ""] : []),
     next,

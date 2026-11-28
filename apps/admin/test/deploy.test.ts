@@ -13,8 +13,8 @@ import {
   clients,
   clientWorkers,
 } from "../src/db/schema.ts";
-import { retryChannel } from "../src/rollout/channels.ts";
-import { reconcile } from "../src/rollout/reconciler.ts";
+import { retryClient } from "../src/rollout/channels.ts";
+import { rolloutPass } from "../src/rollout/scheduler.ts";
 import { checkRevocation } from "../src/rollout/shared-secrets.ts";
 import { deliveredShared } from "../src/rollout/targets.ts";
 import { adminWorkflow, adminWorkflows } from "../src/workflow-runs.ts";
@@ -42,8 +42,8 @@ import {
   useStoreSecrets,
 } from "./secrets-store.ts";
 
-// One client's deploy, as the reconciler starts it (src/rollout/deploy.ts,
-// src/rollout/reconciler.ts), broken where it can break. How it can fail,
+// One client's deploy, as the rollout pass starts it (src/rollout/deploy.ts,
+// src/rollout/scheduler.ts), broken where it can break. How it can fail,
 // each tried below:
 // - a release that fails its probe once live left on the client, or
 //   rolled back to one that can't read the chats it stores;
@@ -166,7 +166,7 @@ const uploadOf = async (
 
 /**
  * The admin's runs as the test starts them, retries and sleeps going at
- * once: `tick` is the cron's reconciler, `settle` waits for every deploy
+ * once: `tick` is the cron's rollout pass, `settle` waits for every deploy
  * started so far to end, `converge` ticks until nothing is left to do, and
  * `latest` is the newest deploy's run, once there is one.
  */
@@ -181,14 +181,14 @@ const followRuns = () => {
   };
   return {
     tick: async (): Promise<void> => {
-      await reconcile(env);
+      await rolloutPass(env);
     },
     settle,
     converge: async (): Promise<void> => {
       for (let round = 0; round < 4; round += 1) {
         const before = runs.of(adminWorkflows.deploy).length;
         // oxlint-disable-next-line no-await-in-loop -- one tick at a time
-        await reconcile(env);
+        await rolloutPass(env);
         // oxlint-disable-next-line no-await-in-loop -- one tick at a time
         await settle();
         if (runs.of(adminWorkflows.deploy).length === before) {
@@ -552,7 +552,7 @@ describe("a client's deploy", () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       await releaseToEdge(env, [release]);
-      await reconcile(env);
+      await rolloutPass(env);
       const [runId] = deploys.started;
       if (runId === undefined || reads === undefined) {
         throw new Error("The deploy's run wasn't started");
@@ -604,7 +604,7 @@ describe("a client's deploy", () => {
     });
     try {
       await releaseToEdge(env, [release]);
-      await reconcile(env);
+      await rolloutPass(env);
       const [started] = deploys.started;
       if (started === undefined || held === undefined) {
         throw new Error("The deploy's run wasn't started");
@@ -656,7 +656,7 @@ describe("a client's deploy", () => {
       held.release();
       errors.mockRestore();
     }
-    await retryChannel(env, staff, { channel: "edge" });
+    await retryClient(env, staff, { clientId: client.clientId });
     await runs.converge();
 
     expect({
@@ -854,7 +854,7 @@ describe("shared secrets as desired state", () => {
       errors.mockRestore();
     }
 
-    await retryChannel(env, staff, { channel: "edge" });
+    await retryClient(env, staff, { clientId: client.clientId });
     await runs.converge();
 
     expect({

@@ -17,7 +17,7 @@
  *   `POST /__e2e/seed-placed` the placed-client journey's,
  *   `POST /__e2e/seed-organizations` an organization's journeys' and
  *   `POST /__e2e/seed-create` the create journey's (test/e2e-seed.ts).
- *   `POST /__e2e/tick` runs the cron's reconciler once.
+ *   `POST /__e2e/tick` runs the cron's rollout pass once.
  *   `POST /__e2e/core` holds a seeded core's snapshot answer for a while,
  *   or lets it answer at once again, and answers how many snapshots it
  *   answered so far.
@@ -27,7 +27,7 @@ import { loopbackHosts } from "@grasp-os/shared/router";
 import { env as adminEnv } from "cloudflare:workers";
 import { z } from "zod";
 
-import { reconcile } from "../src/rollout/reconciler.ts";
+import { rolloutPass } from "../src/rollout/scheduler.ts";
 import server from "../src/server.ts";
 import { base } from "./cloudflare-api-kit.ts";
 import type { CoreState } from "./cloudflare-api-kit.ts";
@@ -155,10 +155,10 @@ export default {
       cloudflare.reset();
       return Response.json(await seed(cloudflare, tokens));
     }
-    // The cron's reconciler, once: what a journey waits on, as a deploy
-    // starts at the next tick (src/rollout/reconciler.ts).
+    // The cron's rollout pass, once: what a journey waits on, as a deploy
+    // starts at the next tick (src/rollout/scheduler.ts).
     if (url.pathname === "/__e2e/tick" && request.method === "POST") {
-      await reconcile(env);
+      await rolloutPass(env);
       return new Response(null, { status: 204 });
     }
     if (url.pathname === "/__e2e/seed-create" && request.method === "POST") {

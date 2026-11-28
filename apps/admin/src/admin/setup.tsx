@@ -543,8 +543,8 @@ const working: ReadonlySet<ProvisioningView["phase"]> = new Set([
 ]);
 
 /**
- * Whether the reconciler is deploying it, or will at its next tick
- * (src/rollout/reconciler.ts): a deploy is out, or one of its Workers
+ * Whether the rollout pass is deploying it, or will at its next run
+ * (src/rollout/scheduler.ts): a deploy is out, or one of its Workers
  * runs another release than it should and that release didn't fail on it
  * (a failed deploy waits for staff).
  */

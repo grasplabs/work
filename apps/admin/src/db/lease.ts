@@ -4,7 +4,11 @@
  * invocation whether or not the last one has ended. Each lease is a row of
  * `leases`, taken with one compare-and-set statement, so of runs at once
  * one gets it, and only from no one or a holder whose lease expired: a run
- * that died without giving it back holds the work up until then.
+ * that died without giving it back holds the work up until then. Each
+ * holder says how long it holds: no longer than the longest its work runs
+ * (a cron or queue invocation's wall-clock limit is 15 minutes,
+ * developers.cloudflare.com/workers/platform/limits/), and as short as
+ * that allows, so work cut off mid-way holds the next run back little.
  */
 import "@tanstack/react-start/server-only";
 import { and, eq, lte } from "drizzle-orm";
@@ -12,20 +16,18 @@ import { and, eq, lte } from "drizzle-orm";
 import type { AdminDatabase } from "./act.ts";
 import { leases } from "./schema.ts";
 
-/**
- * How long a lease lasts: the longest a cron or queue invocation runs (its
- * wall-clock limit, developers.cloudflare.com/workers/platform/limits/),
- * so no holder outlives it.
- */
-const leaseMs = 15 * 60 * 1000;
+/** The longest any work runs: a cron or queue invocation's wall-clock limit. */
+export const invocationLeaseMs = 15 * 60 * 1000;
 
 /**
- * Runs `work` while holding lease `id`, gives it back after, and returns
- * what `work` did; undefined, at once, when another run holds it.
+ * Runs `work` while holding lease `id` for up to `leaseMs`, gives it back
+ * after, and returns what `work` did; undefined, at once, when another
+ * run holds it.
  */
 export const withLease = async <T>(
   db: AdminDatabase,
   id: string,
+  leaseMs: number,
   work: () => Promise<T>
 ): Promise<T | undefined> => {
   const holder = crypto.randomUUID();

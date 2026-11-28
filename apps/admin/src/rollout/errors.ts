@@ -19,6 +19,13 @@ export const rolloutErrorCodes = [
   "channel_behind_chat_storage",
   /** The channel's release changed as it was set: read it again. */
   "channel_changed",
+  /**
+   * The release's rollout on the channel before (Edge for Beta, Beta for
+   * Stable) is halted: resume it, or promote a fix, first.
+   */
+  "previous_channel_halted",
+  /** The channel's rollout isn't halted: there's nothing to resume. */
+  "not_halted",
   /** No such client. */
   "unknown_client",
 ] as const;

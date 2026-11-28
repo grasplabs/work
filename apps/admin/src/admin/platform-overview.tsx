@@ -75,7 +75,7 @@ const UpToDateFigure = ({
 }) => {
   const following = channels.reduce((sum, each) => sum + each.following, 0);
   const upToDate = channels.reduce((sum, each) => sum + each.upToDate, 0);
-  const failed = channels.some((each) => each.failed);
+  const failed = channels.some((each) => each.halted);
   return (
     <Stat
       change={

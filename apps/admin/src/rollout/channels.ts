@@ -2,16 +2,22 @@
  * Release channels: Edge, Beta and Stable. Each points at one release, and
  * every client follows one (Stable unless staff move it), unless it's
  * pinned to a release of its own. These actions only change that desired
- * state, each audited; the reconciler deploys it (src/rollout/reconciler.ts).
+ * state, each audited; the rollout pass deploys it
+ * (src/rollout/scheduler.ts).
  *
+ * Each move of a channel starts its rollout of the release (`rollouts`)
+ * in the batch that moves it, and supersedes the one it had: the move's
+ * actor is the rollout's approver (`started_by`), one approval per
+ * channel and release.
  * - A new release goes to Edge by itself, in the batch the admin imports
  *   it in, on every stage alike (`toEdge`).
  * - Staff promote a release from Edge to Beta, and from Beta to Stable
- *   (`promoteRelease`); rolling a channel back is setting it to a release
- *   it had before (src/rollout/desired.ts).
- * - Retry clears a channel's failed deploys, so the reconciler tries them
- *   again (`retryChannel`), or one client's, pinned or not, from its
- *   Setup (`retryClient`).
+ *   (`promoteRelease`), not while its rollout on the channel before is
+ *   halted; rolling a channel back is setting it to a release it had
+ *   before (src/rollout/desired.ts).
+ * - Resume sets a halted rollout going again, its failed organizations
+ *   tried again (`resumeRollout`); Retry tries one client's failed deploy
+ *   again, pinned or not, from its Setup (`retryClient`).
  * - Pin, unpin and move change one client's fields (`pinClient`,
  *   `setClientChannel`).
  *
@@ -36,7 +42,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
-import { actIfChanged, adminDatabase } from "../db/act.ts";
+import { actIfChanged, adminDatabase, auditIfChanged } from "../db/act.ts";
 import type { Actor, AdminDatabase } from "../db/act.ts";
 import {
   auditEvents,
@@ -44,12 +50,15 @@ import {
   clientDeploys,
   clients,
   releases,
+  rollouts,
 } from "../db/schema.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { channelIds } from "./channel-ids.ts";
-import { promotionRefusal } from "./desired.ts";
+import type { Channel } from "./channel-ids.ts";
+import { previousChannel, promotionRefusal } from "./desired.ts";
 import type { Promotion } from "./desired.ts";
 import { RolloutError } from "./errors.ts";
+import { liveRolloutStatuses } from "./plan.ts";
 import { channelReleases } from "./targets.ts";
 
 /** The audit action every change of a channel's release is recorded as. */
@@ -174,9 +183,53 @@ const bundleKept = (releaseId: string) =>
   sql`EXISTS (SELECT 1 FROM ${releases} WHERE ${releases.id} = ${releaseId} AND ${releases.bundleDeletedAt} IS NULL)`;
 
 /**
+ * Whether release `releaseId`'s rollout on the channel before `channel`
+ * is halted, as SQL: what keeps a promotion from going on past it. Only
+ * while it is: once that channel moves on, its rollout is superseded, and
+ * staff decide.
+ */
+const previousHalted = (channel: Channel, releaseId: string): SQL => {
+  const previous = previousChannel[channel];
+  return previous === null
+    ? sql`0`
+    : sql`EXISTS (SELECT 1 FROM ${rollouts} WHERE ${rollouts.channel} = ${previous} AND ${rollouts.releaseId} = ${releaseId} AND ${rollouts.status} = 'halted')`;
+};
+
+/**
+ * `channel`'s new rollout of `releaseId` by `actor`, as statements to run
+ * before the move they belong to, each only `when` it holds as read then:
+ * the channel's live rollout superseded, and the new one started.
+ */
+const startRollout = (
+  db: AdminDatabase,
+  actor: Actor,
+  { channel, releaseId, rolloutId }: Promotion & { rolloutId: string },
+  when: SQL,
+  now: Date
+): [BatchItem<"sqlite">, BatchItem<"sqlite">] => [
+  db
+    .update(rollouts)
+    .set({ status: "superseded", endedAt: now })
+    .where(
+      and(
+        eq(rollouts.channel, channel),
+        inArray(rollouts.status, liveRolloutStatuses),
+        when
+      )
+    ),
+  db
+    .insert(rollouts)
+    .select(
+      sql`SELECT ${rolloutId}, ${channel}, ${releaseId}, 'running', ${typeof actor === "string" ? actor : actor.email}, ${now.getTime()}, NULL, NULL, NULL, 0, 0 WHERE ${when}`
+    ),
+];
+
+/**
  * Points `channel` at `releaseId`, as `actor`, audited with what it
- * pointed at before: only from `from`, as read, so two changes at once
- * land one. Returns whether it changed.
+ * pointed at before, and starts its rollout of it, in one batch: only
+ * from `from`, as read, so two changes at once land one, and, unless it
+ * goes `back`, not while the release's rollout on the channel before is
+ * halted. Returns whether it changed.
  */
 const pointChannel = async (
   db: AdminDatabase,
@@ -189,39 +242,71 @@ const pointChannel = async (
   }: Promotion & { from: string | null; back: boolean }
 ): Promise<boolean> => {
   const now = new Date();
-  const event = {
-    action: promoteAction,
-    target: releaseId,
-    detail: { channel, ...(from === null ? {} : { from }), back },
-  };
-  if (from === null) {
-    return await actIfChanged(
-      db,
-      actor,
-      db
-        .insert(channels)
-        .select(
-          sql`SELECT ${channel}, ${releaseId}, ${now.getTime()}, NULL WHERE ${bundleKept(releaseId)}`
-        )
-        .onConflictDoNothing(),
-      event
+  const rolloutId = crypto.randomUUID();
+  const pointing =
+    from === null
+      ? sql`NOT EXISTS (SELECT 1 FROM ${channels} WHERE ${channels.id} = ${channel})`
+      : sql`EXISTS (SELECT 1 FROM ${channels} WHERE ${channels.id} = ${channel} AND ${channels.releaseId} = ${from})`;
+  const when = sql`${pointing} AND ${bundleKept(releaseId)} AND NOT ${back ? sql`0` : previousHalted(channel, releaseId)}`;
+  const move =
+    from === null
+      ? db
+          .insert(channels)
+          .select(
+            sql`SELECT ${channel}, ${releaseId}, ${now.getTime()}, NULL WHERE ${when}`
+          )
+          .onConflictDoNothing()
+      : db
+          .update(channels)
+          .set({ releaseId, updatedAt: now, stoppedBy: null })
+          .where(and(eq(channels.id, channel), when));
+  const results = await db.batch([
+    ...startRollout(db, actor, { channel, releaseId, rolloutId }, when, now),
+    move,
+    auditIfChanged(db, actor, {
+      action: promoteAction,
+      target: releaseId,
+      detail: {
+        channel,
+        ...(from === null ? {} : { from }),
+        back,
+        rollout: rolloutId,
+      },
+    }),
+  ]);
+  return results[3].length > 0;
+};
+
+/**
+ * A promotion of `releaseId` to `channel` refused while the release's
+ * rollout on the channel before is halted (`previous_channel_halted`).
+ */
+const assertPreviousGoing = async (
+  db: AdminDatabase,
+  channel: Channel,
+  releaseId: string
+): Promise<void> => {
+  const previous = previousChannel[channel];
+  const halted =
+    previous === null
+      ? undefined
+      : await db
+          .select({ id: rollouts.id })
+          .from(rollouts)
+          .where(
+            and(
+              eq(rollouts.channel, previous),
+              eq(rollouts.releaseId, releaseId),
+              eq(rollouts.status, "halted")
+            )
+          )
+          .get();
+  if (halted !== undefined) {
+    throw new RolloutError(
+      "previous_channel_halted",
+      `${releaseId}'s rollout before ${channel} is halted`
     );
   }
-  return await actIfChanged(
-    db,
-    actor,
-    db
-      .update(channels)
-      .set({ releaseId, updatedAt: now })
-      .where(
-        and(
-          eq(channels.id, channel),
-          eq(channels.releaseId, from),
-          bundleKept(releaseId)
-        )
-      ),
-    event
-  );
 };
 
 /** Promoting a release to a channel, or setting it back, as staff choose it. */
@@ -239,8 +324,10 @@ export type PromoteInput = z.infer<typeof promoteSchema>;
  * (`promotion_not_allowed`), for one that can't read the chats the
  * channel's release stores (`channel_behind_chat_storage`, `canMove`:
  * its clients' deploys would each refuse it), for a release the admin
- * doesn't have or no longer has the bundle of, and when the channel
- * changed as it was set (`channel_changed`).
+ * doesn't have or no longer has the bundle of, for a promotion while the
+ * release's rollout on the channel before is halted
+ * (`previous_channel_halted`), and when the channel changed as it was set
+ * (`channel_changed`). Starts the channel's rollout of the release.
  */
 export const promoteRelease = async (
   env: Env,
@@ -279,6 +366,9 @@ export const promoteRelease = async (
     }
   }
   const back = history.some((event) => event.channel === channel);
+  if (!back) {
+    await assertPreviousGoing(db, channel, releaseId);
+  }
   const changed = await pointChannel(db, staff, {
     channel,
     releaseId,
@@ -286,8 +376,12 @@ export const promoteRelease = async (
     back,
   });
   if (!changed) {
-    // Its bundle claimed since it was checked, or the channel moved.
+    // Its bundle claimed since it was checked, its rollout before halted,
+    // or the channel moved.
     await assertDeployable(db, releaseId);
+    if (!back) {
+      await assertPreviousGoing(db, channel, releaseId);
+    }
     throw new RolloutError(
       "channel_changed",
       `${channel} changed as it was promoted`
@@ -305,72 +399,104 @@ const releaseOrderSql = (id: SQLWrapper | string): SQL =>
   sql`CASE WHEN ${id} LIKE 'dev-%' THEN '0' || ${id} ELSE '1' || substr(${id}, 1, 6) || printf('%09d', CAST(substr(${id}, 7) AS INTEGER)) END`;
 
 /**
- * Takes Edge to release `releaseId`, as the admin itself, audited: only
- * when it's newer than Edge's release, or Edge has none. As statements,
- * for the batch that saves the release (src/releases/import.ts), so a
- * saved release never misses Edge. A release imported late stays where
- * it is, and so does an Edge staff set back, until a newer release comes.
+ * Takes Edge to release `releaseId`, as the admin itself, audited, and
+ * starts Edge's rollout of it (by `system`): only when it's newer than
+ * Edge's release, or Edge has none. As statements, for the batch that
+ * saves the release (src/releases/import.ts), so a saved release never
+ * misses Edge. A release imported late stays where it is, and so does an
+ * Edge staff set back, until a newer release comes.
  */
 export const toEdge = (
   db: AdminDatabase,
   releaseId: string
-): [BatchItem<"sqlite">, BatchItem<"sqlite">] => {
+): [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]] => {
   const now = new Date();
+  const rolloutId = crypto.randomUUID();
   const edge = sql`${channels.id} = 'edge'`;
-  // The event first, while Edge still has the release it had.
+  const older = sql`NOT EXISTS (SELECT 1 FROM ${channels} WHERE ${edge} AND ${releaseOrderSql(channels.releaseId)} >= ${releaseOrderSql(releaseId)})`;
+  // The event and the rollout first, while Edge still has the release it had.
   const event = db
     .insert(auditEvents)
     .select(
-      sql`SELECT ${crypto.randomUUID()}, ${now.getTime()}, 'system', ${promoteAction}, NULL, ${releaseId}, json_object('channel', 'edge', 'from', (SELECT ${channels.releaseId} FROM ${channels} WHERE ${edge}), 'back', json('false')) WHERE NOT EXISTS (SELECT 1 FROM ${channels} WHERE ${edge} AND ${releaseOrderSql(channels.releaseId)} >= ${releaseOrderSql(releaseId)})`
+      sql`SELECT ${crypto.randomUUID()}, ${now.getTime()}, 'system', ${promoteAction}, NULL, ${releaseId}, json_object('channel', 'edge', 'from', (SELECT ${channels.releaseId} FROM ${channels} WHERE ${edge}), 'back', json('false'), 'rollout', ${rolloutId}) WHERE ${older}`
     );
   const move = db
     .insert(channels)
     .values({ id: "edge", releaseId, updatedAt: now })
     .onConflictDoUpdate({
       target: channels.id,
-      set: { releaseId, updatedAt: now },
+      set: { releaseId, updatedAt: now, stoppedBy: null },
       setWhere: sql`${releaseOrderSql(channels.releaseId)} < ${releaseOrderSql(releaseId)}`,
     });
-  return [event, move];
+  return [
+    event,
+    ...startRollout(
+      db,
+      "system",
+      { channel: "edge", releaseId, rolloutId },
+      older,
+      now
+    ),
+    move,
+  ];
 };
 
-/** Retrying a channel's failed deploys. */
-export const retrySchema = z.object({ channel: z.enum(channelIds) });
+/** Resuming a channel's halted rollout. */
+export const resumeSchema = z.object({ channel: z.enum(channelIds) });
 
 /**
- * Clears `input.channel`'s failed deploys, as `staff`, audited
- * (`channel.retry`): the reconciler then deploys those clients again, and
- * the channel goes on. Nothing when none failed.
+ * Sets `input.channel`'s halted rollout going again, as `staff`, audited
+ * (`rollout.resume`, with how many failed organizations it cleared), in
+ * one batch: its failed deploys cleared, so the pass deploys those
+ * clients again in their turn, and its failures counted from 0 again.
+ * Refused while the channel's rollout isn't halted (`not_halted`).
  */
-export const retryChannel = async (
+export const resumeRollout = async (
   env: Env,
   staff: Staff,
-  input: z.infer<typeof retrySchema>
+  input: z.infer<typeof resumeSchema>
 ): Promise<void> => {
   const db = adminDatabase(env.DB);
-  const { channel } = retrySchema.parse(input);
-  await actIfChanged(
-    db,
-    staff,
+  const { channel } = resumeSchema.parse(input);
+  const halted = await db
+    .select({ id: rollouts.id, releaseId: rollouts.releaseId })
+    .from(rollouts)
+    .where(and(eq(rollouts.channel, channel), eq(rollouts.status, "halted")))
+    .get();
+  if (halted === undefined) {
+    throw new RolloutError("not_halted", `${channel}'s rollout isn't halted`);
+  }
+  const now = new Date();
+  const still = sql`EXISTS (SELECT 1 FROM ${rollouts} WHERE ${rollouts.id} = ${halted.id} AND ${rollouts.status} = 'halted')`;
+  const [, recorded] = await db.batch([
     db
       .delete(clientDeploys)
       .where(
         and(
+          eq(clientDeploys.rolloutId, halted.id),
           eq(clientDeploys.status, "failed"),
-          inArray(
-            clientDeploys.clientId,
-            db
-              .select({ id: clients.id })
-              .from(clients)
-              .where(eq(clients.channel, channel))
-          )
+          still
         )
       ),
-    {
-      action: "channel.retry",
-      detail: { channel },
-    }
-  );
+    // Right after the delete, so it counts what that cleared.
+    db
+      .insert(auditEvents)
+      .select(
+        sql`SELECT ${crypto.randomUUID()}, ${now.getTime()}, ${staff.email}, 'rollout.resume', NULL, ${halted.id}, json_object('channel', ${channel}, 'release', ${halted.releaseId}, 'cleared', changes()) WHERE ${still}`
+      )
+      .returning({ id: auditEvents.id }),
+    db
+      .update(channels)
+      .set({ stoppedBy: null })
+      .where(and(eq(channels.id, channel), still)),
+    db
+      .update(rollouts)
+      .set({ status: "running", resumedAt: now, failed: 0 })
+      .where(and(eq(rollouts.id, halted.id), eq(rollouts.status, "halted"))),
+  ]);
+  if (recorded.length === 0) {
+    throw new RolloutError("not_halted", `${channel}'s rollout isn't halted`);
+  }
 };
 
 /** Retrying one client's failed deploy. */
@@ -378,10 +504,10 @@ export const retryClientSchema = z.object({ clientId: z.string().min(1) });
 
 /**
  * Clears client `input.clientId`'s failed deploy, as `staff`, audited
- * (`client.retry`): the reconciler then deploys it again, pinned or not,
- * as many at a time as its channel allows. Nothing when its last deploy
- * didn't fail. A pinned client's failure never stops its channel
- * (src/rollout/desired.ts), so this is how it's tried again.
+ * (`client.retry`): the rollout pass then deploys it again in its turn,
+ * pinned or not. Nothing when its last deploy didn't fail. Only a halt
+ * stops a channel's rollout, and resuming it clears its own failures:
+ * this is how any other failure is tried again.
  */
 export const retryClient = async (
   env: Env,
@@ -429,7 +555,7 @@ export type ChannelInput = z.infer<typeof channelSchema>;
 
 /**
  * Moves client `input.clientId` to `input.channel`, as `staff`, audited:
- * the reconciler then takes it to the channel's release, unless it's
+ * the rollout pass then takes it to the channel's release, unless it's
  * pinned. Nothing when it follows that channel already.
  */
 export const setClientChannel = async (
@@ -460,7 +586,7 @@ export type PinInput = z.infer<typeof pinSchema>;
 
 /**
  * Pins client `input.clientId` to release `input.releaseId`, as `staff`,
- * or unpins it (`null`), audited: the reconciler then takes it to the
+ * or unpins it (`null`), audited: the rollout pass then takes it to the
  * pinned release, or once unpinned to its channel's. Nothing when it
  * changes nothing.
  */
