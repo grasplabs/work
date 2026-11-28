@@ -707,10 +707,13 @@ export const applyD1Migrations = async (
  * `/accounts/{account_id}/workers/dispatch/namespaces/{namespace}/scripts/{script_name}`:
  * the upload (`PUT`, multipart, as an account's own script upload, its
  * secrets among its bindings), the script's details (`GET`, whose
- * `script.migration_tag` is the last Durable Object migration it ran),
- * its static assets' upload session, and its secrets' names (`GET`
- * `.../secrets`). Nothing more is assumed of a namespace: qualifying these
- * on a real account is GRA-430's.
+ * `script.migration_tag` is the last Durable Object migration it ran and
+ * `script.modified_on` when it last changed), its static assets' upload
+ * session, and its settings (`GET` `.../settings`: its bindings, a
+ * secret's by name alone). Nothing more is assumed of a namespace:
+ * qualifying these on a real account is GRA-430's; the settings and
+ * `modified_on` were read on Grasp Work's staging namespace on 27 November
+ * 2026.
  */
 
 /**
@@ -735,6 +738,21 @@ export const deleteTargetScript = async (
 };
 
 /**
+ * Cloudflare's refusals of an upload that repeats one it applied already:
+ * 10079, its Durable Object migration's `old_tag` no longer the script's
+ * (the migration ran), and 100312, its static files' completion token
+ * spent (the upload that carried it went through). Neither is in
+ * Cloudflare's published error list; Void's platform reads them so
+ * (voidzero-dev/void, `upload-worker.ts`, `savedUploadReplayCode`).
+ */
+const replayCodes: ReadonlySet<number> = new Set([10_079, 100_312]);
+
+/** Whether `error` is Cloudflare refusing an upload as one it applied already (`replayCodes`). */
+export const isUploadReplay = (error: unknown): boolean =>
+  error instanceof CloudflareApiError &&
+  error.codes.some((code) => replayCodes.has(code));
+
+/**
  * Uploads `upload` as the script `target` names, live at once (a dispatch
  * namespace has no gradual deployments), with its secrets. An upload that runs a Durable
  * Object migration isn't retried after a server error or no answer: if it
@@ -742,45 +760,101 @@ export const deleteTargetScript = async (
  * on the migration's tag. The caller reads the script's migration tag to
  * find out. `sent` is called once the script's whole upload has gone out:
  * until then, Cloudflare can't have taken it.
+ *
+ * Any other is retried, and a retry Cloudflare refuses as a replay
+ * (`isUploadReplay`) after an earlier attempt went out whole may be that
+ * attempt's upload, applied with its answer lost: `landed` then says
+ * whether the script runs it, read back from Cloudflare, and if it does
+ * the upload is done. If not, or with no `landed`, the refusal stands.
  */
 export const uploadTargetScript = async (
   api: CloudflareApi,
   target: ScriptTarget,
   upload: WorkerUpload,
-  { signal, sent }: { signal?: AbortSignal; sent?: () => void } = {}
+  {
+    signal,
+    sent,
+    landed,
+  }: {
+    signal?: AbortSignal;
+    sent?: () => void;
+    landed?: () => Promise<boolean>;
+  } = {}
 ): Promise<void> => {
-  await callWithForm(
-    api,
-    {
-      method: "PUT",
-      path: targetPath(target),
-      idempotent: upload.metadata.migrations === undefined,
-      // Its metadata holds the script's secrets.
-      carriesSecrets: true,
-      ...(signal === undefined ? {} : { signal }),
-    },
-    uploadForm(upload),
-    z.unknown(),
-    sent
-  );
+  // Whether this attempt's form went out whole, and an earlier one's did.
+  let wentOut = false;
+  let earlierWentOut = false;
+  try {
+    await callWithForm(
+      api,
+      {
+        method: "PUT",
+        path: targetPath(target),
+        idempotent: upload.metadata.migrations === undefined,
+        // Its metadata holds the script's secrets.
+        carriesSecrets: true,
+        ...(signal === undefined ? {} : { signal }),
+        beforeSend: async () => {
+          earlierWentOut ||= wentOut;
+          wentOut = false;
+          await Promise.resolve();
+        },
+      },
+      uploadForm(upload),
+      z.unknown(),
+      () => {
+        wentOut = true;
+        sent?.();
+      }
+    );
+  } catch (error) {
+    if (
+      earlierWentOut &&
+      isUploadReplay(error) &&
+      landed !== undefined &&
+      (await landed())
+    ) {
+      return;
+    }
+    throw error;
+  }
 };
 
 // A script the namespace hasn't got answers 200 with a null `script` (the
 // namespace's own details), not a 404, as a real namespace showed
 // (GRA-430, 28 Oct).
 const dispatchScriptSchema = z.object({
-  script: z.object({ migration_tag: z.string().nullish() }).nullable(),
+  script: z
+    .object({
+      migration_tag: z.string().nullish(),
+      modified_on: z.string().nullish(),
+      etag: z.string().nullish(),
+    })
+    .nullable(),
 });
 
 /**
- * Whether the script `target` names exists, and the last Durable Object
- * migration it ran: `scriptMigrationState` for an account's own, the
- * script's details for one in a namespace.
+ * What the script `target` names is, as Cloudflare has it: whether it
+ * exists, the last Durable Object migration it ran, and, in a namespace,
+ * when it was last modified (`modified_on`, to the microsecond), which an
+ * upload moves on, and the digest of its code (`etag`).
+ */
+export interface TargetState {
+  exists: boolean;
+  migrationTag?: string;
+  modifiedOn?: string;
+  etag?: string;
+}
+
+/**
+ * The state of the script `target` names (`TargetState`):
+ * `scriptMigrationState` for an account's own, the script's details for
+ * one in a namespace.
  */
 export const targetMigrationState = async (
   api: CloudflareApi,
   target: ScriptTarget
-): Promise<{ exists: boolean; migrationTag?: string }> => {
+): Promise<TargetState> => {
   if (target.namespace === null) {
     return await scriptMigrationState(api, target.accountId, target.scriptName);
   }
@@ -793,11 +867,18 @@ export const targetMigrationState = async (
       return { exists: false };
     }
     const tag = script.migration_tag;
+    const modified = script.modified_on;
     return {
       exists: true,
       ...(tag === null || tag === undefined || tag === ""
         ? {}
         : { migrationTag: tag }),
+      ...(modified === null || modified === undefined || modified === ""
+        ? {}
+        : { modifiedOn: modified }),
+      ...(script.etag === null || script.etag === undefined
+        ? {}
+        : { etag: script.etag }),
     };
   } catch (error) {
     if (isNotFound(error)) {
@@ -807,14 +888,25 @@ export const targetMigrationState = async (
   }
 };
 
-/** The names of the secrets the script `target` names has; their values are never read. */
-export const targetSecretNames = async (
+const settingsSchema = z
+  .object({
+    bindings: z.array(z.object({ name: z.string(), type: z.string() }).loose()),
+  })
+  .loose();
+
+/**
+ * The settings the script `target` names runs with, as Cloudflare reads
+ * them back: its bindings (a secret by its name alone, never its value),
+ * compatibility date and flags, limits, observability and the rest.
+ */
+export type TargetSettings = z.infer<typeof settingsSchema>;
+
+/** The settings of the script `target` names (`TargetSettings`). */
+export const targetSettings = async (
   api: CloudflareApi,
   target: ScriptTarget
-): Promise<string[]> => {
-  const secrets = await api.call(
-    { method: "GET", path: `${targetPath(target)}/secrets` },
-    z.array(z.object({ name: z.string() }))
+): Promise<TargetSettings> =>
+  await api.call(
+    { method: "GET", path: `${targetPath(target)}/settings` },
+    settingsSchema
   );
-  return secrets.map(({ name }) => name);
-};

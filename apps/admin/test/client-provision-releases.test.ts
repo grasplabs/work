@@ -154,7 +154,8 @@ describe("provisioning a placed client", () => {
     expect({
       operation: await operationOf(clientId),
       runs: await runs(clientId),
-      // The same two scripts, each uploaded once more: connect, then core.
+      // Core uploaded once more, on its stable script; connect, whose
+      // upload is the same as the release before's, left be.
       uploads: account.scriptUploads
         .slice(uploadsBefore)
         .map(({ script }) => script),
@@ -171,7 +172,7 @@ describe("provisioning a placed client", () => {
         error: null,
       },
       runs: { core: later.releaseId, connect: later.releaseId },
-      uploads: [scripts.connect, scripts.core],
+      uploads: [scripts.core],
       scripts: [scripts.connect, scripts.core].toSorted(),
       applied: true,
       route: { clientId, generation: 1 },
@@ -313,11 +314,12 @@ describe("provisioning a placed client", () => {
     const first = await importRelease();
     const { clientId } = await liveClient(first);
     const { connect } = await scriptsOf(clientId);
-    // Declares a new class; stops at connect's upload, before any script
-    // ran the class's migration.
+    // Declares a new class, and changes connect; stops at connect's
+    // upload, before any script ran the class's migration.
     const later = await importRelease(
       {
         notes: "feat(core): new class, new table",
+        connect: "export default { later: true };",
         migrations: {
           "0000_init.sql": "CREATE TABLE a (id TEXT);",
           "0001_more.sql": "CREATE TABLE b (id TEXT);",
@@ -500,8 +502,10 @@ describe("provisioning a placed client", () => {
   it("rolls a release that fails its probe once live back to the release before on its own, audited, and records a rollback that fails too", async () => {
     const first = await importRelease();
     const { clientId } = await liveClient(first);
+    // Its connect changed too, so the release and its rollback upload it.
     const later = await importRelease({
       notes: "feat(core): broken once live",
+      connect: "export default { later: true };",
     });
     const { connect } = await scriptsOf(clientId);
     // The release's core answers as another client; once the release's

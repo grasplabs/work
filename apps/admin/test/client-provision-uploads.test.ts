@@ -237,7 +237,11 @@ describe("provisioning a placed client", () => {
       // one before still answering core for a moment.
       if (change === "release") {
         const second = await importRelease(
-          { notes: "feat(core): second" },
+          {
+            notes: "feat(connect): second",
+            // Connect changed too: one whose upload is the same isn't uploaded.
+            connect: "export default { second: true };",
+          },
           bindsConnect
         );
         await startClientRelease(db, staff, await attempt(clientId), {
@@ -415,7 +419,11 @@ describe("provisioning a placed client", () => {
     };
     const before = await recordedConnect();
     const second = await importRelease(
-      { notes: "feat(core): second" },
+      {
+        notes: "feat(connect): second",
+        // Connect changed too: one whose upload is the same isn't uploaded.
+        connect: "export default { second: true };",
+      },
       bindsConnect
     );
     await startClientRelease(db, staff, await attempt(clientId), {
