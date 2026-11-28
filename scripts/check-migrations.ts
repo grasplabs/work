@@ -19,9 +19,10 @@
  * journal's migrations (every `.sql` in it ships, and a Durable Object
  * applies what its `migrations.js` lists), and no cut-off of that check
  * covers a migration the branch adds. What each migration the branch adds
- * does to rows already written is judged on generated rows
- * (scripts/migration-data.ts), and how many tables take none is printed
- * and held to a recorded number.
+ * deletes or updates is judged by statement (scripts/migration-statements.ts)
+ * and what its rebuilds keep on generated rows (scripts/migration-data.ts);
+ * how many tables take no row is printed and held to a recorded number,
+ * and what each contract marker covers is printed for the reviewer.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -284,13 +285,20 @@ for (const file of journals) {
       tag,
       sql: readFileSync(`${dir}/${tag}.sql`, "utf-8"),
     }));
-    const { errors: found, skipped } = checkDatabase(dir, migrations, {
+    const {
+      errors: found,
+      notes,
+      skipped,
+    } = checkDatabase(dir, migrations, {
       from: firstChecked[dir] ?? 0,
       now: new Date(),
       indexedBy,
       added: countAtBase(dir),
     });
     errors.push(...found, ...skippedErrors(dir, skipped));
+    if (notes.length > 0) {
+      console.info(notes.join("\n"));
+    }
     console.info(
       [
         `${dir}: ${skipped.length} tables take no generated row`,

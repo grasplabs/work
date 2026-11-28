@@ -55,7 +55,12 @@ import {
   seed,
   snapshotOf,
 } from "./migration-data.ts";
-import type { Skipped, TextStyle } from "./migration-data.ts";
+import type { Rows, Skipped } from "./migration-data.ts";
+import {
+  runRecordingWrites,
+  statementChanges,
+} from "./migration-statements.ts";
+import type { Write } from "./migration-statements.ts";
 
 /**
  * The first migration of each database this check judges, by its index
@@ -127,6 +132,8 @@ export interface Schema {
 export interface Change {
   subject: string;
   detail?: string;
+  /** The statements that make it, where they are known. */
+  statements?: readonly string[];
 }
 
 const rows = (db: DatabaseSync, sql: string): Record<string, unknown>[] =>
@@ -625,27 +632,51 @@ export interface Judging {
   added: number;
 }
 
+/** `changes` with one entry per subject, their details and statements joined. */
+const bySubject = (changes: readonly Change[]): Change[] =>
+  [...Map.groupBy(changes, ({ subject }) => subject)].map(([subject, same]) => {
+    const details = [...new Set(same.flatMap(({ detail }) => detail ?? []))];
+    const made = [
+      ...new Set(same.flatMap(({ statements = [] }) => statements)),
+    ];
+    return {
+      subject,
+      ...(details.length > 0 && { detail: details.join("; ") }),
+      ...(made.length > 0 && { statements: made }),
+    };
+  });
+
+/** A change as a message lists it, with the statements that make it. */
+const changeLines = ({
+  subject,
+  detail,
+  statements = [],
+}: Change): string[] => [
+  `  - ${subject}${detail === undefined ? "" : ` (${detail})`}`,
+  ...statements.map((statement) => `      by: ${statement}`),
+];
+
+/**
+ * What is wrong with one migration's changes and markers, and what each
+ * marker covers, for the reviewer to see.
+ */
 const judge = (
   file: string,
   sql: string,
-  changes: readonly Change[],
+  found: readonly Change[],
   { now, dataJudged }: { now: Date; dataJudged: boolean }
-): string[] => {
-  const { subjects, errors } = contractMarkers(sql, now);
-  const found = errors.map((error) => `${file} ${error}.`);
+): { errors: string[]; notes: string[] } => {
+  const changes = bySubject(found);
+  const { subjects, errors: markerErrors } = contractMarkers(sql, now);
+  const errors = markerErrors.map((error) => `${file} ${error}.`);
   const unmarked = changes.filter(({ subject }) => !subjects.has(subject));
   if (unmarked.length > 0) {
-    found.push(
+    errors.push(
       [
         `${file} breaks the release before it, which still runs on the new schema for a while and after a rollback:`,
-        ...unmarked.map(
-          ({ subject, detail }) =>
-            `  - ${subject}${detail === undefined ? "" : ` (${detail})`}`
-        ),
+        ...unmarked.flatMap(changeLines),
         "  Expand first: add columns as nullable or with a default, and remove the last use in a release before. Then, as the contract step, name each change and the release that removed its last use, in the migration:",
-        ...[...new Set(unmarked.map(({ subject }) => subject))].map(
-          (subject) => `  ${markerFor(subject)}`
-        ),
+        ...unmarked.map(({ subject }) => `  ${markerFor(subject)}`),
       ].join("\n")
     );
   }
@@ -653,23 +684,43 @@ const judge = (
   for (const subject of subjects) {
     // A migration main has already had its data judged when it was added.
     if (!changed.has(subject) && (dataJudged || !isDataSubject(subject))) {
-      found.push(
+      errors.push(
         `${file} has a contract marker for ${subject}, which it does not change in a way the release before it relies on: remove the marker.`
       );
     }
   }
-  return found;
+  const marked = changes.filter(({ subject }) => subjects.has(subject));
+  return {
+    errors,
+    notes:
+      marked.length === 0
+        ? []
+        : [
+            `${file}: its contract markers cover`,
+            ...marked.flatMap(changeLines),
+          ],
+  };
 };
 
 const message = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-const TEXT_STYLES = ["string", "object", "list"] as const;
+/**
+ * How rows are written for a replay, in order: JSON objects with one row
+ * of empty text, then without it (empty text is no JSON), as JSON strings
+ * and as lists of objects.
+ */
+const ROW_SHAPES: readonly Rows[] = [
+  { style: "object", empty: true },
+  { style: "object", empty: false },
+  { style: "string", empty: false },
+  { style: "list", empty: false },
+];
 
 const replayOnRows = (
   migrations: readonly Migration[],
   added: number,
-  style: TextStyle
+  shape: Rows
 ): { results: Map<number, Change[] | string>; skipped: Skipped[] } => {
   const results = new Map<number, Change[] | string>();
   const db = new DatabaseSync(":memory:");
@@ -680,7 +731,7 @@ const replayOnRows = (
       db.exec(asDeployed(sql));
     }
     db.exec("PRAGMA foreign_keys = ON");
-    const { skipped } = seed(db, style);
+    const { skipped } = seed(db, shape);
     for (const { idx, sql } of migrations.filter(
       (migration) => migration.idx >= added
     )) {
@@ -718,18 +769,21 @@ const appliesToRows = ({
 const dataOfAdded = (
   migrations: readonly Migration[],
   added: number
-): { results: Map<number, Change[] | string>; leftOut: Skipped[] } => {
+): {
+  results: Map<number, Change[] | string>;
+  leftOut: Skipped[];
+  skipped: Skipped[];
+} => {
   if (!migrations.some(({ idx }) => idx >= added)) {
-    return { results: new Map(), leftOut: [] };
+    return { results: new Map(), leftOut: [], skipped: [] };
   }
-  // Text is written as a JSON string first; a migration that reads it as
-  // an object or a list gets those, so it is not refused for the rows'
-  // shape alone.
-  const [first, ...others] = TEXT_STYLES.map((style) =>
-    replayOnRows(migrations, added, style)
+  // A migration the rows refuse gets rows of the next shape, so it is not
+  // refused for their shape alone (ROW_SHAPES).
+  const [first, ...others] = ROW_SHAPES.map((shape) =>
+    replayOnRows(migrations, added, shape)
   );
   if (first === undefined) {
-    return { results: new Map(), leftOut: [] };
+    return { results: new Map(), leftOut: [], skipped: [] };
   }
   const chosen = appliesToRows(first)
     ? first
@@ -738,6 +792,7 @@ const dataOfAdded = (
   return {
     results: chosen.results,
     leftOut: chosen.skipped.filter(({ table }) => !skippedFirst.has(table)),
+    skipped: chosen.skipped,
   };
 };
 
@@ -763,9 +818,14 @@ export const checkDatabase = (
   dir: string,
   migrations: readonly Migration[],
   { from, now, indexedBy, added }: Judging
-): { errors: string[]; skipped: Skipped[] } => {
+): { errors: string[]; notes: string[]; skipped: Skipped[] } => {
   const errors: string[] = [];
-  const { results: data, leftOut } = dataOfAdded(migrations, added);
+  const notes: string[] = [];
+  const {
+    results: data,
+    leftOut,
+    skipped: unseeded,
+  } = dataOfAdded(migrations, added);
   if (leftOut.length > 0) {
     errors.push(
       `${dir}: the branch's migrations apply only to rows whose text is JSON of another shape, which ${leftOut.map(({ table, reason }) => `${table} (${reason})`).join(", ")} refuse: what they do to those tables is not checked.`
@@ -773,17 +833,26 @@ export const checkDatabase = (
   }
   const db = new DatabaseSync(":memory:");
   try {
+    let base: Schema["tables"] | undefined;
     for (const { idx, tag, sql } of migrations) {
       const file = `${dir}/${tag}.sql`;
       // A cut-off never covers what the branch adds: `from` <= `added`.
       const before = idx >= from ? schemaOf(db) : undefined;
+      if (idx >= added) {
+        base ??= before?.tables;
+      }
+      let writes: Write[] = [];
       try {
-        db.exec(sql);
+        if (idx >= added) {
+          writes = runRecordingWrites(db, sql);
+        } else {
+          db.exec(sql);
+        }
       } catch (error) {
         errors.push(
           `${file} does not apply after the migrations before it: ${message(error)}`
         );
-        return { errors, skipped: [] };
+        return { errors, notes, skipped: [] };
       }
       const onRows = data.get(idx);
       if (typeof onRows === "string") {
@@ -792,20 +861,29 @@ export const checkDatabase = (
         );
       }
       if (before !== undefined) {
-        errors.push(
-          ...judge(
-            file,
-            sql,
-            [
-              ...unsafeChanges(before, schemaOf(db), indexedBy),
-              ...(Array.isArray(onRows) ? onRows : []),
-            ],
-            { now, dataJudged: idx >= added }
-          )
+        const after = schemaOf(db);
+        const judged = judge(
+          file,
+          sql,
+          [
+            ...unsafeChanges(before, after, indexedBy),
+            ...(Array.isArray(onRows) ? onRows : []),
+            ...(base === undefined
+              ? []
+              : statementChanges(writes, {
+                  base,
+                  before: new Set(before.tables.keys()),
+                  after: new Set(after.tables.keys()),
+                  skipped: new Set(unseeded.map(({ table }) => table)),
+                })),
+          ],
+          { now, dataJudged: idx >= added }
         );
+        errors.push(...judged.errors);
+        notes.push(...judged.notes);
       }
     }
-    return { errors, skipped: skippedOf(db) };
+    return { errors, notes, skipped: skippedOf(db) };
   } finally {
     db.close();
   }

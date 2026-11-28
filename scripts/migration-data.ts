@@ -15,17 +15,20 @@
  *
  * Each column gets values of its own (`"chats.title#0"`, numbers counting
  * from the column's place), so a value that moved to another column is
- * told apart from one that was lost. Text is JSON, a string first; a
- * migration the rows refuse is tried again on rows whose text is a JSON
- * object, then a list of objects, so it is not refused for their shape.
- * Rows are written parents first, each child pointing at a parent's row;
- * a CHECK's `IN (...)`, `= n` or `BETWEEN n` gives its values, and a row a
- * constraint refuses is tried again with JSON object text and with its
- * nullable columns left empty. A table that takes no row is skipped and
- * said so, with the reason; how many each database skips is held to
- * `skippedTables`, so coverage cannot fall unnoticed. What a migration
- * does to rows the generator does not write (a value no column held) is
- * not seen.
+ * told apart from one that was lost. Text is a JSON object first, so a
+ * JSON rewrite changes it visibly; a migration the rows refuse is tried
+ * again without the row of empty text, then on JSON strings and lists of
+ * objects, so it is not refused for their shape. Rows are written parents
+ * first, each child pointing at a parent's row; a CHECK's `IN (...)` gives
+ * every value it allows (`= n` and `BETWEEN n` one), then one row repeats
+ * another but for its key (so a dedupe shows) and one has empty text. A
+ * row a constraint refuses is tried again with JSON string text and with
+ * its nullable columns left empty. A table that takes no row is skipped
+ * and said so, with the reason; how many each database skips is held to
+ * `skippedTables`, so coverage cannot fall unnoticed. What a migration's
+ * own statements delete or update is judged exactly, rows or not
+ * (scripts/migration-statements.ts); these rows judge what its rebuilds
+ * keep.
  *
  * D1 and Durable Objects ignore `PRAGMA foreign_keys = OFF`, so its
  * toggles are dropped and each migration runs in one transaction, as
@@ -40,7 +43,6 @@ import type { DatabaseSync, SQLInputValue, SQLOutputValue } from "node:sqlite";
  */
 export const skippedTables: Readonly<Record<string, number>> = {
   "apps/core/src/db/core/migrations": 11,
-  "apps/core/src/db/data-store/migrations": 2,
   "packages/brain-next/src/db/migrations": 5,
 };
 
@@ -216,9 +218,17 @@ const parentsFirst = (tables: readonly Table[]): Table[] => {
 /** A value of its own for `column`, by its type's affinity (SQLite 3.1). */
 /**
  * How text is written: each a JSON value, since a migration may read a
- * text column as JSON (a string, an object, a list of objects).
+ * text column as JSON: an object first (so `json_set` and `json_remove`
+ * change it visibly), a string, or a list of objects.
  */
 export type TextStyle = "string" | "object" | "list";
+
+/** How rows are written: their text's shape, and whether one is empty. */
+export interface Rows {
+  style?: TextStyle;
+  /** A row with empty text, which is no JSON. */
+  empty?: boolean;
+}
 
 const textValue = (value: string, style: TextStyle): string =>
   JSON.stringify(
@@ -253,20 +263,46 @@ const valueFor = (
   return number;
 };
 
+/**
+ * One row's own values: each column's for row `row`, or for a row that
+ * repeats row 0 but for its primary key, or one whose text is empty.
+ */
+const ownRow = (
+  table: Table,
+  row: number,
+  style: TextStyle,
+  kind: "own" | "duplicate" | "empty"
+): Row =>
+  Object.fromEntries(
+    table.columns.map((column, place) => {
+      const keyed = table.primaryKey.includes(column.name);
+      const value = valueFor(
+        table,
+        column,
+        place,
+        kind === "duplicate" && !keyed ? 0 : row,
+        style
+      );
+      return [
+        column.name,
+        kind === "empty" &&
+        !keyed &&
+        typeof value === "string" &&
+        !table.allowed.has(column.name.toLowerCase())
+          ? ""
+          : value,
+      ];
+    })
+  );
+
 /** The rows to try for one row of `table`, in order. */
 const attempts = (
   table: Table,
-  row: number,
+  own: Row,
+  { row, nullFirst }: { row: number; nullFirst: boolean },
   written: ReadonlyMap<string, Row[]>,
-  tables: ReadonlyMap<string, Table>,
-  style: TextStyle
+  tables: ReadonlyMap<string, Table>
 ): Row[] => {
-  const own: Row = Object.fromEntries(
-    table.columns.map((column, place) => [
-      column.name,
-      valueFor(table, column, place, row, style),
-    ])
-  );
   const nullable = table.columns.filter((column) => !column.notNull);
   const allNull = Object.fromEntries(
     nullable.map((column) => [column.name, null])
@@ -308,7 +344,7 @@ const attempts = (
     ];
     // The last row leaves its nullable columns empty first: a parent with
     // them all set may read as closed (removed) to its children.
-    return row === ROWS - 1
+    return nullFirst
       ? [{ ...base, ...allNull }, ...variants]
       : [...variants, { ...base, ...allNull }];
   }).flat();
@@ -323,7 +359,7 @@ const firstLine = (error: unknown): string =>
  */
 export const seed = (
   db: DatabaseSync,
-  style: TextStyle = "string"
+  { style = "object", empty = true }: Rows = {}
 ): { seeded: string[]; skipped: Skipped[] } => {
   const names = tableNames(db);
   const skipped: Skipped[] = names
@@ -344,23 +380,49 @@ export const seed = (
     );
     const done: Row[] = [];
     let refusal: string | undefined;
-    for (let row = 0; row < ROWS; row += 1) {
+    const write = (
+      row: number,
+      kind: "own" | "duplicate" | "empty",
+      nullFirst: boolean
+    ): void => {
       // Text of another shape falls back to a JSON string, so a table that
       // takes only strings is not left empty for the shape.
+      const tries = (shape: TextStyle) =>
+        attempts(
+          table,
+          ownRow(table, row, shape, kind),
+          { row, nullFirst },
+          written,
+          tables
+        );
       for (const attempt of [
-        ...attempts(table, row, written, tables, style),
-        ...(style === "string"
-          ? []
-          : attempts(table, row, written, tables, "string")),
+        ...tries(style),
+        ...(style === "string" ? [] : tries("string")),
       ]) {
         try {
           insert.run(...table.columns.map(({ name }) => attempt[name] ?? null));
           done.push(attempt);
-          break;
+          return;
         } catch (error) {
-          refusal ??= firstLine(error);
+          if (kind === "own") {
+            refusal ??= firstLine(error);
+          }
         }
       }
+    };
+    // Every value a CHECK allows, and at least three rows.
+    const count = Math.max(
+      ROWS,
+      ...[...table.allowed.values()].map((values) => values.length)
+    );
+    for (let row = 0; row < count; row += 1) {
+      write(row, "own", row === count - 1);
+    }
+    // Where the constraints allow: a row that repeats another but for its
+    // key, so a dedupe is seen, and one whose text is empty.
+    write(count, "duplicate", false);
+    if (empty) {
+      write(count + 1, "empty", false);
     }
     if (done.length === 0) {
       skipped.push({ table: table.name, reason: refusal ?? "no row" });
@@ -393,23 +455,16 @@ export const snapshotOf = (db: DatabaseSync): Snapshot =>
       ])
   );
 
-/** Whether SQLite would read `a` and `b` as the same value. */
+/** Whether `a` and `b` are the same value, of the same type. */
 const same = (
   a: SQLOutputValue | undefined,
   b: SQLOutputValue | undefined
-): boolean => {
-  if (a === null || b === null || a === undefined || b === undefined) {
-    return a === b;
-  }
-  if (a instanceof Uint8Array || b instanceof Uint8Array) {
-    return (
-      a instanceof Uint8Array &&
+): boolean =>
+  a instanceof Uint8Array || b instanceof Uint8Array
+    ? a instanceof Uint8Array &&
       b instanceof Uint8Array &&
       Buffer.from(a).equals(b)
-    );
-  }
-  return String(a) === String(b);
-};
+    : a === b;
 
 const shown = (value: unknown): string =>
   value instanceof Uint8Array
