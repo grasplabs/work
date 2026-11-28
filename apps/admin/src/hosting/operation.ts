@@ -314,6 +314,12 @@ export const provisionSteps = [
 ] as const;
 export type ProvisionStep = (typeof provisionSteps)[number];
 
+/** Where `step` is in the operation's order; -1 for none or one it doesn't have. */
+const stepIndexOf = (step: string | null): number => {
+  const steps: readonly (string | null)[] = provisionSteps;
+  return steps.indexOf(step);
+};
+
 /**
  * The step an operation left running stopped in: the one after the last
  * it finished (`step`, null before the first). A recorded step this
@@ -321,8 +327,7 @@ export type ProvisionStep = (typeof provisionSteps)[number];
  * recorded: where it stopped can't be told past it.
  */
 export const stepReached = (step: string | null): string => {
-  const steps: readonly (string | null)[] = provisionSteps;
-  const done = steps.indexOf(step);
+  const done = stepIndexOf(step);
   if (step !== null && done === -1) {
     return step;
   }
@@ -450,6 +455,16 @@ const progressSchema = z.object({
   recordedBefore: z.record(z.string(), z.string()).default({}),
   /** The core origin the probe passed at. */
   origin: z.string().optional(),
+  /**
+   * What core went live with in this change, as its upload step read the
+   * client: its secrets generation, and since when its company starts
+   * closed (ISO; null where it starts open). The probe, the route and the
+   * record hold the client to these, never to the client as it reads
+   * later: a rotation since is the next change's to deliver.
+   */
+  delivered: z
+    .object({ generation: z.int(), closedFrom: z.string().nullable() })
+    .optional(),
   /**
    * When the settings core last went live with were read (ISO): a change
    * to them after it waits for the next run (src/rollout/targets.ts).
@@ -684,6 +699,9 @@ const switchProvisionRelease = async (
       .set({
         releaseId,
         status: "running",
+        // Started again from its first step on the new release: no step of
+        // the release before counts for it (`runOperationPhase`).
+        step: null,
         error: null,
         runId: held.runId,
         startedBy: actorName(actor),
@@ -2281,6 +2299,26 @@ const sendOrResend = async (
 };
 
 /**
+ * Records core live with the client as this run read it: what's pending
+ * is what changed after it started reading (`readAt`), sign-in included,
+ * and the later steps hold the client to what went live (`delivered`).
+ */
+const recordDelivered = async (
+  db: AdminDatabase,
+  loaded: Loaded
+): Promise<void> => {
+  const now = await progressNow(db, loaded.operation.id);
+  await recordProgress(db, loaded, {
+    ...now,
+    configuredAt: loaded.readAt.toISOString(),
+    delivered: {
+      generation: loaded.client.generation,
+      closedFrom: loaded.client.closedFrom?.toISOString() ?? null,
+    },
+  });
+};
+
+/**
  * Steps 5 and 6 for Worker `app`: rendered onto the client's inventory and
  * uploaded as its script with its secrets, unless the script runs an
  * upload with the same fingerprint already (`uploadFingerprint`): one
@@ -2441,13 +2479,7 @@ const upload = async (
     });
   }
   if (app === "core") {
-    // Core live with the settings as this run read them: what's pending is
-    // what changed after it started reading (`readAt`), sign-in included.
-    const now = await progressNow(db, loaded.operation.id);
-    await recordProgress(db, loaded, {
-      ...now,
-      configuredAt: loaded.readAt.toISOString(),
-    });
+    await recordDelivered(db, loaded);
   }
   // What the client runs, as a deploy records it: only while the runner
   // holds the client, in the same statement.
@@ -3004,6 +3036,12 @@ export interface Stopped {
   step: ProvisionStep;
   code: string;
   error: unknown;
+  /**
+   * Whether it stopped before its phase did any of its own work: refused
+   * out of order, no longer held, or the client unreadable. Nothing of
+   * the release failed then, so nothing is rolled back for it.
+   */
+  unstarted: boolean;
 }
 
 /**
@@ -3072,12 +3110,6 @@ const assertMovable = async (
     operation.releaseId,
     false
   );
-};
-
-/** Where `step` is in the operation's order; -1 for none or one it doesn't have. */
-const stepIndexOf = (step: string | null): number => {
-  const steps: readonly (string | null)[] = provisionSteps;
-  return steps.indexOf(step);
 };
 
 /** The step each phase starts at: where a failure before its work is recorded. */
@@ -3150,6 +3182,41 @@ const phaseWork: Readonly<
   },
 };
 
+/** The phases after the upload: each holds the client to what it delivered (`asDelivered`). */
+const afterInstall: ReadonlySet<OperationPhase> = new Set([
+  "probe",
+  "route",
+  "record",
+]);
+
+/**
+ * `loaded` with the client as core went live with it in this change
+ * (`delivered`): its secrets generation and its closed start, which a
+ * rotation or a change of the start since doesn't move. Refused when
+ * nothing recorded it (`phase_out_of_order`).
+ */
+const asDelivered = async (
+  db: AdminDatabase,
+  loaded: Loaded
+): Promise<Loaded> => {
+  const { delivered } = await progressNow(db, loaded.operation.id);
+  if (delivered === undefined) {
+    throw new ProvisionOperationError(
+      "phase_out_of_order",
+      `${loaded.held.clientId}'s core has no upload recorded in this change`
+    );
+  }
+  return {
+    ...loaded,
+    client: {
+      ...loaded.client,
+      generation: delivered.generation,
+      closedFrom:
+        delivered.closedFrom === null ? null : new Date(delivered.closedFrom),
+    },
+  };
+};
+
 /**
  * Runs phase `phase` of client `held.clientId`'s operation, as runner
  * `held`, on the operation as it is now: one done already is left as it
@@ -3172,6 +3239,7 @@ export const runOperationPhase = async (
     return undefined;
   }
   const at: Reached = { step: firstSteps[phase] };
+  let unstarted = true;
   try {
     // Before anything is read or asked of Cloudflare: an admin whose
     // STAGE names no stage has no namespace of its own to hold a client
@@ -3200,7 +3268,11 @@ export const runOperationPhase = async (
       ...(await load(db, held, operation)),
       ownNamespace,
     };
-    await phaseWork[phase](context, loaded, at);
+    const working = afterInstall.has(phase)
+      ? await asDelivered(db, loaded)
+      : loaded;
+    unstarted = false;
+    await phaseWork[phase](context, working, at);
     return undefined;
   } catch (error) {
     // Any failure, a resource outside the organization's jurisdiction
@@ -3214,7 +3286,7 @@ export const runOperationPhase = async (
       error: code,
     });
     await recordFailure(db, { operation, held }, at.step, code);
-    return { operation, step: at.step, code, error };
+    return { operation, step: at.step, code, error, unstarted };
   }
 };
 
@@ -3334,8 +3406,12 @@ export const runClientProvision = async (
   if (stopped === undefined) {
     return;
   }
-  const { operation, step, code, error } = stopped;
-  if (rollBackOnProbe && (await rollsBack(context.db, operation, step, code))) {
+  const { operation, step, code, error, unstarted } = stopped;
+  if (
+    rollBackOnProbe &&
+    !unstarted &&
+    (await rollsBack(context.db, operation, step, code))
+  ) {
     await rollBackAfterProbe(context, held, operation, code);
     return;
   }

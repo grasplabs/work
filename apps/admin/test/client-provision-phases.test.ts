@@ -3,7 +3,8 @@ import { and, eq } from "drizzle-orm";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { auditEvents } from "../src/db/schema.ts";
+import { auditEvents, clientProvisions, clients } from "../src/db/schema.ts";
+import { rotateClientSecrets } from "../src/deploy/rotation.ts";
 import { mappedRoute } from "../src/deploy/router.ts";
 import {
   operationPhases,
@@ -48,7 +49,11 @@ import { useStoreSecrets } from "./secrets-store.ts";
 // - a bookmark taken where there is nothing to keep (a first deploy);
 // - a core that answers another release, a database behind the release,
 //   or Cloudflare's stub for static files, published or kept live;
-// - a core from before the probe named its release and schema refused.
+// - a core from before the probe named its release and schema refused;
+// - a rotation landing between the upload and the route: the probe and
+//   the router's map taking the new generation core doesn't have;
+// - a resumed release going past a Durable Object migration observed
+//   since it started.
 
 mockCloudflareApi(token, cloudflare);
 
@@ -394,6 +399,96 @@ describe("an operation's phases, its restore point and its probe", () => {
         runs: { core: a.releaseId, connect: a.releaseId },
       },
       runs: { core: b.releaseId, connect: b.releaseId },
+    });
+  });
+
+  it("holds the probe, the route and the record to the generation core went live with, when a rotation lands after its upload", async () => {
+    const { clientId, b } = await liveOnA();
+    const held = await attempt(clientId);
+    await startClientRelease(db, staff, held, { releaseId: b.releaseId });
+    const outcomes: unknown[] = [];
+    for (const phase of [
+      "preflight",
+      "snapshot",
+      "migrate",
+      "install",
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      outcomes.push(await runOperationPhase(context, held, phase));
+    }
+    // Staff rotate the client's secrets once core went live: nothing
+    // refuses a claimed client.
+    const rotated = await rotateClientSecrets(db, staff, clientId, new Date());
+    for (const phase of ["probe", "route", "record"] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      outcomes.push(await runOperationPhase(context, held, phase));
+    }
+    const client = await db
+      .select({
+        generation: clients.generation,
+        rotationLiveAt: clients.rotationLiveAt,
+      })
+      .from(clients)
+      .where(eq(clients.id, clientId))
+      .get();
+
+    expect({
+      rotated,
+      outcomes: {
+        phases: outcomes.length,
+        passed: outcomes.filter((outcome) => outcome === undefined).length,
+      },
+      route: await mappedRoute(env.ROUTER_HOSTS, `${clientId}.${domain}`),
+      // The rotation waits for the next change, its window not started.
+      client,
+      operation: await operationOf(clientId),
+    }).toMatchObject({
+      rotated: true,
+      outcomes: { phases: 7, passed: 7 },
+      route: { clientId, generation: 1 },
+      client: { generation: 2, rotationLiveAt: null },
+      operation: { status: "done", releaseId: b.releaseId },
+    });
+  });
+
+  it("refuses a resumed release at its first step once a script was observed at a Durable Object migration the release lacks", async () => {
+    const { clientId, a, b } = await liveOnA();
+    const { core, connect } = await scriptsOf(clientId);
+    const held = await attempt(clientId);
+    await startClientRelease(db, staff, held, { releaseId: b.releaseId });
+    // Since it started, core's script was observed at a later release's
+    // migration, as an upload counted as run records it.
+    const operation = await operationOf(clientId);
+    const progress = z
+      .record(z.string(), z.unknown())
+      .parse(JSON.parse(operation?.progress ?? "{}"));
+    await db
+      .update(clientProvisions)
+      .set({
+        progress: JSON.stringify({ ...progress, migrated: { core: "v9" } }),
+      })
+      .where(eq(clientProvisions.clientId, clientId));
+    const uploads = () =>
+      cloudflare.calls.filter(
+        (call) => isUpload(core)(call) || isUpload(connect)(call)
+      ).length;
+    const before = { uploads: uploads(), sent: sentOf("0001_more") };
+    await failing(held);
+
+    expect({
+      operation: await operationOf(clientId),
+      uploads: uploads() - before.uploads,
+      sent: sentOf("0001_more") - before.sent,
+      runs: await runs(clientId),
+    }).toMatchObject({
+      operation: {
+        status: "failed",
+        error: "release_behind_migration",
+        step: null,
+      },
+      uploads: 0,
+      sent: 0,
+      runs: { core: a.releaseId, connect: a.releaseId },
     });
   });
 

@@ -477,7 +477,7 @@ describe("a client's deploy", () => {
     }
   });
 
-  it("cuts a deploy's attempt once it migrated, as an admin redeploy would, and its retry keeps the restore point and migrates nothing twice", async () => {
+  it("cuts a deploy's attempt once it kept its restore point, as an admin redeploy would, and its retry keeps that one and migrates once", async () => {
     const before = await placedRelease("feat(core): before");
     const client = await live(before);
     const release = await placedRelease("feat(core): a table more", {
@@ -486,12 +486,18 @@ describe("a client's deploy", () => {
         "0001_more.sql": "CREATE TABLE b (id TEXT);",
       },
     });
-    const { connect } = await scriptsOf(client.clientId);
-    // The attempt is held once it reads connect's script, its migration
-    // done: there the admin's redeploy cuts it.
+    const scripts = await scriptsOf(client.clientId);
+    const core = client.account.d1.find(
+      ({ name }) => name === `${scripts.core}-db`
+    );
+    // The attempt is held once its restore point is kept, as it reads
+    // which migrations core's database still needs: there the admin's
+    // redeploy cuts it, before anything migrated.
     const first = heldAfter(
       (call: ApiCall) =>
-        call.method === "GET" && call.path.endsWith(`/scripts/${connect}`)
+        cloudflare.calls.some(isBookmark) &&
+        call.path.endsWith(`/d1/database/${core?.uuid ?? "none"}/query`) &&
+        JSON.stringify(call.body).includes("SELECT name FROM d1_migrations")
     );
     const takeovers: Promise<void>[] = [];
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -517,7 +523,7 @@ describe("a client's deploy", () => {
         bookmarks: cloudflare.calls.filter(isBookmark).length,
         sent: cloudflare.calls.filter(isMoreSent).length,
       }).toStrictEqual({
-        cutAt: { bookmarks: 1, sent: 1 },
+        cutAt: { bookmarks: 1, sent: 0 },
         status: "complete",
         deploy: { releaseId: release, status: "done", error: null },
         releases: on(release),
