@@ -108,7 +108,8 @@ describe("a chat in a tab the person left", () => {
     let connected = Promise.withResolvers<boolean>();
     connected.resolve(true);
     const subscriptions: ReturnType<typeof subscription>[] = [];
-    // Watched again, core answers once the test lets it.
+    // Watched again, core says so, and answers once the test lets it.
+    const watchedAgain = Promise.withResolvers<boolean>();
     const answered = Promise.withResolvers<boolean>();
     const chats = {
       watch: async (
@@ -117,6 +118,7 @@ describe("a chat in a tab the person left", () => {
         onUpdate: (update: ChatUpdate) => void
       ) => {
         if (subscriptions.length > 0) {
+          watchedAgain.resolve(true);
           await answered.promise;
         }
         onUpdate({
@@ -179,11 +181,14 @@ describe("a chat in a tab the person left", () => {
       showTab(true);
       await delivered();
     });
+    // The page watches again after a pause it picks at random, up to a
+    // second for a watch that dropped soon after it began (follow-chat.ts).
     await act(async () => {
       connected.resolve(true);
+      await watchedAgain.promise;
       await delivered();
     });
-    // Connected again, and the watch hasn't answered yet.
+    // Watched again, and the watch hasn't answered yet.
     const beforeAnswered = [...reads];
     await act(async () => {
       answered.resolve(true);
