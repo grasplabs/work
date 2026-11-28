@@ -21,6 +21,8 @@ export interface Effect {
   /** For an undoing: what the rollback was given of its step. */
   undoing?: {
     stepKey: string;
+    /** Its step's `ctx.failedAttempts`. */
+    failedAttempts: number;
     step: { name: string; count: number };
     output: unknown;
     error: { name: string; message: string };
@@ -210,6 +212,7 @@ export const undone = async (
     at: Date.now(),
     undoing: {
       stepKey: context.ctx.idempotencyKey,
+      failedAttempts: context.ctx.failedAttempts,
       step: { ...context.ctx.step },
       output: context.output,
       error: { name: context.error.name, message: context.error.message },

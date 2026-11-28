@@ -603,11 +603,13 @@ describe("an attempt that runs past its timeout", () => {
       status: "complete",
       output: hung[1]?.receipt,
     });
-    // A new attempt number, under the step's one key.
+    // A new attempt number, under the step's one key, told the timeout
+    // before it as a failure.
     expect({
       attempts: hung.map((effect) => effect.attempt),
+      failedAttempts: hung.map((effect) => effect.failedAttempts),
       keys: new Set(hung.map((effect) => effect.key)).size,
-    }).toStrictEqual({ attempts: [1, 2], keys: 1 });
+    }).toStrictEqual({ attempts: [1, 2], failedAttempts: [0, 1], keys: 1 });
     await expect(journalOf("hung", id)).resolves.toMatchObject({
       steps: [{ name: "hung", state: "succeeded", attempt: 2 }],
       attempts: [
