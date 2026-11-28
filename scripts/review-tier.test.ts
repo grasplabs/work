@@ -88,12 +88,17 @@ describe("ranking a pull request's complexity", () => {
 });
 
 describe("the Security floor", () => {
-  it("marks sign-in, CI, the repository's rules, what's installed and this classifier as Security", () => {
+  it("marks sign-in, CI, the repository's rules, release signing, what's installed and this classifier as Security", () => {
     for (const filename of [
       "apps/core/src/auth/claims.ts",
       ".github/workflows/ci.yml",
       ".github/rulesets/main.json",
       ".github/CODEOWNERS",
+      "scripts/release/sign-manifest.ts",
+      "scripts/release/release-signing.json",
+      "packages/shared/src/release-signing-keys.ts",
+      "packages/shared/src/release-signature.ts",
+      "scripts/github-setup.ts",
       "pnpm-workspace.yaml",
       "pnpm-lock.yaml",
       ".npmrc",

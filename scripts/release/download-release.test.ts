@@ -9,6 +9,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -23,8 +24,19 @@ import path from "node:path";
 import { buffer, text } from "node:stream/consumers";
 
 import { manifestKey, modelBlobKey } from "@grasp-os/shared/release";
+import {
+  MAX_SIGNATURE_BYTES,
+  RELEASE_SIGNATURE_FILE,
+  signatureKey,
+} from "@grasp-os/shared/release-signature";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
+import {
+  signReleaseManifest,
+  strangerSigningKey,
+  testReleaseSigningKey,
+} from "../../packages/shared/test/release-signing-keys.ts";
+import type { TestSigningKey } from "../../packages/shared/test/release-signing-keys.ts";
 import { builds, fixtureModelFiles, info } from "./fixture-release.ts";
 import { generateManifest, writeRelease } from "./manifest-lib.ts";
 
@@ -37,9 +49,14 @@ const HTTP_PRECONDITION_FAILED = 412;
 const fixture = await builds();
 const manifest = generateManifest(info, fixture);
 
-/** Runs a script in Node, resolving with its stdout; failing with its stderr. */
+const TRUST_TEST_KEY = path.join(import.meta.dirname, "trust-test-key.ts");
+
+/**
+ * Runs a script in Node, trusting the tests' signing key
+ * (trust-test-key.ts), resolving with its stdout; failing with its stderr.
+ */
 const run = async (args: string[], env: NodeJS.ProcessEnv): Promise<string> => {
-  const child = spawn("node", args, { env });
+  const child = spawn("node", ["--import", TRUST_TEST_KEY, ...args], { env });
   const closed = once(child, "close");
   const [stdout, stderr] = await Promise.all([
     text(child.stdout),
@@ -92,6 +109,14 @@ describe("promoting a release from staging's bucket to production's", () => {
     dir = mkdtempSync(path.join(tmpdir(), "grasp-os-promote-test-"));
     const built = path.join(dir, "built");
     writeRelease(built, manifest, fixture);
+    // Signed, as every release staging publishes is.
+    writeFileSync(
+      path.join(built, RELEASE_SIGNATURE_FILE),
+      await signReleaseManifest(
+        readFileSync(path.join(built, "manifest.json")),
+        testReleaseSigningKey
+      )
+    );
     // Staging's bucket holds the model files, put there once
     // (upload-model-files.ts) with their SHA-256; production's doesn't yet.
     checksums = new Map(
@@ -263,6 +288,111 @@ describe("promoting a release from staging's bucket to production's", () => {
       /isn't published in grasp-releases-staging/u
     );
     expect(buckets.get(PRODUCTION)?.size).toBe(0);
+  });
+
+  /**
+   * Puts release `id` straight in staging's bucket, as anyone holding its
+   * key could: the fixture's manifest under that id, its notes `notes`,
+   * and, unless `signedWith` is null, a signature file for `signed` (the
+   * manifest's own bytes unless given) at the manifest's hash.
+   */
+  const putInStaging = async (
+    id: string,
+    {
+      notes = info.notes,
+      signedWith = testReleaseSigningKey,
+      signed,
+    }: {
+      notes?: string;
+      signedWith?: TestSigningKey | null;
+      signed?: Buffer;
+    } = {}
+  ): Promise<void> => {
+    const bytes = Buffer.from(
+      JSON.stringify(
+        generateManifest({ ...info, releaseId: id, notes }, fixture)
+      )
+    );
+    const objects = buckets.get(STAGING);
+    objects?.set(manifestKey(id), bytes);
+    if (signedWith !== null) {
+      objects?.set(
+        signatureKey(sha256(bytes) ?? ""),
+        Buffer.from(await signReleaseManifest(signed ?? bytes, signedWith))
+      );
+    }
+  };
+
+  it("promotes a release with its signature, which production then holds beside its manifest", async () => {
+    await putInStaging("26.12.1");
+    const fetched = path.join(dir, "fetched");
+    await download(fetched, "26.12.1");
+    await upload(PRODUCTION, fetched);
+
+    const stored = buckets.get(PRODUCTION)?.get(manifestKey("26.12.1"));
+    const signature = signatureKey(sha256(stored) ?? "");
+    expect({
+      downloaded: readdirSync(fetched).includes(RELEASE_SIGNATURE_FILE),
+      manifest: sha256(stored),
+      signature: sha256(buckets.get(PRODUCTION)?.get(signature)),
+    }).toStrictEqual({
+      downloaded: true,
+      manifest: sha256(buckets.get(STAGING)?.get(manifestKey("26.12.1"))),
+      signature: sha256(buckets.get(STAGING)?.get(signature)),
+    });
+  });
+
+  it("promotes nothing that isn't signed, was changed after it was signed, was signed with a key nobody trusts, or whose signature file is too large to be one", async () => {
+    const [unsigned, changed, stranger, oversized] = [
+      "26.11.1",
+      "26.12.2",
+      "26.12.3",
+      "26.12.4",
+    ];
+    await putInStaging(unsigned, { signedWith: null });
+    const original = Buffer.from(
+      JSON.stringify(generateManifest({ ...info, releaseId: changed }, fixture))
+    );
+    await putInStaging(changed, {
+      notes: "feat(core): something else",
+      signed: original,
+    });
+    await putInStaging(stranger, { signedWith: strangerSigningKey });
+    await putInStaging(oversized, { signedWith: null });
+    const oversizedManifest = buckets.get(STAGING)?.get(manifestKey(oversized));
+    buckets
+      .get(STAGING)
+      ?.set(
+        signatureKey(sha256(oversizedManifest) ?? ""),
+        Buffer.alloc(MAX_SIGNATURE_BYTES + 1, "x")
+      );
+
+    const outcomes = await Promise.all(
+      [unsigned, changed, stranger, oversized].map(async (id) => {
+        try {
+          await download(path.join(dir, id), id);
+          return "promoted";
+        } catch (error) {
+          return error instanceof Error ? error.message : String(error);
+        }
+      })
+    );
+
+    expect(
+      outcomes.map((outcome) =>
+        [
+          "isn't signed",
+          "doesn't match it",
+          "doesn't trust",
+          "signature file that isn't one",
+        ].findIndex((reason) => outcome.includes(reason))
+      )
+    ).toStrictEqual([0, 1, 2, 3]);
+    expect(
+      [unsigned, changed, stranger, oversized].some((id) =>
+        existsSync(path.join(dir, id, "manifest.json"))
+      )
+    ).toBeFalsy();
   });
 
   it("publishes nothing when a blob in staging's bucket isn't the release's", async () => {

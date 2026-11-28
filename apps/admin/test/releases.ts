@@ -1,7 +1,9 @@
 /**
  * Publishes releases to the test pool's R2 bucket laid out as CI publishes
  * them (scripts/release/upload-release.ts): content-addressed blobs first,
- * then `releases/<id>/manifest.json`.
+ * then the manifest's signature, by the key the tests trust
+ * (packages/shared/test/release-signing-keys.ts), then
+ * `releases/<id>/manifest.json`.
  */
 import {
   assetContentKey,
@@ -20,7 +22,14 @@ import {
   nextReleaseId as nextPublishedId,
   parsePublishedReleaseId,
 } from "@grasp-os/shared/release-id";
+import { signatureKey } from "@grasp-os/shared/release-signature";
 import { env } from "cloudflare:workers";
+
+import {
+  signReleaseManifest,
+  testReleaseSigningKey,
+} from "../../../packages/shared/test/release-signing-keys.ts";
+import { testReleaseMonth } from "./release-clock.ts";
 
 const encoder = new TextEncoder();
 
@@ -71,23 +80,16 @@ export interface TestRelease {
   blobs: Map<string, Uint8Array>;
 }
 
-// Each test file publishes in a month of its own, far in the future, so
-// each new release is the newest in the bucket, its ids made as CI's
-// publish makes them (@grasp-os/shared/release-id). They start at N 8, so
-// a file's first releases already go from one digit to two: any order by
-// text instead of by number shows.
-const MONTHS = 12;
-const publishedIn = new Date(
-  Date.UTC(
-    2030 + Math.floor(Math.random() * 60),
-    Math.floor(Math.random() * MONTHS),
-    15
-  )
-);
+// Each test file publishes in a month of its own, far in the future, the
+// month its release clock says it is (release-clock.ts), so each new
+// release is the newest in the bucket, its ids made as CI's publish makes
+// them (@grasp-os/shared/release-id). They start at N 8, so a file's
+// first releases already go from one digit to two: any order by text
+// instead of by number shows.
 const FIRST_N = 8;
 const taken: string[] = [];
 for (let n = 1; n < FIRST_N; n += 1) {
-  taken.push(nextPublishedId(taken, publishedIn));
+  taken.push(nextPublishedId(taken, testReleaseMonth));
 }
 // Build times a minute apart, in the order of the releases' ids: never
 // the same millisecond, however fast the test runs.
@@ -100,7 +102,7 @@ const randomHex = (length: number): string =>
 
 /** A new release id, newer than every one before it in this file. */
 export const nextReleaseId = (): string => {
-  const id = nextPublishedId(taken, publishedIn);
+  const id = nextPublishedId(taken, testReleaseMonth);
   taken.push(id);
   return id;
 };
@@ -293,8 +295,18 @@ export const putBlobs = async (
   );
 };
 
-/** Stores a release's manifest, as CI does last. */
+/** Stores the signature of `manifestText`, as CI signs and publishes it. */
+export const putSignature = async (manifestText: string): Promise<void> => {
+  const bytes = encoder.encode(manifestText);
+  await env.RELEASES.put(
+    signatureKey(await sha256OfBytes(bytes)),
+    await signReleaseManifest(bytes, testReleaseSigningKey)
+  );
+};
+
+/** Stores a release's manifest, signed, as CI does last. */
 export const putManifest = async (release: TestRelease): Promise<void> => {
+  await putSignature(release.manifestText);
   await env.RELEASES.put(manifestKey(release.id), release.manifestText);
 };
 

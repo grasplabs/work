@@ -12,8 +12,11 @@
  * manifest exists. A new one is checked against its manifest, then
  * recorded with its audit event:
  *
- * - its manifest: its id the one its key names, every blob at its content
- *   address, every static file it indexes one a Worker serves (`blobsOf`);
+ * - its manifest: of this month or one before (`isOfMonthToCome`); signed
+ *   by a key Grasp trusts, at the signature file CI stored before it
+ *   (@grasp-os/shared/release-signature); its id the one its key names,
+ *   every blob at its content address, every static
+ *   file it indexes one a Worker serves (`blobsOf`);
  * - each blob the newest imported release whose bundle is kept checked
  *   the same way (the same key, size and, for a static file, extension:
  *   `checksOf`), most of a release, as a merge changes a few files: not
@@ -34,9 +37,13 @@
  * and, for a module or migration, without a SHA-256. The deploy stops
  * that before it serves: it hashes every module, migration and static
  * file as it reads them from the bucket (src/deploy/release.ts), and each
- * model file as it streams (src/deploy/model-files.ts). This protects
- * against partial or corrupted uploads, not against whoever can write to
- * the bucket: a release that's consistent with its own manifest imports.
+ * model file as it streams (src/deploy/model-files.ts), against the
+ * manifest this import saved. The signature is what protects against
+ * whoever can write to the bucket: a manifest they write or change has
+ * none that verifies, and is refused, alerted as a failed import; the
+ * blobs it names are then checked against it as above. Once `releases/`
+ * is locked in the bucket (set by hand, once), a published manifest can't
+ * be rewritten either.
  *
  * A request R2 fails is tried again, after a short wait, a few times. A run
  * makes at most {@link MAX_REQUESTS_PER_RUN} requests and tries at most
@@ -77,8 +84,15 @@ import type {
 } from "@grasp-os/shared/release";
 import {
   compareReleaseIds,
+  parsePublishedReleaseId,
   releaseIdSchema,
 } from "@grasp-os/shared/release-id";
+import {
+  MAX_SIGNATURE_BYTES,
+  releaseSignatureProblem,
+  signatureKey,
+} from "@grasp-os/shared/release-signature";
+import { releaseSigningKeys } from "@grasp-os/shared/release-signing-keys";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 
 import { alert } from "../alerts/alert.ts";
@@ -92,6 +106,7 @@ import {
 } from "../db/schema.ts";
 import { toEdge } from "../rollout/channels.ts";
 import { recordBlobs } from "./blobs.ts";
+import { releaseNow } from "./release-clock.ts";
 
 /**
  * The releases bucket, as the import uses it: reading only, so the import
@@ -126,8 +141,9 @@ export const MAX_RELEASES_PER_RUN = 10;
  * {@link MAX_RELEASES_PER_RUN}), its listing (a page per 1,000 releases),
  * and, on the cron, the retention, reconciling and provisioning that
  * share the invocation. A release built from main today
- * (1,163 blobs and 3 model files) costs 1,167, so a run imports four; a
- * release it doesn't finish goes on next run from where it got.
+ * (1,163 blobs and 3 model files) costs 1,168 with its manifest and
+ * signature, so a run imports four; a release it doesn't finish goes on
+ * next run from where it got.
  */
 export const MAX_REQUESTS_PER_RUN = 5000;
 
@@ -489,6 +505,54 @@ const checkModelFiles = async (
   }
 };
 
+/**
+ * Throws unless release `id`'s manifest, `manifestBytes`, verifies with
+ * the signature file stored for it (`signatureKey`), against the keys
+ * Grasp trusts. Every release it imports is signed: one published before
+ * signing began was imported then, and is never checked again. Its
+ * error's name, `UnverifiedReleaseError`, is the code its alert carries.
+ */
+const checkSignature = async (
+  reader: Reader,
+  id: string,
+  manifestBytes: Bytes,
+  manifestSha256: string
+): Promise<void> => {
+  const signature = await reader.read(
+    signatureKey(manifestSha256),
+    (size) => size <= MAX_SIGNATURE_BYTES,
+    `at most ${MAX_SIGNATURE_BYTES}`
+  );
+  const problem = await releaseSignatureProblem(
+    manifestBytes,
+    signature,
+    releaseSigningKeys,
+    id
+  );
+  if (problem !== undefined) {
+    const error = new Error(`Release ${id} ${problem}`);
+    error.name = "UnverifiedReleaseError";
+    throw error;
+  }
+};
+
+/**
+ * Whether release `id` is of a month after `now`'s (UTC). The admin moves
+ * Edge only to a newer id, so one of a month to come would hold Edge
+ * until that month and beyond; CI's signer signs no such id
+ * (scripts/release/sign-manifest.ts), so one is refused, with an alert,
+ * before anything of it is read.
+ */
+const isOfMonthToCome = (id: string, now: Date): boolean => {
+  const parts = parsePublishedReleaseId(id);
+  const MONTHS = 12;
+  return (
+    parts !== undefined &&
+    parts.year * MONTHS + parts.month >
+      (now.getUTCFullYear() % 100) * MONTHS + now.getUTCMonth() + 1
+  );
+};
+
 /** How many of release `id`'s blobs an earlier attempt checked, for this very manifest. */
 const resumeAt = async (
   db: AdminDatabase,
@@ -543,6 +607,11 @@ const importRelease = async (
   db: AdminDatabase,
   id: string
 ): Promise<"imported" | "absent" | "deferred"> => {
+  if (isOfMonthToCome(id, releaseNow())) {
+    const error = new Error(`Release ${id} is of a month still to come`);
+    error.name = "FutureReleaseError";
+    throw error;
+  }
   const manifestBytes = await reader.read(
     manifestKey(id),
     (size) => size <= MAX_MANIFEST_BYTES,
@@ -552,6 +621,9 @@ const importRelease = async (
     return "absent";
   }
   const { manifest, text } = parseManifest(id, manifestBytes);
+  const manifestSha256 = await sha256OfBytes(manifestBytes);
+  // Before anything of it is recorded or read.
+  await checkSignature(reader, id, manifestBytes, manifestSha256);
   const blobs = blobsOf(manifest);
   if (blobs.length > MAX_BLOBS_PER_RELEASE) {
     throw new Error(
@@ -568,7 +640,6 @@ const importRelease = async (
   // that's still being imported, over however many runs it takes, as the
   // manifest it has now names them.
   await recordBlobs(db, id, manifest);
-  const manifestSha256 = await sha256OfBytes(manifestBytes);
   const before = await checkedBefore(db);
   let failure: Error | undefined;
   for (

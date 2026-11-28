@@ -3,14 +3,21 @@
  * (the outside system) that stores objects in memory and, as R2 does,
  * honours `If-None-Match: *` and `If-Match` on an object's ETag (its
  * bytes' MD5, as for a single-part PUT), checks `x-amz-checksum-sha256` on
- * a PUT and reports it on a HEAD with checksum mode on. It can fail a request as a
+ * a PUT and reports it on a HEAD with checksum mode on, and, as a bucket
+ * lock on `releases/` and `signatures/` does, answers a write to a key
+ * there that holds something with 409. It can fail a request as a
  * network does: drop the connection unanswered, or answer 500, before or
- * after doing what was asked.
+ * after doing what was asked. CI's publish runs as its three jobs do:
+ * --stage, then CI's signer (sign-manifest.ts, against KMS's stand-in
+ * signing with the key the tests trust: fake-google.ts), then the signed
+ * manifest published as it is, every script on one set clock.
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import {
+  copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -28,15 +35,35 @@ import {
   compareReleaseIds,
   releaseMonthPrefix,
 } from "@grasp-os/shared/release-id";
+import {
+  RELEASE_SIGNATURE_FILE,
+  releaseSignatureProblem,
+  signatureKey,
+} from "@grasp-os/shared/release-signature";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import {
+  releaseSigningKeys,
+  signReleaseManifest,
+  testReleaseSigningKey,
+} from "../../packages/shared/test/release-signing-keys.ts";
+import { clockAt, pushToMain, runSigner, TEST_NOW } from "./fake-google.ts";
 import { builds, fixtureModelFiles, info } from "./fixture-release.ts";
 import { generateManifest, writeRelease } from "./manifest-lib.ts";
 
-/** Runs a script in Node, resolving with its stdout; failing with its stderr. */
+const TRUST_TEST_KEY = path.join(import.meta.dirname, "trust-test-key.ts");
+
+/**
+ * Runs a script in Node at `TEST_NOW`, trusting the tests' signing key
+ * (trust-test-key.ts), resolving with its stdout; failing with its stderr.
+ */
 const run = async (args: string[], env: NodeJS.ProcessEnv): Promise<string> => {
-  const child = spawn("node", args, { env });
+  const child = spawn(
+    "node",
+    ["--import", clockAt(TEST_NOW), "--import", TRUST_TEST_KEY, ...args],
+    { env }
+  );
   const closed = once(child, "close");
   const [stdout, stderr] = await Promise.all([
     text(child.stdout),
@@ -69,6 +96,7 @@ const manifest = generateManifest(info, fixture);
 const published = `releases/${manifest.releaseId}/manifest.json`;
 
 const HTTP_BAD_REQUEST = 400;
+const HTTP_CONFLICT = 409;
 const HTTP_SERVER_ERROR = 500;
 
 /** What the tests read of a published manifest. */
@@ -76,6 +104,9 @@ const storedManifest = z.object({ releaseId: z.string(), commit: z.string() });
 
 const sha256Base64 = (bytes: Uint8Array): string =>
   createHash("sha256").update(bytes).digest("base64");
+
+const sha256Hex = (bytes: Uint8Array): string =>
+  createHash("sha256").update(bytes).digest("hex");
 
 /** An object's ETag as R2 gives one for a single-part PUT: its bytes' MD5, quoted. */
 const etagOf = (bytes: Uint8Array): string =>
@@ -115,6 +146,8 @@ interface Bucket {
   faults: Map<string, Fault[]>;
   /** Every request answered or failed, as `<method> <key>`, a listing as `LIST <prefix>`. */
   requests: string[];
+  /** Whether `releases/` and `signatures/` are locked, as production's buckets are. */
+  locked: boolean;
 }
 
 const emptyBucket = (): Bucket => ({
@@ -126,6 +159,7 @@ const emptyBucket = (): Bucket => ({
   failingPuts: new Set(),
   faults: new Map(),
   requests: [],
+  locked: true,
 });
 
 /**
@@ -261,6 +295,14 @@ const serveObject = async (
   if (bucket.failingPuts.delete(key)) {
     return { status: HTTP_BAD_REQUEST };
   }
+  if (
+    bucket.locked &&
+    stored !== undefined &&
+    (key.startsWith("releases/") || key.startsWith("signatures/"))
+  ) {
+    // The lock is checked first, whatever the request's conditions.
+    return { status: HTTP_CONFLICT };
+  }
   const ifMatch = request.headers["if-match"];
   if (
     (request.headers["if-none-match"] === "*" && stored !== undefined) ||
@@ -385,9 +427,21 @@ describe("publishing a release", () => {
     endpoint = `http://127.0.0.1:${address.port}`;
   };
 
+  /** Signs the release directory's manifest as it is, as Promote release's download leaves one. */
+  const signDir = async (): Promise<void> => {
+    writeFileSync(
+      path.join(dir, RELEASE_SIGNATURE_FILE),
+      await signReleaseManifest(
+        readFileSync(path.join(dir, "manifest.json")),
+        testReleaseSigningKey
+      )
+    );
+  };
+
   beforeEach(async () => {
     dir = mkdtempSync(path.join(tmpdir(), "grasp-os-upload-test-"));
     writeRelease(dir, manifest, fixture);
+    await signDir();
     await serve(bucketWithModel());
   });
 
@@ -412,6 +466,25 @@ describe("publishing a release", () => {
       R2_SECRET_ACCESS_KEY: "test-secret",
     });
 
+  /**
+   * Why release `id`'s published manifest doesn't verify with the
+   * signature stored for it; undefined when it does.
+   */
+  const signatureProblemOf = async (
+    id: string
+  ): Promise<string | undefined> => {
+    const bytes = bucket.objects.get(`releases/${id}/manifest.json`);
+    if (bytes === undefined) {
+      return "isn't published";
+    }
+    return await releaseSignatureProblem(
+      bytes,
+      bucket.objects.get(signatureKey(sha256Hex(bytes))),
+      releaseSigningKeys,
+      id
+    );
+  };
+
   it("uploads every blob, then the manifest last", async () => {
     await upload();
     const referenced = [
@@ -423,8 +496,11 @@ describe("publishing a release", () => {
       ]),
       ...Object.values(manifest.assets).map((asset) => asset.r2Key),
     ];
-    expect(bucket.puts.at(-1)).toBe(published);
-    expect(bucket.puts.slice(0, -1).toSorted()).toStrictEqual(
+    const signature = signatureKey(
+      sha256Hex(readFileSync(path.join(dir, "manifest.json")))
+    );
+    expect(bucket.puts.slice(-2)).toStrictEqual([signature, published]);
+    expect(bucket.puts.slice(0, -2).toSorted()).toStrictEqual(
       [...new Set(referenced)].toSorted()
     );
   });
@@ -437,10 +513,21 @@ describe("publishing a release", () => {
       path.join(dir, "manifest.json"),
       `${JSON.stringify({ ...manifest, createdAt: "2026-02-02T00:00:00.000Z" })}\n`
     );
-    const stdout = await upload();
-    expect(bucket.puts).toStrictEqual([]);
-    expect(bucket.objects.get(published)).toStrictEqual(first);
-    expect(stdout).toContain("0 uploaded");
+    await signDir();
+    const outcome = await outcomeOf(upload());
+    expect({
+      refused: outcome.includes("holds another manifest"),
+      // No blob, and only its signature, which names the other
+      // manifest's bytes.
+      puts: bucket.puts,
+      stored: bucket.objects.get(published),
+    }).toStrictEqual({
+      refused: true,
+      puts: [
+        signatureKey(sha256Hex(readFileSync(path.join(dir, "manifest.json")))),
+      ],
+      stored: first,
+    });
   });
 
   const coreModule = (): { key: string; bytes: Buffer } => {
@@ -557,6 +644,7 @@ describe("publishing a release", () => {
       generateManifest({ ...info, modelFiles: [] }, fixture),
       fixture
     );
+    await signDir();
     await upload();
     expect(bucket.puts.at(-1)).toBe(published);
   });
@@ -569,7 +657,42 @@ describe("publishing a release", () => {
     expect(bucket.puts).not.toContain(stray);
   });
 
-  it("keeps the id it has without --assign-id, as Promote release publishes it", async () => {
+  it("publishes a release as it has it only with a signature that verifies, stored right before it", async () => {
+    const bytes = readFileSync(path.join(dir, "manifest.json"));
+    const signatureFile = path.join(dir, RELEASE_SIGNATURE_FILE);
+    const signature = readFileSync(signatureFile);
+    rmSync(signatureFile);
+    const unsigned = await outcomeOf(upload());
+    writeFileSync(
+      signatureFile,
+      await signReleaseManifest(
+        Buffer.from("another manifest"),
+        testReleaseSigningKey
+      )
+    );
+    const mismatched = await outcomeOf(upload());
+    const putsBefore = bucket.puts.length;
+    writeFileSync(signatureFile, signature);
+    const signed = await outcomeOf(upload());
+
+    expect({
+      unsigned: unsigned.includes("isn't signed"),
+      mismatched: mismatched.includes("has a signature that doesn't match it"),
+      putsBefore,
+      signed,
+      problem: await signatureProblemOf(manifest.releaseId),
+      lastPuts: bucket.puts.slice(-2),
+    }).toStrictEqual({
+      unsigned: true,
+      mismatched: true,
+      putsBefore: 0,
+      signed: "ok",
+      problem: undefined,
+      lastPuts: [signatureKey(sha256Hex(bytes)), published],
+    });
+  });
+
+  it("keeps the id it has without --stage, as Promote release publishes it", async () => {
     await upload();
     expect(bucket.objects.get(published)).toStrictEqual(
       readFileSync(path.join(dir, "manifest.json"))
@@ -594,18 +717,45 @@ describe("publishing a release", () => {
       JSON.parse(readFileSync(path.join(built, "manifest.json"), "utf-8"))
     ).commit;
 
-  /** Publishes as CI does, main's head being `head`: the build's own commit unless said. */
+  /**
+   * Publishes as CI's three jobs do, main's head being `head`: the build's
+   * own commit unless said. stage-release stages the release; when it
+   * staged one, sign-release signs it, and publish-release publishes the
+   * signed manifest in place of the built one. What the steps said.
+   */
   const publish = async (
     built: string,
     head = commitOf(built)
-  ): Promise<string> =>
-    await run([SCRIPT, "--release", built, "--assign-id", "--head", head], {
+  ): Promise<string> => {
+    const r2 = {
       PATH: process.env.PATH,
       R2_ENDPOINT: endpoint,
       R2_BUCKET: BUCKET,
       R2_ACCESS_KEY_ID: "test-key-id",
       R2_SECRET_ACCESS_KEY: "test-secret",
+    };
+    const staged = mkdtempSync(path.join(tmpdir(), "grasp-os-staged-test-"));
+    builtDirs.push(staged);
+    const stamped = path.join(staged, "manifest.json");
+    const said = await run(
+      [SCRIPT, "--release", built, "--stage", stamped, "--head", head],
+      r2
+    );
+    if (!existsSync(stamped)) {
+      return said;
+    }
+    const signed = await runSigner(staged, {
+      env: pushToMain(commitOf(built)),
+      key: testReleaseSigningKey,
     });
+    if (signed.code !== 0) {
+      throw new Error(signed.output);
+    }
+    for (const file of ["manifest.json", RELEASE_SIGNATURE_FILE]) {
+      copyFileSync(path.join(staged, file), path.join(built, file));
+    }
+    return said + (await run([SCRIPT, "--release", built, "--head", head], r2));
+  };
 
   /** The ids published, oldest first, each with its manifest's id and commit. */
   const publishedReleases = (): {
@@ -627,7 +777,7 @@ describe("publishing a release", () => {
       });
 
   it("publishes under the month's next id, YY.MM.N, the next commit under the one after", async () => {
-    const month = releaseMonthPrefix(new Date());
+    const month = releaseMonthPrefix(new Date(TEST_NOW));
     await publish(buildOf("1".repeat(40)));
     await publish(buildOf("2".repeat(40)));
 
@@ -648,37 +798,73 @@ describe("publishing a release", () => {
     );
   });
 
-  it("takes the next id when another publish claims one between its listing and its write", async () => {
-    const month = releaseMonthPrefix(new Date());
-    const others = Buffer.from(
-      JSON.stringify({ releaseId: `${month}1`, commit: "f".repeat(40) })
-    );
-    bucket.writtenAfterList.set(`releases/${month}1/manifest.json`, others);
+  it("has the manifest signed as published, under its id, and stores the signature right before it", async () => {
+    const id = `${releaseMonthPrefix(new Date(TEST_NOW))}1`;
     await publish(buildOf("1".repeat(40)));
-
-    expect(
-      bucket.objects.get(`releases/${month}1/manifest.json`)
-    ).toStrictEqual(others);
-    expect(bucket.objects.get(commitKey("1".repeat(40)))?.toString()).toBe(
-      `${month}2\n`
+    const claim = `releases/${id}/manifest.json`;
+    const signature = signatureKey(
+      sha256Hex(bucket.objects.get(claim) ?? Buffer.alloc(0))
     );
+
+    expect({
+      problem: await signatureProblemOf(id),
+      lastPuts: bucket.puts.slice(-2),
+    }).toStrictEqual({
+      problem: undefined,
+      lastPuts: [signature, claim],
+    });
   });
 
-  it("never gives publishes running at once the same id", async () => {
+  it.each([
+    { lock: "locked, R2 answering 409", locked: true },
+    { lock: "not locked yet, R2 answering 412", locked: false },
+  ])(
+    "publishes nothing, and fails, when another publish claims its id between its stage and its publish ($lock)",
+    async ({ locked }) => {
+      bucket.locked = locked;
+      const month = releaseMonthPrefix(new Date(TEST_NOW));
+      const others = Buffer.from(
+        JSON.stringify({ releaseId: `${month}1`, commit: "f".repeat(40) })
+      );
+      bucket.writtenAfterList.set(`releases/${month}1/manifest.json`, others);
+      const outcome = await outcomeOf(publish(buildOf("1".repeat(40))));
+
+      expect({
+        refused: outcome.includes("holds another manifest"),
+        first: bucket.objects.get(`releases/${month}1/manifest.json`),
+        releases: publishedReleases().map(({ id }) => id),
+      }).toStrictEqual({
+        refused: true,
+        first: others,
+        releases: [`${month}1`],
+      });
+    }
+  );
+
+  it("never publishes two commits under one id when publishes run at once: each that loses its id publishes nothing, and fails", async () => {
     const commits = ["3", "4", "5"].map((digit) => digit.repeat(40));
     const dirs = commits.map(buildOf);
-    await Promise.all(dirs.map(async (built) => await publish(built)));
+    const outcomes = await Promise.all(
+      dirs.map(async (built) => await outcomeOf(publish(built)))
+    );
 
     const releases = publishedReleases();
-    expect(new Set(releases.map(({ id }) => id)).size).toBe(commits.length);
-    expect(
-      releases
-        .map(({ commit }) => String(commit))
-        .toSorted((a, b) => a.localeCompare(b))
-    ).toStrictEqual(commits);
-    expect(
-      releases.every(({ id, manifestId }) => manifestId === id)
-    ).toBeTruthy();
+    expect({
+      // Each published commit once, each under its own id.
+      unique: new Set(releases.map(({ commit }) => commit)).size,
+      ownIds: releases.every(({ id, manifestId }) => manifestId === id),
+      // Every run published or knew it lost its id.
+      outcomes: outcomes.every(
+        (outcome) =>
+          outcome === "ok" || outcome.includes("holds another manifest")
+      ),
+      published: outcomes.filter((outcome) => outcome === "ok").length,
+    }).toStrictEqual({
+      unique: releases.length,
+      ownIds: true,
+      outcomes: true,
+      published: releases.length,
+    });
   });
 
   it("publishes a commit once, however often its publish runs", async () => {
@@ -690,7 +876,7 @@ describe("publishing a release", () => {
   });
 
   it("publishes a commit once when its earlier publish stopped after naming its id, before its manifest", async () => {
-    const month = releaseMonthPrefix(new Date());
+    const month = releaseMonthPrefix(new Date(TEST_NOW));
     const commit = "7".repeat(40);
     bucket.failingPuts.add(`releases/${month}1/manifest.json`);
     const stopped = await outcomeOf(publish(buildOf(commit)));
@@ -710,7 +896,7 @@ describe("publishing a release", () => {
   });
 
   it("publishes nothing again for a commit whose earlier publish stored its manifest but never heard back", async () => {
-    const month = releaseMonthPrefix(new Date());
+    const month = releaseMonthPrefix(new Date(TEST_NOW));
     const commit = "8".repeat(40);
     const claim = `releases/${month}1/manifest.json`;
     bucket.faults.set(
@@ -736,7 +922,7 @@ describe("publishing a release", () => {
   it.each(["drop", "500"] as const)(
     "takes a manifest it stored for its own when the answer is lost (%s), not for a failure or another id",
     async (answer) => {
-      const month = releaseMonthPrefix(new Date());
+      const month = releaseMonthPrefix(new Date(TEST_NOW));
       const commit = "9".repeat(40);
       const claim = `releases/${month}1/manifest.json`;
       bucket.faults.set(claim, [{ answer, after: true }]);
@@ -754,23 +940,27 @@ describe("publishing a release", () => {
     }
   );
 
-  it("takes a manifest of its commit from another build, found at the id it claims, for its release", async () => {
-    const month = releaseMonthPrefix(new Date());
+  it("leaves a manifest of its commit from another build, found at the id it claims, and a re-run finds the commit published", async () => {
+    const month = releaseMonthPrefix(new Date(TEST_NOW));
     const commit = "e".repeat(40);
     const earlier = manifestOf(`${month}1`, commit);
     bucket.writtenAfterList.set(`releases/${month}1/manifest.json`, earlier);
-    const stdout = await publish(buildOf(commit));
+    const outcome = await outcomeOf(publish(buildOf(commit)));
+    const putsBefore = bucket.puts.length;
+    const rerun = await outcomeOf(publish(buildOf(commit)));
 
     expect({
+      refused: outcome.includes("holds another manifest"),
       releases: publishedReleases().map(({ id }) => id),
       stored: bucket.objects.get(`releases/${month}1/manifest.json`),
-      marker: bucket.objects.get(commitKey(commit))?.toString(),
-      published: stdout.includes(`release ${month}1`),
+      rerun,
+      putsAgain: bucket.puts.length - putsBefore,
     }).toStrictEqual({
+      refused: true,
       releases: [`${month}1`],
       stored: earlier,
-      marker: `${month}1\n`,
-      published: true,
+      rerun: "ok",
+      putsAgain: 0,
     });
   });
 
@@ -785,7 +975,7 @@ describe("publishing a release", () => {
   });
 
   it("publishes under a new id when another commit took the id its marker named before the re-run", async () => {
-    const month = releaseMonthPrefix(new Date());
+    const month = releaseMonthPrefix(new Date(TEST_NOW));
     const commit = "4".repeat(40);
     const claim = `releases/${month}1/manifest.json`;
     bucket.failingPuts.add(claim);
@@ -805,7 +995,7 @@ describe("publishing a release", () => {
   });
 
   it("goes on to its claim when its marker write took but the answer was lost", async () => {
-    const month = releaseMonthPrefix(new Date());
+    const month = releaseMonthPrefix(new Date(TEST_NOW));
     const commit = "5".repeat(40);
     bucket.faults.set(commitKey(commit), [
       { answer: "drop", method: "PUT", after: true },
@@ -852,10 +1042,10 @@ describe("publishing a release", () => {
   };
 
   it("publishes a commit once when another run of it names the same id and claims it first", async () => {
-    const month = releaseMonthPrefix(new Date());
+    const month = releaseMonthPrefix(new Date(TEST_NOW));
     const commit = "6".repeat(40);
     interleaveTwin(commit, `${month}1`, true);
-    await publish(buildOf(commit));
+    await outcomeOf(publish(buildOf(commit)));
 
     expect(publishedReleases().map(({ id }) => id)).toStrictEqual([
       `${month}1`,
@@ -863,7 +1053,7 @@ describe("publishing a release", () => {
   });
 
   it("stops as published when another run of its commit published it under another id meanwhile", async () => {
-    const month = releaseMonthPrefix(new Date());
+    const month = releaseMonthPrefix(new Date(TEST_NOW));
     const commit = "7".repeat(40);
     interleaveTwin(commit, `${month}5`, true);
     const stdout = await publish(buildOf(commit));
@@ -875,7 +1065,7 @@ describe("publishing a release", () => {
   });
 
   it("publishes nothing while another run of its commit holds the marker for an id it hasn't claimed yet", async () => {
-    const month = releaseMonthPrefix(new Date());
+    const month = releaseMonthPrefix(new Date(TEST_NOW));
     const commit = "8".repeat(40);
     interleaveTwin(commit, `${month}5`, false);
     const outcome = await outcomeOf(publish(buildOf(commit)));
@@ -886,8 +1076,8 @@ describe("publishing a release", () => {
     }).toStrictEqual({ refused: true, releases: [] });
   });
 
-  it("leaves another publish's manifest as it is when a retried claim finds the id taken, and takes the next", async () => {
-    const month = releaseMonthPrefix(new Date());
+  it("leaves another publish's manifest as it is when a retried claim finds the id taken, and publishes nothing", async () => {
+    const month = releaseMonthPrefix(new Date(TEST_NOW));
     const claim = `releases/${month}1/manifest.json`;
     const others = Buffer.from(
       JSON.stringify({ releaseId: `${month}1`, commit: "f".repeat(40) })
@@ -901,18 +1091,18 @@ describe("publishing a release", () => {
         },
       },
     ]);
-    await publish(buildOf("a".repeat(40)));
+    const outcome = await outcomeOf(publish(buildOf("a".repeat(40))));
 
     expect({
+      refused: outcome.includes("holds another manifest"),
       first: bucket.objects.get(claim),
-      marker: bucket.objects.get(commitKey("a".repeat(40)))?.toString(),
       releases: publishedReleases().map(
         ({ id, commit }) => `${id} ${String(commit)}`
       ),
     }).toStrictEqual({
+      refused: true,
       first: others,
-      marker: `${month}2\n`,
-      releases: [`${month}1 ${"f".repeat(40)}`, `${month}2 ${"a".repeat(40)}`],
+      releases: [`${month}1 ${"f".repeat(40)}`],
     });
   });
 
@@ -931,7 +1121,7 @@ describe("publishing a release", () => {
   });
 
   it("reads an answer again when the connection drops halfway through its body", async () => {
-    const month = releaseMonthPrefix(new Date());
+    const month = releaseMonthPrefix(new Date(TEST_NOW));
     const commit = "1".repeat(40);
     await publish(buildOf(commit));
     bucket.faults.set(`releases/${month}1/manifest.json`, [
@@ -968,7 +1158,7 @@ describe("publishing a release", () => {
   });
 
   it("asks the same of the bucket however many releases it holds, but a listing page per 1,000 of the month's: none of their manifests is read", async () => {
-    const now = new Date();
+    const now = new Date(TEST_NOW);
     const month = releaseMonthPrefix(now);
     const before = releaseMonthPrefix(
       new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))

@@ -5,8 +5,8 @@
  * A published release is `YY.MM.N`: the two-digit year and zero-padded
  * month (UTC) it was published in, and N, counting up from 1 within that
  * month, such as `26.10.42`. CI's publish takes the next N from the
- * releases bucket and claims it with a conditional write, trying the one
- * after when another publish got there first (scripts/release/upload-release.ts).
+ * releases bucket and claims it with a conditional write once the
+ * manifest is signed (scripts/release/upload-release.ts).
  * Promoting a release copies it with the id it has.
  *
  * A local build is `dev-<time>` until it's published: never in a bucket a

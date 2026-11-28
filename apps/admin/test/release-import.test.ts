@@ -5,14 +5,25 @@ import {
   moduleKey,
   sha256OfBytes,
 } from "@grasp-os/shared/release";
-import { nextReleaseId as nextPublishedId } from "@grasp-os/shared/release-id";
+import {
+  nextReleaseId as nextPublishedId,
+  releaseMonthPrefix,
+} from "@grasp-os/shared/release-id";
+import { signatureKey } from "@grasp-os/shared/release-signature";
 import { createScheduledController } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import {
+  signReleaseManifest,
+  strangerSigningKey,
+  testReleaseSigningKey,
+} from "../../../packages/shared/test/release-signing-keys.ts";
+import { alertEventSchema } from "../src/alerts/alert.ts";
 import { adminDatabase } from "../src/db/act.ts";
 import {
+  alerts,
   auditEvents,
   channels,
   releaseImportFailures,
@@ -29,6 +40,7 @@ import {
 import type { ImportStore } from "../src/releases/import.ts";
 import { channelReleases } from "../src/rollout/targets.ts";
 import worker from "../src/server.ts";
+import { testReleaseMonth } from "./release-clock.ts";
 import {
   buildRelease,
   nextReleaseId,
@@ -511,13 +523,10 @@ CREATE TABLE t (id TEXT);`,
   });
 
   it("takes the newest release by year, month and N as numbers, never as text", async () => {
-    // A month after every other release in the file's bucket.
-    const month = new Date(Date.UTC(2099, 11, 15));
-    const ids: string[] = [];
-    for (let n = 1; n <= 10; n += 1) {
-      ids.push(nextPublishedId(ids, month));
-    }
-    const [ninth = "", tenth = ""] = ids.slice(-2);
+    // Above every other N of the file's month: by text, the first is the
+    // newer.
+    const month = releaseMonthPrefix(testReleaseMonth);
+    const [ninth, tenth] = [`${month}99999`, `${month}100000`];
     for (const id of [ninth, tenth]) {
       // oxlint-disable-next-line no-await-in-loop -- in order, oldest first
       const release = await buildRelease({ notes: `feat(core): ${id}` }, id);
@@ -655,21 +664,23 @@ CREATE TABLE t (id TEXT);`,
     expect({
       blobs: first.blobs.size,
       firstImported: firstRun.imported.includes(first.id),
-      // Its manifest and each blob, read once: nothing imported holds them.
+      // Its manifest, its signature and each blob, read once: nothing
+      // imported holds them.
       firstRequests: firstReads + firstHeads,
       secondImported: secondRun.imported.includes(second.id),
       fresh: fresh.length,
-      // Its manifest and its new blobs read; the rest by their heads alone.
+      // Its manifest, its signature and its new blobs read; the rest by
+      // their heads alone.
       secondReads: allReads(reads) - firstReads,
       freshReadOnce: fresh.every((key) => reads.get(key) === 1),
       secondHeads: allReads(heads) - firstHeads,
     }).toStrictEqual({
       blobs: 1154,
       firstImported: true,
-      firstRequests: 1155,
+      firstRequests: 1156,
       secondImported: true,
       fresh: 76,
-      secondReads: 77,
+      secondReads: 78,
       freshReadOnce: true,
       secondHeads: 1154 - 76,
     });
@@ -992,6 +1003,123 @@ CREATE TABLE t (id TEXT);`,
     await expect(
       eventsFor("release.import_failed", broken.id)
     ).resolves.toHaveLength(1);
+  });
+
+  it("refuses a release that isn't signed, was changed after it was signed, or was signed with a key nobody trusts, alerting staff, and imports the next", async () => {
+    const encoder = new TextEncoder();
+    const unsigned = await buildRelease({ notes: "feat(core): unsigned" });
+    const changed = await buildRelease({ notes: "feat(core): changed" });
+    const stranger = await buildRelease({ notes: "feat(core): stranger" });
+    const local = await buildRelease(
+      { notes: "feat(core): local" },
+      "dev-unsigned"
+    );
+    for (const release of [unsigned, changed, stranger, local]) {
+      // oxlint-disable-next-line no-await-in-loop -- a few, in order
+      await putBlobs(release);
+    }
+    await env.RELEASES.put(manifestKey(unsigned.id), unsigned.manifestText);
+    await env.RELEASES.put(manifestKey(local.id), local.manifestText);
+    // Signed as published, then changed by whoever holds the bucket's key.
+    const altered = changed.manifestText.replace(
+      "feat(core): changed",
+      "feat(core): chang3d"
+    );
+    await env.RELEASES.put(
+      signatureKey(await sha256OfBytes(encoder.encode(altered))),
+      await signReleaseManifest(
+        encoder.encode(changed.manifestText),
+        testReleaseSigningKey
+      )
+    );
+    await env.RELEASES.put(manifestKey(changed.id), altered);
+    await env.RELEASES.put(
+      signatureKey(await sha256OfBytes(encoder.encode(stranger.manifestText))),
+      await signReleaseManifest(
+        encoder.encode(stranger.manifestText),
+        strangerSigningKey
+      )
+    );
+    await env.RELEASES.put(manifestKey(stranger.id), stranger.manifestText);
+    const next = await publishRelease({ notes: "feat(core): signed after" });
+
+    const result = await runImport();
+
+    const refused = [unsigned.id, changed.id, stranger.id, local.id];
+    const alerted = await Promise.all(
+      refused.map(async (id) => {
+        const [row] = await db
+          .select()
+          .from(alerts)
+          .where(eq(alerts.key, `import:${id}`));
+        const event = alertEventSchema.parse(JSON.parse(row?.event ?? "null"));
+        return "code" in event ? event.code : undefined;
+      })
+    );
+    const rows = await Promise.all(refused.map(releaseRow));
+    expect({
+      failed: result.failed.toSorted(),
+      imported: result.imported.includes(next.id),
+      rows: rows.filter(Boolean),
+      alerted,
+    }).toStrictEqual({
+      failed: refused.toSorted(),
+      imported: true,
+      rows: [],
+      alerted: refused.map(() => "UnverifiedReleaseError"),
+    });
+  });
+
+  it("refuses an unsigned release under an old id nobody used, as anyone holding the bucket's key could write one", async () => {
+    const old = "26.10.999";
+    const release = await buildRelease({ notes: "feat(core): planted" }, old);
+    await putBlobs(release);
+    await env.RELEASES.put(manifestKey(old), release.manifestText);
+
+    const result = await runImport();
+
+    expect({
+      failed: result.failed.includes(old),
+      saved: await releaseRow(old),
+    }).toStrictEqual({ failed: true, saved: undefined });
+  });
+
+  it("refuses a signed release under an id of a month still to come, alerting staff, as it would hold Edge until that month: and imports this month's", async () => {
+    const ahead = nextPublishedId(
+      [],
+      new Date(
+        Date.UTC(
+          testReleaseMonth.getUTCFullYear(),
+          testReleaseMonth.getUTCMonth() + 1,
+          1
+        )
+      )
+    );
+    const early = await buildRelease({ notes: "feat(core): early" }, ahead);
+    await putBlobs(early);
+    await putManifest(early);
+    const current = await publishRelease({ notes: "feat(core): this month" });
+
+    const result = await runImport();
+    const [alerted] = await db
+      .select()
+      .from(alerts)
+      .where(eq(alerts.key, `import:${ahead}`));
+    // Out of the file's bucket, which would otherwise try it again in
+    // every later test.
+    await env.RELEASES.delete(manifestKey(ahead));
+
+    expect({
+      failed: result.failed.includes(ahead),
+      imported: result.imported.includes(current.id),
+      saved: await releaseRow(ahead),
+      code: alertEventSchema.parse(JSON.parse(alerted?.event ?? "null")),
+    }).toMatchObject({
+      failed: true,
+      imported: true,
+      saved: undefined,
+      code: { code: "FutureReleaseError" },
+    });
   });
 
   it("reads the whole listing, a page at a time", async () => {

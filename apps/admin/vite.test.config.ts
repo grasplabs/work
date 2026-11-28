@@ -34,6 +34,21 @@ const coreMigrationFiles = readdirSync(coreMigrationsDir)
  */
 export default defineProject({
   define: adminDefine,
+  // The release signing key the tests trust in place of production's
+  // (packages/shared/test/release-signing-keys.ts), and the release
+  // clock they run on (test/release-clock.ts), for every import of either.
+  resolve: {
+    alias: [
+      {
+        find: /^@grasp-os\/shared\/release-signing-keys$/u,
+        replacement: `${import.meta.dirname}/../../packages/shared/test/release-signing-keys.ts`,
+      },
+      {
+        find: /^\.{1,2}\/(?:releases\/)?release-clock\.ts$/u,
+        replacement: `${import.meta.dirname}/test/release-clock.ts`,
+      },
+    ],
+  },
   test: {
     name: "admin",
     include: ["test/**/*.test.ts"],
