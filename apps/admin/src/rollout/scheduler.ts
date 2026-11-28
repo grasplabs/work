@@ -583,8 +583,7 @@ const alertHalt = async (
 
 /**
  * Halts running rollout `rollout` (`failed`), audited (`rollout.halt`)
- * and alerted once, and says so on its channel (`channels.stopped_by`,
- * which an older admin reads). Nothing when it's no longer as read.
+ * and alerted once. Nothing when it's no longer as read.
  */
 const recordHalt = async (
   db: AdminDatabase,
@@ -608,15 +607,6 @@ const recordHalt = async (
         failed,
       },
     }),
-    db
-      .update(channels)
-      .set({ stoppedBy: reason })
-      .where(
-        and(
-          eq(channels.id, rollout.channel),
-          sql`EXISTS (SELECT 1 FROM ${rollouts} WHERE ${rollouts.id} = ${rollout.id} AND ${rollouts.status} = 'halted')`
-        )
-      ),
   ]);
   if (recorded.length > 0) {
     await alertHalt(db, rollout, { done, failed });
@@ -683,18 +673,6 @@ const recordRollouts = async (
       // between the halt and its alert never loses it.
       // oxlint-disable-next-line no-await-in-loop -- as above
       await alertHalt(db, rollout, counts);
-      // Said again each pass: an older admin's reconciler clears it.
-      // oxlint-disable-next-line no-await-in-loop -- as above
-      await db
-        .update(channels)
-        .set({ stoppedBy: "failed" })
-        .where(
-          and(
-            eq(channels.id, rollout.channel),
-            eq(channels.releaseId, rollout.releaseId),
-            isNull(channels.stoppedBy)
-          )
-        );
     }
   }
 };

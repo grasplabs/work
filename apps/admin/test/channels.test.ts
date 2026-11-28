@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { and, asc, desc, eq, inArray, like, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { clientGrid } from "../src/clients/grid.ts";
 import { adminDatabase } from "../src/db/act.ts";
 import {
   alerts,
@@ -147,14 +148,10 @@ const startedOf = async (clientIds: readonly string[]): Promise<number> =>
     )
   );
 
-/** Why nothing new deploys on `channel`; null while something may. */
-const stoppedByOf = async (channel: Channel): Promise<string | null> => {
-  const row = await db
-    .select({ stoppedBy: channels.stoppedBy })
-    .from(channels)
-    .where(eq(channels.id, channel))
-    .get();
-  return row?.stoppedBy ?? null;
+/** Why nothing new deploys on client `clientId`'s channel, as its grid row tells staff; null while something may. */
+const channelStoppedAt = async (clientId: string): Promise<string | null> => {
+  const grid = await clientGrid(env);
+  return grid.find(({ id }) => id === clientId)?.rollout.channelStopped ?? null;
 };
 
 /** How many deploys of client `clientId` started, as the audit log keeps them. */
@@ -575,7 +572,7 @@ describe("release channels", () => {
         })
       ),
       largest: await releasesOf(largest.clientId),
-      stoppedBy: await stoppedByOf("stable"),
+      stopped: await channelStoppedAt(largest.clientId),
       halts: await eventsOf("rollout.halt", id),
       told: await haltAlertsOf(id),
     };
@@ -591,7 +588,7 @@ describe("release channels", () => {
           async ({ clientId }) => await releasesOf(clientId)
         )
       ),
-      stoppedBy: await stoppedByOf("stable"),
+      stopped: await channelStoppedAt(largest.clientId),
       resumed: await db
         .select({ actor: auditEvents.actor, detail: auditEvents.detail })
         .from(auditEvents)
@@ -617,7 +614,7 @@ describe("release channels", () => {
         // One at a time while none was done, then halted: the largest
         // never started.
         largest: on(before),
-        stoppedBy: "failed",
+        stopped: "failed",
         halts: 1,
         told: 1,
       },
@@ -631,7 +628,7 @@ describe("release channels", () => {
         failed: 0,
       },
       everyone: [on(release), on(release), on(release), on(release)],
-      stoppedBy: null,
+      stopped: null,
       resumed: [
         {
           actor: staff.email,

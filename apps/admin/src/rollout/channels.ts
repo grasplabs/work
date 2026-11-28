@@ -253,12 +253,12 @@ const pointChannel = async (
       ? db
           .insert(channels)
           .select(
-            sql`SELECT ${channel}, ${releaseId}, ${now.getTime()}, NULL WHERE ${when}`
+            sql`SELECT ${channel}, ${releaseId}, ${now.getTime()} WHERE ${when}`
           )
           .onConflictDoNothing()
       : db
           .update(channels)
-          .set({ releaseId, updatedAt: now, stoppedBy: null })
+          .set({ releaseId, updatedAt: now })
           .where(and(eq(channels.id, channel), when));
   const results = await db.batch([
     ...startRollout(db, actor, { channel, releaseId, rolloutId }, when, now),
@@ -425,7 +425,7 @@ export const toEdge = (
     .values({ id: "edge", releaseId, updatedAt: now })
     .onConflictDoUpdate({
       target: channels.id,
-      set: { releaseId, updatedAt: now, stoppedBy: null },
+      set: { releaseId, updatedAt: now },
       setWhere: sql`${releaseOrderSql(channels.releaseId)} < ${releaseOrderSql(releaseId)}`,
     });
   return [
@@ -485,10 +485,6 @@ export const resumeRollout = async (
         sql`SELECT ${crypto.randomUUID()}, ${now.getTime()}, ${staff.email}, 'rollout.resume', NULL, ${halted.id}, json_object('channel', ${channel}, 'release', ${halted.releaseId}, 'cleared', changes()) WHERE ${still}`
       )
       .returning({ id: auditEvents.id }),
-    db
-      .update(channels)
-      .set({ stoppedBy: null })
-      .where(and(eq(channels.id, channel), still)),
     db
       .update(rollouts)
       .set({ status: "running", resumedAt: now, failed: 0 })

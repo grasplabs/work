@@ -104,14 +104,6 @@ export const channels = sqliteTable("channels", {
     .notNull()
     .references(() => releases.id),
   updatedAt: timestamp("updated_at").notNull(),
-  /**
-   * Why nothing new deploys on the channel: its rollout's halt reason
-   * (src/rollout/scheduler.ts), or, from an older admin, an error code;
-   * null once it's resumed or the channel moves. Shown in "Needs Grasp
-   * today" at each of its organizations. Kept while an older admin may
-   * read it.
-   */
-  stoppedBy: text("stopped_by"),
 });
 
 /**

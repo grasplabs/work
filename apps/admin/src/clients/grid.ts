@@ -22,12 +22,12 @@ import { z } from "zod";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
-  channels,
   clientDeploys,
   clientProvisions,
   clients,
   clientWorkers,
   releases,
+  rollouts,
 } from "../db/schema.ts";
 import { clientDomain, deploySecrets, ifStored } from "../deploy/context.ts";
 import { errorCode } from "../deploy/errors.ts";
@@ -279,11 +279,12 @@ const stoppedChannels = async (
   db: AdminDatabase
 ): Promise<Map<Channel, string>> => {
   const rows = await db
-    .select({ id: channels.id, stoppedBy: channels.stoppedBy })
-    .from(channels);
+    .select({ channel: rollouts.channel, why: rollouts.haltedReason })
+    .from(rollouts)
+    .where(eq(rollouts.status, "halted"));
   return new Map(
-    rows.flatMap(({ id, stoppedBy: why }): [Channel, string][] =>
-      why === null ? [] : [[id, why]]
+    rows.flatMap(({ channel, why }): [Channel, string][] =>
+      why === null ? [] : [[channel, why]]
     )
   );
 };
