@@ -460,26 +460,44 @@ export const seed = (
   return { seeded: [...written.keys()], skipped };
 };
 
-/** The rows of a table, and the columns that find one again. */
+/**
+ * The rows of a table, the columns that find one again, and each row's
+ * rowid (none in a WITHOUT ROWID table), which an UPDATE of its key keeps.
+ */
 interface TableRows {
   key: string[];
   rows: Stored[];
+  rowids: SQLOutputValue[];
 }
 
 /** Every ordinary table's rows. */
 export type Snapshot = Map<string, TableRows>;
 
+/** A table's rows, with their rowids where it has them. */
+const tableRows = (db: DatabaseSync, name: string): TableRows => {
+  const key = tableOf(db, name).primaryKey;
+  try {
+    const read = rows(db, `SELECT rowid AS "rowid ", * FROM ${quoted(name)}`);
+    return {
+      key,
+      rows: read.map((row) =>
+        Object.fromEntries(
+          Object.entries(row).filter(([column]) => column !== "rowid ")
+        )
+      ),
+      rowids: read.map((row) => row["rowid "] ?? null),
+    };
+  } catch {
+    // A WITHOUT ROWID table.
+    return { key, rows: rows(db, `SELECT * FROM ${quoted(name)}`), rowids: [] };
+  }
+};
+
 export const snapshotOf = (db: DatabaseSync): Snapshot =>
   new Map(
     tableNames(db)
       .filter(({ virtual }) => !virtual)
-      .map(({ name }) => [
-        name,
-        {
-          key: tableOf(db, name).primaryKey,
-          rows: rows(db, `SELECT * FROM ${quoted(name)}`),
-        },
-      ])
+      .map(({ name }) => [name, tableRows(db, name)])
   );
 
 /** Whether `a` and `b` are the same value, of the same type. */
@@ -499,44 +517,69 @@ const shown = (value: unknown): string =>
     : JSON.stringify(value);
 
 /**
- * What `db` lost or changed of the rows in `before`, in the tables and
- * columns main has (`main`, as written before the branch's migrations): a
- * table or a column the branch added is its own to change.
+ * What `db` lost or changed of main's rows (`before`: those main wrote, as
+ * the branch's earlier migrations left them), in the columns main has
+ * (`main`), and those rows as they are now, for the next migration. A row,
+ * a table or a column the branch added is its own to change.
  */
-/** What `now` lost or changed of `oldRows`, one table's rows. */
+/**
+ * What `now` lost or changed of `old`, one table's rows, and the rows of
+ * `now` that are `old`'s: found by key, or by rowid when an UPDATE changed
+ * the key.
+ */
 const rowChanges = (
   table: string,
-  key: readonly string[],
-  oldRows: readonly Stored[],
-  nowRows: readonly Stored[],
+  old: TableRows,
+  now: TableRows,
   kept: readonly string[]
-): DataChange[] => {
+): { changes: DataChange[]; followed: TableRows } => {
   const found: DataChange[] = [];
   // Without a primary key, a row is found again by all it holds.
-  const findBy = key.length > 0 ? key : kept;
+  const findBy = old.key.length > 0 ? old.key : kept;
   let lost = 0;
   const changed = new Map<string, { rows: number; detail: string }>();
-  // Each row found again once: of two equal rows, one may be lost.
-  const unmatched = new Set(nowRows);
-  for (const old of oldRows) {
-    const match = [...unmatched].find((row) =>
-      findBy.every((column) => same(row[column], old[column]))
+  const followed: TableRows = { key: now.key, rows: [], rowids: [] };
+  // Each row found again once: of two equal rows, one may be lost. By
+  // key first, for every row; then by rowid, among the rows no key found,
+  // for a row whose key an UPDATE changed.
+  const unmatched = new Set(now.rows.keys());
+  const byKey = old.rows.map((row) => {
+    const index = [...unmatched].find((candidate) =>
+      findBy.every((column) => same(now.rows[candidate]?.[column], row[column]))
     );
-    if (match === undefined) {
+    if (index !== undefined) {
+      unmatched.delete(index);
+    }
+    return index;
+  });
+  for (const [at, row] of old.rows.entries()) {
+    const rowid = old.rowids[at];
+    const match =
+      byKey[at] ??
+      [...unmatched].find(
+        (index) =>
+          rowid !== undefined &&
+          now.rowids[index] !== undefined &&
+          same(now.rowids[index], rowid)
+      );
+    const matched = match === undefined ? undefined : now.rows[match];
+    if (match === undefined || matched === undefined) {
       lost += 1;
       continue;
     }
     unmatched.delete(match);
+    followed.rows.push(matched);
+    followed.rowids.push(now.rowids[match] ?? null);
     for (const column of kept) {
-      if (!same(match[column], old[column])) {
+      if (!same(matched[column], row[column])) {
         const moved = kept.find(
-          (other) => other !== column && same(match[column], old[other])
+          (other) => other !== column && same(matched[column], row[other])
         );
         const entry = changed.get(column) ?? {
           rows: 0,
           detail:
             moved === undefined
-              ? `${shown(old[column])} to ${shown(match[column])}`
+              ? `${shown(row[column])} to ${shown(matched[column])}`
               : `now holds what ${table}.${moved} held`,
         };
         entry.rows += 1;
@@ -547,50 +590,48 @@ const rowChanges = (
   if (lost > 0) {
     found.push({
       subject: `delete rows ${table}`,
-      detail: `${lost} of ${oldRows.length} rows gone`,
+      detail: `${lost} of ${old.rows.length} rows gone`,
     });
   }
   for (const [column, { rows: count, detail }] of changed) {
     found.push({
       subject: `change values ${table}.${column}`,
-      detail: `${count} of ${oldRows.length} rows, ${detail}`,
+      detail: `${count} of ${old.rows.length} rows, ${detail}`,
     });
   }
-  return found;
+  return { changes: found, followed };
 };
 
 export const dataChanges = (
   before: Snapshot,
   db: DatabaseSync,
   main: Snapshot
-): DataChange[] => {
+): { changes: DataChange[]; followed: Snapshot } => {
   const after = snapshotOf(db);
-  const found: DataChange[] = [];
-  for (const [table, { key, rows: oldRows }] of before) {
+  const changes: DataChange[] = [];
+  const followed: Snapshot = new Map();
+  for (const [table, old] of before) {
     const now = after.get(table);
-    // A table the branch created holds none of main's rows; the rows are
-    // followed from migration to migration, whatever earlier ones changed.
-    if (!main.has(table)) {
-      continue;
-    }
     const mainColumns = Object.keys(main.get(table)?.rows[0] ?? {});
     // A table or key column dropped is the schema check's to judge.
-    if (now === undefined || oldRows.length === 0) {
+    if (now === undefined || old.rows.length === 0) {
       continue;
     }
     const columns =
       Object.keys(now.rows[0] ?? {}).length > 0
         ? Object.keys(now.rows[0] ?? {})
         : tableOf(db, table).columns.map(({ name }) => name);
-    if (!key.every((column) => columns.includes(column))) {
+    if (!old.key.every((column) => columns.includes(column))) {
       continue;
     }
-    const kept = Object.keys(oldRows[0] ?? {}).filter(
+    const kept = Object.keys(old.rows[0] ?? {}).filter(
       (column) => columns.includes(column) && mainColumns.includes(column)
     );
-    found.push(...rowChanges(table, key, oldRows, now.rows, kept));
+    const compared = rowChanges(table, old, now, kept);
+    changes.push(...compared.changes);
+    followed.set(table, compared.followed);
   }
-  return found;
+  return { changes, followed };
 };
 
 /** A migration as D1 and Durable Objects run it: `foreign_keys` stays on. */

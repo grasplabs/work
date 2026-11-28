@@ -735,10 +735,10 @@ const replayOnRows = (
     const { skipped } = seed(db, shape);
     // The rows and columns main has: what the branch adds is its own.
     const main = snapshotOf(db);
+    let followed = main;
     for (const { idx, sql } of migrations.filter(
       (migration) => migration.idx >= added
     )) {
-      const before = snapshotOf(db);
       try {
         db.exec("BEGIN");
         db.exec(asDeployed(sql));
@@ -747,7 +747,9 @@ const replayOnRows = (
         results.set(idx, message(error));
         break;
       }
-      results.set(idx, dataChanges(before, db, main));
+      const compared = dataChanges(followed, db, main);
+      results.set(idx, compared.changes);
+      ({ followed } = compared);
     }
     return { results, skipped };
   } finally {

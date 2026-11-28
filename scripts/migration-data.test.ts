@@ -377,12 +377,40 @@ ALTER TABLE \`__new_costs\` RENAME TO \`costs\`;`,
       ],
       { ...judging, from: 1, added: 1 }
     );
+    expect(errors.join("\n")).not.toContain("db/0001_rekey.sql");
     expect(errors.join("\n")).toContain("db/0002_empty.sql breaks");
     expect(errors.join("\n")).toContain("delete rows tags (5 of 5 rows gone)");
   });
 });
 
 describe("a branch of several migrations", () => {
+  it("passes losing a row the branch added, through a trigger main has", () => {
+    const { errors } = checkDatabase(
+      "db",
+      [
+        {
+          idx: 0,
+          tag: "0000_base",
+          sql: `CREATE TABLE \`t\` (\`id\` text PRIMARY KEY NOT NULL, \`kind\` text);
+CREATE TABLE \`events\` (\`id\` text PRIMARY KEY NOT NULL);
+CREATE TRIGGER \`events_sweep\` AFTER INSERT ON \`events\` BEGIN DELETE FROM \`t\` WHERE \`kind\` = 'scratch'; END;`,
+        },
+        {
+          idx: 1,
+          tag: "0001_scratch",
+          sql: "INSERT INTO `t` (`id`, `kind`) VALUES ('s-1', 'scratch');",
+        },
+        {
+          idx: 2,
+          tag: "0002_event",
+          sql: "INSERT INTO `events` (`id`) VALUES ('e-1');",
+        },
+      ],
+      { ...judging, from: 1, added: 1 }
+    );
+    expect(errors).toStrictEqual([]);
+  });
+
   it("passes a backfill of a column an earlier migration of the branch added", () => {
     const { errors } = checkDatabase(
       "db",
