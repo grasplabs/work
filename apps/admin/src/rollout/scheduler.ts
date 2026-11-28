@@ -64,7 +64,9 @@ import {
 import { clientDomain } from "../deploy/context.ts";
 import { errorCode } from "../deploy/errors.ts";
 import { currentRun, hasEnded, instanceStatus } from "../runners.ts";
+import type { RunStatus } from "../runners.ts";
 import { adminWorkflow, adminWorkflows } from "../workflow-runs.ts";
+import { deployerToken } from "./api-budget.ts";
 import { channelIds } from "./channel-ids.ts";
 import type { Channel } from "./channel-ids.ts";
 import { recordEnd } from "./deploy.ts";
@@ -99,9 +101,6 @@ const pageSize = 200;
  * one cut off by the admin's own redeploy holds the next back little.
  */
 const passLeaseMs = 2 * 60 * 1000;
-
-/** The deployer token's row in `api_budget`. */
-const deployerToken = "DEPLOYER_API_TOKEN";
 
 /**
  * The one release every Worker of the client runs, as SQL: null when it
@@ -215,9 +214,44 @@ export const eachPage = async (
   }
 };
 
-/** The workflow an organization's run is a run of. */
+/** The workflow the pass starts an organization's run under. */
 const organizationRuns = (env: Env) =>
   adminWorkflow<DeployParams>(env, adminWorkflows.deploy);
+
+/**
+ * The workflows an organization's deploy may be a run of: a rollout, a
+ * step a phase (src/rollout/org-rollout.ts), or a deploy in one step
+ * (src/rollout/deploy.ts), until the last of those has ended and that
+ * definition goes. Each kind's run is its own object, so a run is looked
+ * for under each: an admin that starts one kind settles the other's runs
+ * as theirs, never as gone, while both are out.
+ */
+const organizationWorkflows = [
+  adminWorkflows.orgRollout,
+  adminWorkflows.deploy,
+] as const;
+
+/** Where run `runId`, claimed at `since`, is, of whichever `organizationWorkflows` it's a run of. */
+const runStatusOf = async (
+  env: Env,
+  runId: string,
+  since: Date
+): Promise<RunStatus> => {
+  let status: RunStatus = "gone";
+  for (const workflow of organizationWorkflows) {
+    // oxlint-disable-next-line no-await-in-loop -- the first that has it
+    const found = await instanceStatus(
+      adminWorkflow(env, workflow),
+      runId,
+      since
+    );
+    if (found.instance !== null) {
+      return found.status;
+    }
+    ({ status } = found);
+  }
+  return status;
+};
 
 /**
  * Client `row` once its deploy is settled: one whose run ended without
@@ -237,11 +271,7 @@ const settled = async (
   }
   let code: string;
   try {
-    const { status } = await instanceStatus(
-      organizationRuns(env),
-      row.run.runId,
-      row.run.startedAt
-    );
+    const status = await runStatusOf(env, row.run.runId, row.run.startedAt);
     if (!hasEnded(status)) {
       return row;
     }

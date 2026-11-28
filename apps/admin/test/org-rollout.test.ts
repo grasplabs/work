@@ -16,7 +16,7 @@ import {
   clientWorkers,
 } from "../src/db/schema.ts";
 import { operationPhases } from "../src/hosting/operation.ts";
-import { reconcile } from "../src/rollout/reconciler.ts";
+import { rolloutPass } from "../src/rollout/scheduler.ts";
 import { claimRun, currentRun, hasEnded, takeAttempt } from "../src/runners.ts";
 import { adminWorkflow, adminWorkflows } from "../src/workflow-runs.ts";
 import type { ApiCall } from "./cloudflare-api-kit.ts";
@@ -1108,7 +1108,7 @@ describe("an organization's rollout", () => {
     }
   });
 
-  it("never deploys an organization in the old run while its rollout has it, nor starts a rollout while an old deploy has one", async () => {
+  it("never deploys an organization in a deploy run while its rollout has it, nor starts a rollout while a deploy has one, and the pass settles neither as gone", async () => {
     const before = await placedRelease("feat(core): before");
     const rolling = await live(before);
     const deploying = await live(before);
@@ -1120,18 +1120,24 @@ describe("an organization's rollout", () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     await using runs = followAdminRuns();
     try {
-      // The rollout has one organization; then the old reconciler ticks,
-      // with the release on Edge.
+      // The rollout has one organization, claimed long enough ago that
+      // the pass would settle a run it can't find as gone; then the pass,
+      // which starts deploy runs, runs with the release on Edge.
       const runId = await rollOut(rolling.clientId, release);
       await held.read();
+      await db
+        .update(clientDeploys)
+        .set({ startedAt: new Date(Date.now() - 10 * 60 * 1000) })
+        .where(eq(clientDeploys.clientId, rolling.clientId));
       await releaseToEdge(env, [release]);
-      await reconcile(env);
+      await rolloutPass(env);
       const oldRuns = runs.of(adminWorkflows.deploy);
-      const { runner } = await deployOf(rolling.clientId);
+      const { deploy, runner } = await deployOf(rolling.clientId);
       const whileOut = {
         rollout: await startRollout(deploying.clientId, release),
         oldRuns: oldRuns.length,
         rollingRunner: runner?.runId,
+        rollingDeploy: deploy?.status,
       };
       held.release();
       await ended(rollouts, runId);
@@ -1148,9 +1154,15 @@ describe("an organization's rollout", () => {
           deploying: await releasesOf(deploying.clientId),
         },
       }).toStrictEqual({
-        // The old run took only the organization the rollout didn't have,
-        // and the rollout didn't start for the one the old run had.
-        whileOut: { rollout: undefined, oldRuns: 1, rollingRunner: runId },
+        // The deploy run took only the organization the rollout didn't
+        // have, the rollout didn't start for the one the deploy run had,
+        // and the pass found the rollout's run out.
+        whileOut: {
+          rollout: undefined,
+          oldRuns: 1,
+          rollingRunner: runId,
+          rollingDeploy: "deploying",
+        },
         rolling: {
           deploy: { releaseId: release, status: "done", error: null },
           runner: null,
