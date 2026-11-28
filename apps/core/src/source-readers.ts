@@ -89,14 +89,14 @@ import { entra } from "./directory-ties.ts";
  * How many requests one run of the clock lets connect send reading
  * people's groups (connect's reader-groups.ts), counted all told: the
  * providers' pages, each connection's token and each write. The platform's
- * limit is Workers' subrequests per invocation: 10,000 by default on
- * Workers Paid, as Cloudflare's Workers limits page states it (checked 18
- * November 2026; D1 queries count too; on-prem workerd has none). The page
+ * limit is Workers' subrequests per invocation (D1 queries count too;
+ * on-prem workerd has none), which the admin sets to 1,000,000 on every
+ * client upload (shared-reads.ts `brainCallsPerTick` says how). Cloudflare
  * doesn't say whether what a service binding's callee sends counts against
  * its caller, so it is taken to: this is a share of the clock's own
- * invocation, a tenth, as the shared reads' erasures take
- * (shared-reads.ts `brainCallsPerTick`), which leaves 8,000 for the
- * clock's other tasks. A read longer than one run goes on in the next.
+ * invocation, the same as the shared reads' erasures take, sized to
+ * Cloudflare's default of 10,000 so a run does as much as before. A read
+ * longer than one run goes on in the next.
  */
 export const readerGroupRequestsPerTick = 1000;
 
