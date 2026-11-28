@@ -160,6 +160,8 @@
     "./release": "./src/release.ts",
     "./release-apply": "./src/release-apply.ts",
     "./release-id": "./src/release-id.ts",
+    "./release-signature": "./src/release-signature.ts",
+    "./release-signing-keys": "./src/release-signing-keys.ts",
     "./resource-bindings": "./src/resource-bindings.ts",
     "./roles": "./src/roles.ts",
     "./run-filter": "./src/run-filter.ts",

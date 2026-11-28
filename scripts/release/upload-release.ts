@@ -21,7 +21,15 @@
  * The manifest goes up last, to `releases/<id>/manifest.json`: the admin
  * imports only releases whose manifest exists, so an upload that stops
  * halfway never leaves a manifest pointing at missing blobs. It's
- * written only if absent, so a published release never changes.
+ * written only if absent, so a published release never changes, and
+ * once `releases/` is locked in the bucket (by hand, once), R2 refuses a
+ * write to a published manifest with 409, which counts as taken, as 412
+ * does.
+ * Right before it goes its signature (@grasp-os/shared/release-signature),
+ * at the manifest's hash: CI's publish has the staging admin sign the
+ * manifest as stamped with each id it tries (signer-lib.ts); Promote
+ * release's copies the one its download fetched and checked, and refuses
+ * a release that has none that verifies.
  *
  * With --assign-id (CI's publish) the release gets its id here, from the
  * bucket (@grasp-os/shared/release-id): the next `YY.MM.N` after the ids
@@ -45,10 +53,12 @@
  * without credentials or network.
  *
  * Env: R2_ENDPOINT (https://<account id>.eu.r2.cloudflarestorage.com),
- *      R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
+ *      R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY; with --assign-id,
+ *      the signer's (signer-lib.ts)
  * Usage: vp run release:upload --release <dir> [--assign-id --head <sha>] [--dry-run]
  */
 import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
@@ -65,13 +75,21 @@ import {
   releaseIdSchema,
   releaseMonthPrefix,
 } from "@grasp-os/shared/release-id";
+import {
+  RELEASE_SIGNATURE_FILE,
+  releaseSignatureProblem,
+  signatureKey,
+} from "@grasp-os/shared/release-signature";
+import { releaseSigningKeys } from "@grasp-os/shared/release-signing-keys";
 
 import { stampReleaseId } from "./assign-lib.ts";
 import { REQUESTS_AT_ONCE, releasesBucketFromEnv } from "./bucket-lib.ts";
 import type { ReleasesBucket } from "./bucket-lib.ts";
 import { verifyRelease } from "./manifest-lib.ts";
+import { releaseSignerFromEnv } from "./signer-lib.ts";
 
 const HTTP_NOT_FOUND = 404;
+const HTTP_CONFLICT = 409;
 const HTTP_PRECONDITION_FAILED = 412;
 /**
  * Most ids one publish tries: each one another publish claimed first
@@ -100,6 +118,10 @@ const { manifest, manifestBytes, blobs } = await verifyRelease(releaseDir);
 /** SHA-256, base64: the form of R2's `x-amz-checksum-sha256`. */
 const sha256Base64 = (bytes: Uint8Array): string =>
   createHash("sha256").update(bytes).digest("base64");
+
+/** SHA-256, hex: how a manifest's signature is keyed (`signatureKey`). */
+const sha256Hex = (bytes: Uint8Array): string =>
+  createHash("sha256").update(bytes).digest("hex");
 
 const assertStored = (key: string, stored: string, expected: string): void => {
   if (stored !== expected) {
@@ -143,7 +165,11 @@ const storedSha256 = async (
  * nothing there. Undefined when this put stored them; otherwise the
  * SHA-256 of what `key` holds (`storedSha256`). A try that took but whose
  * answer was lost, sent again by the bucket's retries, finds its own bytes
- * there: the SHA-256 it reports is then theirs, never a failure.
+ * there: the SHA-256 it reports is then theirs, never a failure. Refused
+ * with nothing there, it throws. R2
+ * answers a key a bucket lock holds with 409 before it looks at
+ * `If-None-Match` (developers.cloudflare.com/r2/buckets/bucket-locks/,
+ * read 28 November 2026): held, as 412 says.
  */
 const putIfAbsent = async (
   bucket: ReleasesBucket,
@@ -160,13 +186,36 @@ const putIfAbsent = async (
       "x-amz-checksum-sha256": sha256Base64(bytes),
     },
   });
-  if (put.status === HTTP_PRECONDITION_FAILED) {
-    return (await storedSha256(bucket, key)) ?? "none";
+  if (put.status === HTTP_PRECONDITION_FAILED || put.status === HTTP_CONFLICT) {
+    const held = await storedSha256(bucket, key);
+    if (held === undefined) {
+      throw new Error(
+        `PUT ${key}: ${put.status}, yet R2 holds nothing there; nothing published`
+      );
+    }
+    return held;
   }
   if (!put.ok) {
     throw new Error(`PUT ${key}: ${put.status} ${await put.text()}`);
   }
   return undefined;
+};
+
+/**
+ * Stores `signature`, the signature file of `stampedBytes` (a manifest as
+ * it's about to be published), at its key, only if absent: there already,
+ * it must be these bytes, which signing the same manifest again gives.
+ */
+const putSignature = async (
+  bucket: ReleasesBucket,
+  stampedBytes: Uint8Array,
+  signature: Buffer
+): Promise<void> => {
+  const key = signatureKey(sha256Hex(stampedBytes));
+  const held = await putIfAbsent(bucket, key, signature, "application/json");
+  if (held !== undefined) {
+    assertStored(key, held, sha256Base64(signature));
+  }
 };
 
 /** SHA-256 hex as R2's checksum header writes it, base64. */
@@ -290,10 +339,40 @@ const uploadBlobs = async (bucket: ReleasesBucket): Promise<void> => {
 };
 
 /**
- * Publishes the release under the id it has (Promote release). Published
- * already, by an earlier attempt: it stands.
+ * The release directory's signature of its manifest, as its download
+ * fetched it, once it verifies; undefined for a release published before
+ * signing began that has none. Throws for one that must be signed and
+ * isn't, or whose signature doesn't verify: nothing is uploaded.
  */
-const publishAsBuilt = async (bucket: ReleasesBucket): Promise<void> => {
+const verifiedSignature = async (): Promise<Buffer | undefined> => {
+  const file = path.join(releaseDir, RELEASE_SIGNATURE_FILE);
+  const signature = existsSync(file) ? readFileSync(file) : undefined;
+  const problem = await releaseSignatureProblem(
+    manifest.releaseId,
+    manifestBytes,
+    signature,
+    releaseSigningKeys
+  );
+  if (problem !== undefined) {
+    throw new Error(
+      `Release ${manifest.releaseId} ${problem}; nothing published`
+    );
+  }
+  return signature;
+};
+
+/**
+ * Publishes the release under the id it has (Promote release), its
+ * signature (`signature`, checked) first. Published already, by an
+ * earlier attempt: it stands.
+ */
+const publishAsBuilt = async (
+  bucket: ReleasesBucket,
+  signature: Buffer | undefined
+): Promise<void> => {
+  if (signature !== undefined) {
+    await putSignature(bucket, manifestBytes, signature);
+  }
   const published = manifestKey(manifest.releaseId);
   const held = await putIfAbsent(
     bucket,
@@ -416,13 +495,15 @@ const writeMarker = async (
 /**
  * Publishes the release under the next id of the month (CI's publish):
  * each attempt names its id in the commit's marker (over `etag`, the
- * marker as read before the upload), then claims it by writing the
- * manifest only if absent, and moves on to the next id when another
- * publish has it.
+ * marker as read before the upload), has the manifest as stamped with it
+ * signed (`sign`) and stores the signature, then claims the id by writing
+ * the manifest only if absent, and moves on to the next id when another
+ * publish has it, its signature left for no manifest.
  */
 const publishWithNextId = async (
   bucket: ReleasesBucket,
-  etag: string | undefined
+  etag: string | undefined,
+  sign: (releaseId: string, manifestBytes: Buffer) => Promise<Buffer>
 ): Promise<void> => {
   const now = new Date();
   const taken = new Set(await bucket.listIds(releaseMonthPrefix(now)));
@@ -443,6 +524,10 @@ const publishWithNextId = async (
       return;
     }
     markerTag = named.etag;
+    // oxlint-disable-next-line no-await-in-loop -- one id at a time, until one is ours
+    const signature = await sign(id, stamped.manifestBytes);
+    // oxlint-disable-next-line no-await-in-loop -- one id at a time, until one is ours
+    await putSignature(bucket, stamped.manifestBytes, signature);
     // The manifest is the claim, only if absent. Found there already, it's
     // this commit's when an earlier try or attempt put it there: a lost
     // answer, or a build of the same commit, whose bytes may differ.
@@ -480,6 +565,10 @@ if (args["dry-run"]) {
     `::notice::Not publishing ${manifest.commit}: main's head is ${String(args.head)} now, which publishes its own release`
   );
 } else {
+  // Before anything is uploaded: a release that isn't signed as it must
+  // be, or a signer that isn't set, stops it here.
+  const signature = args["assign-id"] ? undefined : await verifiedSignature();
+  const sign = args["assign-id"] ? releaseSignerFromEnv() : undefined;
   const bucket = releasesBucketFromEnv();
   const marker = args["assign-id"] ? await readMarker(bucket) : undefined;
   const earlier =
@@ -495,9 +584,9 @@ if (args["dry-run"]) {
     );
     await uploadBlobs(bucket);
     await assertModelFilesStored(bucket, manifest.modelFiles);
-    await (args["assign-id"]
-      ? publishWithNextId(bucket, marker?.etag)
-      : publishAsBuilt(bucket));
+    await (sign === undefined
+      ? publishAsBuilt(bucket, signature)
+      : publishWithNextId(bucket, marker?.etag, sign));
   } else {
     // A re-run of the commit's publish: the release it published stands.
     console.warn(

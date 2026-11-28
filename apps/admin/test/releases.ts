@@ -1,7 +1,9 @@
 /**
  * Publishes releases to the test pool's R2 bucket laid out as CI publishes
  * them (scripts/release/upload-release.ts): content-addressed blobs first,
- * then `releases/<id>/manifest.json`.
+ * then the manifest's signature, by the key the tests trust
+ * (packages/shared/test/release-signing-keys.ts), then
+ * `releases/<id>/manifest.json`.
  */
 import {
   assetContentKey,
@@ -20,7 +22,13 @@ import {
   nextReleaseId as nextPublishedId,
   parsePublishedReleaseId,
 } from "@grasp-os/shared/release-id";
+import {
+  signatureKey,
+  signReleaseManifest,
+} from "@grasp-os/shared/release-signature";
 import { env } from "cloudflare:workers";
+
+import { testReleaseSigningKey } from "../../../packages/shared/test/release-signing-keys.ts";
 
 const encoder = new TextEncoder();
 
@@ -293,8 +301,18 @@ export const putBlobs = async (
   );
 };
 
-/** Stores a release's manifest, as CI does last. */
+/** Stores the signature of `manifestText`, as the admin signs it for CI. */
+export const putSignature = async (manifestText: string): Promise<void> => {
+  const bytes = encoder.encode(manifestText);
+  await env.RELEASES.put(
+    signatureKey(await sha256OfBytes(bytes)),
+    await signReleaseManifest(bytes, testReleaseSigningKey)
+  );
+};
+
+/** Stores a release's manifest, signed, as CI does last. */
 export const putManifest = async (release: TestRelease): Promise<void> => {
+  await putSignature(release.manifestText);
   await env.RELEASES.put(manifestKey(release.id), release.manifestText);
 };
 

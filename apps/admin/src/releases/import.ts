@@ -12,8 +12,11 @@
  * manifest exists. A new one is checked against its manifest, then
  * recorded with its audit event:
  *
- * - its manifest: its id the one its key names, every blob at its content
- *   address, every static file it indexes one a Worker serves (`blobsOf`);
+ * - its manifest: signed by a key Grasp trusts, at the signature file
+ *   CI stored before it (@grasp-os/shared/release-signature), unless
+ *   published before signing began; its id the one its key names, every
+ *   blob at its content address, every static file it indexes one a
+ *   Worker serves (`blobsOf`);
  * - each blob the newest imported release whose bundle is kept checked
  *   the same way (the same key, size and, for a static file, extension:
  *   `checksOf`), most of a release, as a merge changes a few files: not
@@ -34,9 +37,13 @@
  * and, for a module or migration, without a SHA-256. The deploy stops
  * that before it serves: it hashes every module, migration and static
  * file as it reads them from the bucket (src/deploy/release.ts), and each
- * model file as it streams (src/deploy/model-files.ts). This protects
- * against partial or corrupted uploads, not against whoever can write to
- * the bucket: a release that's consistent with its own manifest imports.
+ * model file as it streams (src/deploy/model-files.ts), against the
+ * manifest this import saved. The signature is what protects against
+ * whoever can write to the bucket: a manifest they write or change has
+ * none that verifies, and is refused, alerted as a failed import; the
+ * blobs it names are then checked against it as above. Once `releases/`
+ * is locked in the bucket (set by hand, once), a published manifest can't
+ * be rewritten either.
  *
  * A request R2 fails is tried again, after a short wait, a few times. A run
  * makes at most {@link MAX_REQUESTS_PER_RUN} requests and tries at most
@@ -79,6 +86,12 @@ import {
   compareReleaseIds,
   releaseIdSchema,
 } from "@grasp-os/shared/release-id";
+import {
+  MAX_SIGNATURE_BYTES,
+  releaseSignatureProblem,
+  signatureKey,
+} from "@grasp-os/shared/release-signature";
+import { releaseSigningKeys } from "@grasp-os/shared/release-signing-keys";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 
 import { alert } from "../alerts/alert.ts";
@@ -126,8 +139,9 @@ export const MAX_RELEASES_PER_RUN = 10;
  * {@link MAX_RELEASES_PER_RUN}), its listing (a page per 1,000 releases),
  * and, on the cron, the retention, reconciling and provisioning that
  * share the invocation. A release built from main today
- * (1,163 blobs and 3 model files) costs 1,167, so a run imports four; a
- * release it doesn't finish goes on next run from where it got.
+ * (1,163 blobs and 3 model files) costs 1,168 with its manifest and
+ * signature, so a run imports four; a release it doesn't finish goes on
+ * next run from where it got.
  */
 export const MAX_REQUESTS_PER_RUN = 5000;
 
@@ -270,6 +284,12 @@ const readerOf = (store: ImportStore) => {
   return {
     /** Whether the run has requests left. */
     spent: (): boolean => left <= 0,
+
+    /** When R2 stored the object at `key`; undefined when there's none. */
+    writtenAt: async (key: string): Promise<Date | undefined> => {
+      const head = await request(async () => await store.head(key), key);
+      return head?.uploaded;
+    },
 
     /** What R2 reports of the object at `key`, or null when there's none. */
     head: async (key: string): Promise<StoredObject | null> => {
@@ -489,6 +509,42 @@ const checkModelFiles = async (
   }
 };
 
+/**
+ * Throws unless release `id`'s manifest, `manifestBytes`, verifies with
+ * the signature file stored for it (`signatureKey`), against the keys
+ * Grasp trusts; one R2 says was published before signing began may have
+ * none. Its
+ * error's name, `UnverifiedReleaseError`, is the code its alert carries.
+ */
+const checkSignature = async (
+  reader: Reader,
+  id: string,
+  manifestBytes: Bytes,
+  manifestSha256: string
+): Promise<void> => {
+  const signature = await reader.read(
+    signatureKey(manifestSha256),
+    (size) => size <= MAX_SIGNATURE_BYTES,
+    `at most ${MAX_SIGNATURE_BYTES}`
+  );
+  const problem = await releaseSignatureProblem(
+    id,
+    manifestBytes,
+    signature,
+    releaseSigningKeys,
+    // Only for one without, which only a release before signing began
+    // may be: when R2 stored its manifest.
+    signature === undefined
+      ? await reader.writtenAt(manifestKey(id))
+      : undefined
+  );
+  if (problem !== undefined) {
+    const error = new Error(`Release ${id} ${problem}`);
+    error.name = "UnverifiedReleaseError";
+    throw error;
+  }
+};
+
 /** How many of release `id`'s blobs an earlier attempt checked, for this very manifest. */
 const resumeAt = async (
   db: AdminDatabase,
@@ -552,6 +608,9 @@ const importRelease = async (
     return "absent";
   }
   const { manifest, text } = parseManifest(id, manifestBytes);
+  const manifestSha256 = await sha256OfBytes(manifestBytes);
+  // Before anything of it is recorded or read.
+  await checkSignature(reader, id, manifestBytes, manifestSha256);
   const blobs = blobsOf(manifest);
   if (blobs.length > MAX_BLOBS_PER_RELEASE) {
     throw new Error(
@@ -568,7 +627,6 @@ const importRelease = async (
   // that's still being imported, over however many runs it takes, as the
   // manifest it has now names them.
   await recordBlobs(db, id, manifest);
-  const manifestSha256 = await sha256OfBytes(manifestBytes);
   const before = await checkedBefore(db);
   let failure: Error | undefined;
   for (

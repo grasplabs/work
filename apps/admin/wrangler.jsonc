@@ -278,6 +278,19 @@
       "store_id": "account-secrets-store",
       "secret_name": "DISCORD_ALERTS_WEBHOOK",
     },
+    // The key the admin signs CI's releases with (src/releases/sign.ts): an
+    // Ed25519 private JWK, whose public half every verifier trusts
+    // (@grasp-os/shared/release-signing-keys). Kept by hand, never in
+    // 1Password, so neither CI nor Deploy platform ever reads it
+    // (scripts/optional-secrets.ts, `handKeptSecrets`): only staging's
+    // store has one, as CI publishes to staging alone. Bound at the next
+    // Deploy platform once it's there; production's stays unbound, named
+    // here for the tests, which run this top level.
+    {
+      "binding": "RELEASE_SIGNING_KEY",
+      "store_id": "account-secrets-store",
+      "secret_name": "RELEASE_SIGNING_KEY",
+    },
   ],
   // Staging (`wrangler deploy --env staging`, deploy-platform with stage
   // staging): every name from @grasp-os/shared/names with -staging appended,
@@ -450,6 +463,11 @@
           "binding": "DISCORD_ALERTS_WEBHOOK",
           "store_id": "account-secrets-store",
           "secret_name": "DISCORD_ALERTS_WEBHOOK_STAGING",
+        },
+        {
+          "binding": "RELEASE_SIGNING_KEY",
+          "store_id": "account-secrets-store",
+          "secret_name": "RELEASE_SIGNING_KEY_STAGING",
         },
       ],
     },

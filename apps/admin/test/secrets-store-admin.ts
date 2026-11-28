@@ -58,4 +58,7 @@ export const adminSecrets = (tokens: {
   [env.ATTIO_READ_KEY, ""],
   // The alerts' Discord webhook likewise (test/alerts.test.ts).
   [env.DISCORD_ALERTS_WEBHOOK, ""],
+  // The release signing key likewise, as production's store reads
+  // (test/release-sign.test.ts).
+  [env.RELEASE_SIGNING_KEY, ""],
 ];

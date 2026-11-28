@@ -3,9 +3,13 @@
  * (the outside system) that stores objects in memory and, as R2 does,
  * honours `If-None-Match: *` and `If-Match` on an object's ETag (its
  * bytes' MD5, as for a single-part PUT), checks `x-amz-checksum-sha256` on
- * a PUT and reports it on a HEAD with checksum mode on. It can fail a request as a
+ * a PUT and reports it on a HEAD with checksum mode on, and, as a bucket
+ * lock on `releases/` and `signatures/` does, answers a write to a key
+ * there that holds something with 409. It can fail a request as a
  * network does: drop the connection unanswered, or answer 500, before or
- * after doing what was asked.
+ * after doing what was asked. It also stands in for GitHub's token
+ * service and the staging admin's signer (the outside systems CI asks),
+ * signing with the key the tests trust (packages/shared/test).
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -28,15 +32,31 @@ import {
   compareReleaseIds,
   releaseMonthPrefix,
 } from "@grasp-os/shared/release-id";
+import {
+  RELEASE_SIGNATURE_FILE,
+  SIGNED_FROM,
+  releaseSignatureProblem,
+  signatureKey,
+  signReleaseManifest,
+} from "@grasp-os/shared/release-signature";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import {
+  releaseSigningKeys,
+  testReleaseSigningKey,
+} from "../../packages/shared/test/release-signing-keys.ts";
 import { builds, fixtureModelFiles, info } from "./fixture-release.ts";
 import { generateManifest, writeRelease } from "./manifest-lib.ts";
 
-/** Runs a script in Node, resolving with its stdout; failing with its stderr. */
+const TRUST_TEST_KEY = path.join(import.meta.dirname, "trust-test-key.ts");
+
+/**
+ * Runs a script in Node, trusting the tests' signing key
+ * (trust-test-key.ts), resolving with its stdout; failing with its stderr.
+ */
 const run = async (args: string[], env: NodeJS.ProcessEnv): Promise<string> => {
-  const child = spawn("node", args, { env });
+  const child = spawn("node", ["--import", TRUST_TEST_KEY, ...args], { env });
   const closed = once(child, "close");
   const [stdout, stderr] = await Promise.all([
     text(child.stdout),
@@ -69,13 +89,29 @@ const manifest = generateManifest(info, fixture);
 const published = `releases/${manifest.releaseId}/manifest.json`;
 
 const HTTP_BAD_REQUEST = 400;
+const HTTP_FORBIDDEN = 403;
+const HTTP_CONFLICT = 409;
 const HTTP_SERVER_ERROR = 500;
+
+/** The token GitHub gives the run, and what the run asks for it with. */
+const GITHUB_TOKEN = "github-token-for-the-run";
+const REQUEST_TOKEN = "id-token-request-token";
+/** A key nobody trusts: an attacker's, or a signer's set up wrong. */
+const strangerKey = {
+  kty: "OKP",
+  crv: "Ed25519",
+  x: "A2VEuP3eHRFGIPqELZm-RDZnYWKhUXJLPFsDL5Y8xVY",
+  d: "7Bs1IAjNMwqAVTTNRQkEsTjYn2p3b4Vz3RhHn0GXi8o",
+} as const;
 
 /** What the tests read of a published manifest. */
 const storedManifest = z.object({ releaseId: z.string(), commit: z.string() });
 
 const sha256Base64 = (bytes: Uint8Array): string =>
   createHash("sha256").update(bytes).digest("base64");
+
+const sha256Hex = (bytes: Uint8Array): string =>
+  createHash("sha256").update(bytes).digest("hex");
 
 /** An object's ETag as R2 gives one for a single-part PUT: its bytes' MD5, quoted. */
 const etagOf = (bytes: Uint8Array): string =>
@@ -115,6 +151,12 @@ interface Bucket {
   faults: Map<string, Fault[]>;
   /** Every request answered or failed, as `<method> <key>`, a listing as `LIST <prefix>`. */
   requests: string[];
+  /** Whether `releases/` and `signatures/` are locked, as production's buckets are. */
+  locked: boolean;
+  /** How the signer answers: signs with the tests' key, another, or refuses. */
+  signer: "trusted" | "stranger" | "refuses";
+  /** The release ids the signer signed, in order. */
+  signed: string[];
 }
 
 const emptyBucket = (): Bucket => ({
@@ -126,6 +168,9 @@ const emptyBucket = (): Bucket => ({
   failingPuts: new Set(),
   faults: new Map(),
   requests: [],
+  locked: true,
+  signer: "trusted",
+  signed: [],
 });
 
 /**
@@ -261,6 +306,14 @@ const serveObject = async (
   if (bucket.failingPuts.delete(key)) {
     return { status: HTTP_BAD_REQUEST };
   }
+  if (
+    bucket.locked &&
+    stored !== undefined &&
+    (key.startsWith("releases/") || key.startsWith("signatures/"))
+  ) {
+    // The lock is checked first, whatever the request's conditions.
+    return { status: HTTP_CONFLICT };
+  }
   const ifMatch = request.headers["if-match"];
   if (
     (request.headers["if-none-match"] === "*" && stored !== undefined) ||
@@ -305,6 +358,53 @@ const send = (
   }
 };
 
+/**
+ * Answers the run's ask for GitHub's token, for the signer's origin, or
+ * the signer's for a signature, with the token, if `request` is either.
+ * The signer is reached as `localhost`, GitHub's token service as
+ * `127.0.0.1`: two origins, so a token asked for the wrong audience shows.
+ */
+const answeredSigning = async (
+  bucket: Bucket,
+  request: IncomingMessage,
+  response: ServerResponse
+): Promise<boolean> => {
+  const url = new URL(request.url ?? "", `http://${request.headers.host}`);
+  if (url.pathname === "/token") {
+    const fine =
+      request.headers.authorization === `bearer ${REQUEST_TOKEN}` &&
+      url.searchParams.get("audience") === `http://localhost:${url.port}`;
+    response
+      .writeHead(fine ? HTTP_OK : HTTP_FORBIDDEN)
+      .end(fine ? JSON.stringify({ value: GITHUB_TOKEN }) : undefined);
+    return true;
+  }
+  if (url.pathname !== "/release-publish") {
+    return false;
+  }
+  const body = await buffer(request);
+  if (
+    bucket.signer === "refuses" ||
+    request.method !== "POST" ||
+    request.headers.authorization !== `Bearer ${GITHUB_TOKEN}`
+  ) {
+    response.writeHead(HTTP_FORBIDDEN).end("Not CI's publish");
+    return true;
+  }
+  bucket.signed.push(
+    storedManifest.parse(JSON.parse(body.toString())).releaseId
+  );
+  response
+    .writeHead(HTTP_OK)
+    .end(
+      await signReleaseManifest(
+        body,
+        bucket.signer === "trusted" ? testReleaseSigningKey : strangerKey
+      )
+    );
+  return true;
+};
+
 const handle = async (
   bucket: Bucket,
   request: IncomingMessage,
@@ -312,7 +412,10 @@ const handle = async (
 ): Promise<void> => {
   const prefix = `/${BUCKET}/`;
   const url = request.url ?? "";
-  if (answeredListing(bucket, request, response)) {
+  if (
+    answeredListing(bucket, request, response) ||
+    (await answeredSigning(bucket, request, response))
+  ) {
     return;
   }
   const key = url.startsWith(prefix) ? url.slice(prefix.length) : undefined;
@@ -385,9 +488,21 @@ describe("publishing a release", () => {
     endpoint = `http://127.0.0.1:${address.port}`;
   };
 
+  /** Signs the release directory's manifest as it is, as Promote release's download leaves one. */
+  const signDir = async (): Promise<void> => {
+    writeFileSync(
+      path.join(dir, RELEASE_SIGNATURE_FILE),
+      await signReleaseManifest(
+        readFileSync(path.join(dir, "manifest.json")),
+        testReleaseSigningKey
+      )
+    );
+  };
+
   beforeEach(async () => {
     dir = mkdtempSync(path.join(tmpdir(), "grasp-os-upload-test-"));
     writeRelease(dir, manifest, fixture);
+    await signDir();
     await serve(bucketWithModel());
   });
 
@@ -412,6 +527,25 @@ describe("publishing a release", () => {
       R2_SECRET_ACCESS_KEY: "test-secret",
     });
 
+  /**
+   * Why release `id`'s published manifest doesn't verify with the
+   * signature stored for it; undefined when it does.
+   */
+  const signatureProblemOf = async (
+    id: string
+  ): Promise<string | undefined> => {
+    const bytes = bucket.objects.get(`releases/${id}/manifest.json`);
+    if (bytes === undefined) {
+      return "isn't published";
+    }
+    return await releaseSignatureProblem(
+      id,
+      bytes,
+      bucket.objects.get(signatureKey(sha256Hex(bytes))),
+      releaseSigningKeys
+    );
+  };
+
   it("uploads every blob, then the manifest last", async () => {
     await upload();
     const referenced = [
@@ -423,8 +557,11 @@ describe("publishing a release", () => {
       ]),
       ...Object.values(manifest.assets).map((asset) => asset.r2Key),
     ];
-    expect(bucket.puts.at(-1)).toBe(published);
-    expect(bucket.puts.slice(0, -1).toSorted()).toStrictEqual(
+    const signature = signatureKey(
+      sha256Hex(readFileSync(path.join(dir, "manifest.json")))
+    );
+    expect(bucket.puts.slice(-2)).toStrictEqual([signature, published]);
+    expect(bucket.puts.slice(0, -2).toSorted()).toStrictEqual(
       [...new Set(referenced)].toSorted()
     );
   });
@@ -437,8 +574,12 @@ describe("publishing a release", () => {
       path.join(dir, "manifest.json"),
       `${JSON.stringify({ ...manifest, createdAt: "2026-02-02T00:00:00.000Z" })}\n`
     );
+    await signDir();
     const stdout = await upload();
-    expect(bucket.puts).toStrictEqual([]);
+    // Only its signature, which names the other manifest's bytes.
+    expect(bucket.puts).toStrictEqual([
+      signatureKey(sha256Hex(readFileSync(path.join(dir, "manifest.json")))),
+    ]);
     expect(bucket.objects.get(published)).toStrictEqual(first);
     expect(stdout).toContain("0 uploaded");
   });
@@ -557,6 +698,7 @@ describe("publishing a release", () => {
       generateManifest({ ...info, modelFiles: [] }, fixture),
       fixture
     );
+    await signDir();
     await upload();
     expect(bucket.puts.at(-1)).toBe(published);
   });
@@ -567,6 +709,43 @@ describe("publishing a release", () => {
     writeFileSync(path.join(dir, stray), "not in the manifest");
     await upload();
     expect(bucket.puts).not.toContain(stray);
+  });
+
+  it("publishes a release as it has it only with a signature that verifies, stored right before it, even one from before signing began", async () => {
+    const bytes = readFileSync(path.join(dir, "manifest.json"));
+    const signatureFile = path.join(dir, RELEASE_SIGNATURE_FILE);
+    const signature = readFileSync(signatureFile);
+    rmSync(signatureFile);
+    const unsigned = await outcomeOf(upload());
+    writeFileSync(
+      signatureFile,
+      await signReleaseManifest(
+        Buffer.from("another manifest"),
+        testReleaseSigningKey
+      )
+    );
+    const mismatched = await outcomeOf(upload());
+    const putsBefore = bucket.puts.length;
+    writeFileSync(signatureFile, signature);
+    const signed = await outcomeOf(upload());
+
+    expect({
+      beforeSigning: compareReleaseIds(manifest.releaseId, SIGNED_FROM) < 0,
+      unsigned: unsigned.includes("isn't signed"),
+      mismatched: mismatched.includes("has a signature that doesn't match it"),
+      putsBefore,
+      signed,
+      problem: await signatureProblemOf(manifest.releaseId),
+      lastPuts: bucket.puts.slice(-2),
+    }).toStrictEqual({
+      beforeSigning: true,
+      unsigned: true,
+      mismatched: true,
+      putsBefore: 0,
+      signed: "ok",
+      problem: undefined,
+      lastPuts: [signatureKey(sha256Hex(bytes)), published],
+    });
   });
 
   it("keeps the id it has without --assign-id, as Promote release publishes it", async () => {
@@ -605,6 +784,9 @@ describe("publishing a release", () => {
       R2_BUCKET: BUCKET,
       R2_ACCESS_KEY_ID: "test-key-id",
       R2_SECRET_ACCESS_KEY: "test-secret",
+      RELEASE_SIGNER_URL: `${endpoint.replace("127.0.0.1", "localhost")}/release-publish`,
+      ACTIONS_ID_TOKEN_REQUEST_URL: `${endpoint}/token?api-version=2.0`,
+      ACTIONS_ID_TOKEN_REQUEST_TOKEN: REQUEST_TOKEN,
     });
 
   /** The ids published, oldest first, each with its manifest's id and commit. */
@@ -648,21 +830,65 @@ describe("publishing a release", () => {
     );
   });
 
-  it("takes the next id when another publish claims one between its listing and its write", async () => {
-    const month = releaseMonthPrefix(new Date());
-    const others = Buffer.from(
-      JSON.stringify({ releaseId: `${month}1`, commit: "f".repeat(40) })
-    );
-    bucket.writtenAfterList.set(`releases/${month}1/manifest.json`, others);
+  it("has the manifest signed as published, under its id, and stores the signature right before it", async () => {
+    const id = `${releaseMonthPrefix(new Date())}1`;
     await publish(buildOf("1".repeat(40)));
-
-    expect(
-      bucket.objects.get(`releases/${month}1/manifest.json`)
-    ).toStrictEqual(others);
-    expect(bucket.objects.get(commitKey("1".repeat(40)))?.toString()).toBe(
-      `${month}2\n`
+    const claim = `releases/${id}/manifest.json`;
+    const signature = signatureKey(
+      sha256Hex(bucket.objects.get(claim) ?? Buffer.alloc(0))
     );
+
+    expect({
+      signed: bucket.signed,
+      problem: await signatureProblemOf(id),
+      lastPuts: bucket.puts.slice(-2),
+    }).toStrictEqual({
+      signed: [id],
+      problem: undefined,
+      lastPuts: [signature, claim],
+    });
   });
+
+  it("publishes nothing when the signer refuses, or signs with a key this checkout doesn't trust", async () => {
+    bucket.signer = "refuses";
+    const refused = await outcomeOf(publish(buildOf("1".repeat(40))));
+    bucket.signer = "stranger";
+    const stranger = await outcomeOf(publish(buildOf("2".repeat(40))));
+
+    expect({
+      refused: refused.includes("The signer refused"),
+      stranger: stranger.includes("is signed with a key Grasp doesn't trust"),
+      releases: publishedReleases(),
+    }).toStrictEqual({ refused: true, stranger: true, releases: [] });
+  });
+
+  it.each([
+    { lock: "locked, R2 answering 409", locked: true },
+    { lock: "not locked yet, R2 answering 412", locked: false },
+  ])(
+    "takes the next id, signed anew, when another publish claims one between its listing and its write ($lock)",
+    async ({ locked }) => {
+      bucket.locked = locked;
+      const month = releaseMonthPrefix(new Date());
+      const others = Buffer.from(
+        JSON.stringify({ releaseId: `${month}1`, commit: "f".repeat(40) })
+      );
+      bucket.writtenAfterList.set(`releases/${month}1/manifest.json`, others);
+      await publish(buildOf("1".repeat(40)));
+
+      expect({
+        first: bucket.objects.get(`releases/${month}1/manifest.json`),
+        marker: bucket.objects.get(commitKey("1".repeat(40)))?.toString(),
+        signed: bucket.signed,
+        problem: await signatureProblemOf(`${month}2`),
+      }).toStrictEqual({
+        first: others,
+        marker: `${month}2\n`,
+        signed: [`${month}1`, `${month}2`],
+        problem: undefined,
+      });
+    }
+  );
 
   it("never gives publishes running at once the same id", async () => {
     const commits = ["3", "4", "5"].map((digit) => digit.repeat(40));

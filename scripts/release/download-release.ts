@@ -4,12 +4,18 @@
  * another bucket: how Promote release (.github/workflows/promote-release.yml)
  * copies a release staging ran into production's bucket, byte for byte.
  *
- * The manifest is read first and every blob it names is checked against it
- * as it arrives (`verifyReleaseBlobs`), its model files by their SHA-256
- * too, so the release can be published to a bucket that lacks them; one
- * that is missing or doesn't match stops the download. The manifest is written as it is stored,
- * never re-encoded, so what's promoted is what staging published. Reads
- * only.
+ * The manifest is read first, with its signature
+ * (@grasp-os/shared/release-signature): a release whose manifest isn't
+ * signed by a key Grasp trusts, or was changed since, is refused before
+ * anything else is read, so production never gets it. One published
+ * before signing began too: production takes signed releases alone.
+ * Then every blob it names is checked against it as it arrives
+ * (`verifyReleaseBlobs`), its model files by their SHA-256 too, so the
+ * release can be published to a bucket that lacks them; one that is
+ * missing or doesn't match stops the download. The manifest is written
+ * as it is stored, never re-encoded, so what's promoted is what staging
+ * published, and its signature beside it (`RELEASE_SIGNATURE_FILE`),
+ * which upload-release.ts checks again and publishes with it. Reads only.
  *
  * Env: R2_ENDPOINT, R2_BUCKET (the bucket to read), R2_ACCESS_KEY_ID,
  *      R2_SECRET_ACCESS_KEY
@@ -27,6 +33,12 @@ import {
 } from "@grasp-os/shared/release";
 import type { Bytes } from "@grasp-os/shared/release";
 import { releaseIdSchema } from "@grasp-os/shared/release-id";
+import {
+  RELEASE_SIGNATURE_FILE,
+  releaseSignatureProblem,
+  signatureKey,
+} from "@grasp-os/shared/release-signature";
+import { releaseSigningKeys } from "@grasp-os/shared/release-signing-keys";
 
 import { REQUESTS_AT_ONCE, releasesBucketFromEnv } from "./bucket-lib.ts";
 import { assertReleaseDir, clearReleaseDir } from "./manifest-lib.ts";
@@ -80,6 +92,16 @@ if (manifest.releaseId !== releaseId) {
     `${manifestKey(releaseId)} is release ${manifest.releaseId}'s manifest`
   );
 }
+const signature = await read(signatureKey(await sha256OfBytes(manifestBytes)));
+const problem = await releaseSignatureProblem(
+  releaseId,
+  manifestBytes,
+  signature,
+  releaseSigningKeys
+);
+if (problem !== undefined) {
+  throw new Error(`Release ${releaseId} ${problem}; nothing promoted`);
+}
 
 // A release directory as build-release.ts writes one, its marker first, so
 // a later download (or build) may replace it.
@@ -111,6 +133,9 @@ for (const file of manifest.modelFiles) {
     );
   }
   write(file.r2Key, bytes);
+}
+if (signature !== undefined) {
+  write(RELEASE_SIGNATURE_FILE, signature);
 }
 write("manifest.json", manifestBytes);
 console.info(`Release ${releaseId} fetched from ${bucket.name} and verified`);
