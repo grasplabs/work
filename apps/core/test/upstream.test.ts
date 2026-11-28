@@ -1,12 +1,20 @@
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+} from "vite-plus/test";
 
 import { draftToldSchema } from "../src/draft-watch.ts";
 import { draftWatch } from "../src/durable-objects.ts";
 import { isolateRpcHeld } from "../src/rpc-target.ts";
 import { watchEnds } from "../src/socket-watchers.ts";
-import { followObject } from "../src/upstream.ts";
+import { followObject, reopenJitter } from "../src/upstream.ts";
 
 // A page's watch of an object, as the Worker holds it (upstream.ts), on a
 // real object that hibernates with its watchers (draft-watch.ts). Starts
@@ -87,6 +95,16 @@ const closeAll = async (
 };
 
 describe("a page's watch of an object", () => {
+  // Every pause before a socket opens again, its jitter's draw fixed at
+  // none: no test waits on a draw, nor on how long a pause runs.
+  const { draw } = reopenJitter;
+  beforeEach(() => {
+    reopenJitter.draw = () => 0;
+  });
+  afterEach(() => {
+    reopenJitter.draw = draw;
+  });
+
   it("hands a frame the page couldn't take for a moment over again, once, and goes on live", async () => {
     const subject = newSubject();
     const taken: number[] = [];
@@ -355,6 +373,9 @@ describe("a page's watch of an object", () => {
       await Promise.resolve();
     });
     void watch;
+    // Half of each pause, so the catching up waits while the isolate is
+    // full rather than trying again and again within the test's look.
+    reopenJitter.draw = () => 0.5;
     const { held } = isolateRpcHeld;
     // The isolate's connections hold all they may.
     isolateRpcHeld.held = isolateRpcHeld.limit;

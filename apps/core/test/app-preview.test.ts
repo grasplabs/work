@@ -12,6 +12,7 @@ import { z } from "zod";
 import { appKind } from "../src/apps.ts";
 import { readDraft, saveDraft } from "../src/drafts.ts";
 import { draftWatch } from "../src/durable-objects.ts";
+import { reopenJitter } from "../src/upstream.ts";
 import { sourceParts, withFiles } from "./app-definitions.ts";
 import type { TestSource } from "./app-definitions.ts";
 import { commitApp, release } from "./apps.ts";
@@ -323,6 +324,13 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
   });
 
   it("tells a page of a write made while the draft's object reset, once, as its socket opens again, and of the next write live", async () => {
+    // The pause before the Worker opens the socket again (upstream.ts),
+    // its jitter's draw fixed at none: the test waits on no draw.
+    const { draw } = reopenJitter;
+    reopenJitter.draw = () => 0;
+    onTestFinished(() => {
+      reopenJitter.draw = draw;
+    });
     const builder = await signedInApi(idp, "builder");
     const app = await notesApp(builder);
     const subject = { kind: "app" as const, id: app };

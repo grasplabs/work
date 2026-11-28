@@ -50,6 +50,12 @@ const reopenMs = [1000, 2000, 4000, 8000, 15_000] as const;
  */
 const steadyMs = 30_000;
 
+/**
+ * Where each pause's jitter is drawn from (`reopenMs`): `Math.random`. A
+ * test fixes the draw here, so none waits on one, nor on a whole pause.
+ */
+export const reopenJitter = { draw: (): number => Math.random() };
+
 /** What a page's watch of an object is made of. */
 export interface UpstreamWatch<T> {
   /**
@@ -302,7 +308,8 @@ export const followObject = async <T>(
       }
       // oxlint-disable-next-line no-await-in-loop -- one try at a time, waiting longer each
       await scheduler.wait(
-        Math.random() * (reopenMs[Math.min(attempt, reopenMs.length - 1)] ?? 0)
+        reopenJitter.draw() *
+          (reopenMs[Math.min(attempt, reopenMs.length - 1)] ?? 0)
       );
       if (stopped) {
         return;
