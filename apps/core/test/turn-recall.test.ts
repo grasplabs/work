@@ -3518,6 +3518,24 @@ const placeIn = async (
   };
 };
 
+/** When the Brain learned `memory`, as `personId`'s recall of `question` finds it. */
+const learnedAt = async (
+  personId: string,
+  question: string,
+  memory: string
+): Promise<number> => {
+  const pack = await recallAs(env, personId, {
+    question,
+    budget: { tokens: 20_000 },
+    personal: true,
+  });
+  const found = pack.memories.find((each) => each.memory === memory);
+  if (found === undefined) {
+    throw new Error("The recall found no such memory.");
+  }
+  return found.learnedAt.getTime();
+};
+
 /** A memory of `personId`'s own store, in their own word, `statement`. */
 const ownMemory = async (personId: string, statement: string) => {
   const { memory } = await rememberAs(env, personId, {
@@ -3693,7 +3711,11 @@ describe("memories a person never uses fade for them", setUpTime, () => {
     const [newer = ""] = await rememberedAbout("company", `Depot ${word()}`, [
       { statement: `The ${topic} pallets go out late` },
     ]);
-    // An id the Brain would refuse beside a use of the older memory.
+    // An id the Brain would refuse beside a use of the older memory, made
+    // after the newer one was learned, by the Brain's own clock: a use in
+    // the same millisecond ties with it, and the newer goes first
+    // (order.ts `byFreshness`). The recall reads uses up to that moment.
+    const usedAt = (await learnedAt(dan.userId, topic, newer)) + 1;
     await runInDurableObject(
       workspace(env, personalWorkspaceId(dan.userId)),
       (_instance, state) => {
@@ -3701,14 +3723,14 @@ describe("memories a person never uses fade for them", setUpTime, () => {
           state.storage.sql.exec(
             "INSERT INTO memory_uses (store, memory, used_at) VALUES ('shared', ?, ?)",
             memory,
-            Date.now()
+            usedAt
           );
         }
       }
     );
 
     await expect(
-      placeIn(dan.userId, topic, [older, newer])
+      placeIn(dan.userId, topic, [older, newer], { asOf: new Date(usedAt) })
     ).resolves.toStrictEqual({
       first: true,
       both: true,
