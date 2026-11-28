@@ -538,8 +538,8 @@ export const checksOf = (blob: ReleaseBlob): string[] =>
  * none) isn't `blob`, or undefined when nothing it reports says so: it's
  * there, at the size every place names, and a blob named by its SHA-256
  * (a module or migration) has that SHA-256 if R2 kept one. CI stores
- * every blob with its SHA-256, which R2 checks as it takes the bytes
- * (scripts/release/upload-release.ts). What this can't see, only reading
+ * each module and migration with its SHA-256, which R2 checks as it takes
+ * the bytes (apps/admin/src/releases/publish.ts). What this can't see, only reading
  * the bytes does: an asset's (named by Cloudflare's content key, which R2
  * doesn't compute), or a file's R2 kept no SHA-256 for, of the same size.
  */

@@ -38,6 +38,7 @@
     "test:durations": "node scripts/test-durations.ts",
     "e2e:durations": "node scripts/e2e-durations.ts",
     "release:build": "node scripts/release/build-release.ts",
+    "release:publish": "node scripts/release/publish-release.ts",
     "release:upload": "node scripts/release/upload-release.ts",
     "release:download": "node scripts/release/download-release.ts",
     "release:model-files": "node scripts/release/upload-model-files.ts",

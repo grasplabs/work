@@ -95,9 +95,9 @@ const out = path.resolve(args.out);
 const commit = process.env.GITHUB_SHA ?? run("git", ["rev-parse", "HEAD"]);
 
 // A build's id until it's published: a timestamp, so every build is a
-// release of its own. CI's publish gives it its id (`YY.MM.N`) from the
-// bucket it's published to (upload-release.ts --stage); only the
-// manifest's id changes then, never a blob.
+// release of its own. CI's publish gives it the id (`YY.MM.N`) the
+// staging admin assigns (publish-release.ts); only the manifest's id
+// changes then, never a blob.
 const defaultReleaseId = (): string =>
   `dev-${Math.floor(Date.now() / 1000).toString(36)}`;
 

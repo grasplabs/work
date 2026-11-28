@@ -1,7 +1,7 @@
 /**
  * A built release under the id it's published as: CI builds it under a
- * local id (`dev-<time>`) and its publish gives it the next `YY.MM.N`
- * (upload-release.ts --stage); the one-off rename of the first
+ * local id (`dev-<time>`) and its publish gives it the `YY.MM.N` the
+ * staging admin assigns (publish-release.ts); the one-off rename of the first
  * staging releases gives the old ones theirs. Only the manifest's id
  * changes: the blobs, and everything else in it, stay as they were built
  * and checked.

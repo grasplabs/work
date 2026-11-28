@@ -185,9 +185,9 @@ const notInStore = /not found/iu;
  * any other way stops the caller as a missing required secret does, so a
  * store that answered badly once is never taken for one without it.
  */
-const optionalStoreSecret = async (
+export const optionalStoreSecret = async (
   env: Env,
-  name: SharedSecret
+  name: StoreSecret
 ): Promise<string | undefined> => {
   const binding: SecretsStoreSecret | undefined = env[name];
   if (binding === undefined) {

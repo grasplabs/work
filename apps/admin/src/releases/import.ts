@@ -1,5 +1,5 @@
 /**
- * Imports the releases CI publishes to R2 (scripts/release/upload-release.ts)
+ * Imports the releases CI publishes to R2 (scripts/release/publish-release.ts)
  * into the admin's database: as soon as R2 tells the admin a manifest was
  * written (its event notification, through the admin's queue), and on the
  * admin's cron every minute, which catches whatever the queue doesn't
@@ -174,7 +174,7 @@ export const MAX_BLOB_BYTES = 25 * 1024 * 1024;
  * hashing a static file holds its base64 too (a third more), so what's
  * read stays well inside the Worker's 128 MB.
  */
-const READ_BYTES_AT_ONCE = MAX_BLOB_BYTES;
+export const READ_BYTES_AT_ONCE = MAX_BLOB_BYTES;
 
 /**
  * Blobs checked a batch at a time, in the manifest's order: each batch's
@@ -345,7 +345,7 @@ const asError = (error: unknown): Error =>
  * together, the others in the order they came as weight frees up; a task
  * heavier than that alone.
  */
-const gate = (capacity: number) => {
+export const gate = (capacity: number) => {
   let free = capacity;
   const waiting: { weight: number; wake: () => void }[] = [];
   return async <T>(bytes: number, task: () => Promise<T>): Promise<T> => {
@@ -408,7 +408,7 @@ const parseManifest = (
  * release is imported, or its manifest no longer parses as this admin's
  * (another manifest version): then every blob is read.
  */
-const checkedBefore = async (
+export const checkedBefore = async (
   db: AdminDatabase
 ): Promise<Map<string, ReadonlySet<string>>> => {
   const [newest] = await db
@@ -488,7 +488,7 @@ const checkBlobs = async (
 /**
  * Throws unless the bucket holds each model file `manifest` names at its
  * size, stored with its SHA-256: R2 computes and checks that when CI
- * stores it (scripts/release/upload-release.ts), so its head says what
+ * stores it (scripts/release/upload-model-files.ts), so its head says what
  * the bytes are without this reading them. One stored without it is
  * refused, not read.
  */
