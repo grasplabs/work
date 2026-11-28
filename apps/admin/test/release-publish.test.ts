@@ -45,6 +45,7 @@ import {
 } from "../../../packages/shared/test/release-signing-keys.ts";
 import { adminDatabase } from "../src/db/act.ts";
 import { auditEvents, releaseBlobs } from "../src/db/schema.ts";
+import { MAX_MANIFEST_BYTES } from "../src/releases/import.ts";
 import worker from "../src/server.ts";
 import { testReleaseMonth } from "./release-clock.ts";
 import { buildRelease, putBlobs } from "./releases.ts";
@@ -400,6 +401,49 @@ describe("CI's publish through the staging admin", () => {
       });
     }
   );
+
+  it("never reads an object at a manifest's or a marker's key larger than one can be, as anyone who can write the bucket could plant one there for good", async () => {
+    // Blobs of its own: nothing else in the file's bucket names them.
+    const release = await buildRelease(
+      {
+        notes: "feat(core): planted",
+        core: `export default { planted: "${crypto.randomUUID()}" };`,
+      },
+      "dev-build"
+    );
+    const module = release.manifest.workers.core?.modules[0];
+    await env.RELEASES.put(module?.r2Key ?? "", "other bytes of other size");
+    // A manifest naming that module, under an unused id, too large to be
+    // one: read, it would spare the module and this start would get 409.
+    const plantedId = `26.09.${String(Math.floor(Math.random() * 90_000) + 10_000)}`;
+    await env.RELEASES.put(
+      manifestKey(plantedId),
+      JSON.stringify({
+        ...release.manifest,
+        releaseId: plantedId,
+        notes: "x".repeat(MAX_MANIFEST_BYTES),
+      })
+    );
+    // The commit's marker, too large to be one, naming an id of this month
+    // that's free: read, this start would be given that id.
+    await env.RELEASES.put(
+      commitKey(release.manifest.commit),
+      `${releaseMonthPrefix(testReleaseMonth)}777777\n${" ".repeat(100)}`
+    );
+    const expected = await monthsNext();
+    const plan = await start(release);
+    const gone = await env.RELEASES.head(module?.r2Key ?? "");
+    // Out of the bucket the files share, whose imports would try it.
+    await env.RELEASES.delete(manifestKey(plantedId));
+
+    expect({
+      id: "id" in plan ? plan.id : plan,
+      relinked:
+        "uploads" in plan &&
+        plan.uploads.some(({ key }) => key === module?.r2Key),
+      gone,
+    }).toStrictEqual({ id: expected, relinked: true, gone: null });
+  });
 
   it("takes the manifest stamped with the commit's id as CI signed it, stores the signature, audited, and gives the manifest's link carrying its SHA-256", async () => {
     const release = await built("feat(core): signed");

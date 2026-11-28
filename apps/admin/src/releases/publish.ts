@@ -181,6 +181,29 @@ const manifestIn = (bytes: Uint8Array): ReleaseManifest | undefined => {
   }
 };
 
+/**
+ * Release `id`'s manifest as `bucket` holds it: null when there's none,
+ * undefined when what's there isn't one (`manifestIn`), or is larger than
+ * a manifest may be (`MAX_MANIFEST_BYTES`, as the import reads it), which
+ * is never read: anyone who can write the bucket could put gigabytes
+ * under an unused id, and once `releases/` is locked nobody could take
+ * them away.
+ */
+const manifestAt = async (
+  bucket: R2Bucket,
+  id: string
+): Promise<ReleaseManifest | null | undefined> => {
+  const object = await bucket.get(manifestKey(id));
+  if (object === null) {
+    return null;
+  }
+  if (object.size > MAX_MANIFEST_BYTES) {
+    await object.body.cancel();
+    return undefined;
+  }
+  return manifestIn(new Uint8Array(await object.arrayBuffer()));
+};
+
 /** What CI's publish asks with: its run, the manifest, its signature if sent, and the link signer. */
 interface Ask {
   run: PublishRun;
@@ -277,6 +300,9 @@ const idsUnder = async (
 const monthIds = async (bucket: R2Bucket, now: Date): Promise<string[]> =>
   await idsUnder(bucket, releaseMonthPrefix(now));
 
+/** Largest commit marker read; one is an id and a newline, under 20 bytes. */
+const MAX_MARKER_BYTES = 64;
+
 /**
  * The commit's release as the bucket has it: the id its marker names, and
  * whether that id's manifest is the commit's (published) or isn't there
@@ -288,16 +314,20 @@ const markedRelease = async (
   commit: string
 ): Promise<{ id: string; published: boolean } | undefined> => {
   const marker = await bucket.get(commitKey(commit));
+  // An id and a newline: anything larger isn't a marker, and isn't read.
+  if (marker !== null && marker.size > MAX_MARKER_BYTES) {
+    await marker.body.cancel();
+    return undefined;
+  }
   const named = marker === null ? undefined : await marker.text();
   const id = releaseIdSchema.safeParse(named?.trim());
   if (!id.success || parsePublishedReleaseId(id.data) === undefined) {
     return undefined;
   }
-  const stored = await bucket.get(manifestKey(id.data));
-  if (stored === null) {
+  const manifest = await manifestAt(bucket, id.data);
+  if (manifest === null) {
     return { id: id.data, published: false };
   }
-  const manifest = manifestIn(new Uint8Array(await stored.arrayBuffer()));
   return manifest?.commit === commit && manifest.releaseId === id.data
     ? { id: id.data, published: true }
     : undefined;
@@ -363,12 +393,8 @@ const sparedBlobs = async (
   const listed = await idsUnder(bucket, "");
   for (const id of listed.filter((each) => !imported.has(each))) {
     // oxlint-disable-next-line no-await-in-loop -- the few not imported yet
-    const object = await bucket.get(manifestKey(id));
-    // oxlint-disable-next-line no-await-in-loop -- the few not imported yet
-    const bytes = object === null ? undefined : await object.arrayBuffer();
-    const manifest =
-      bytes === undefined ? undefined : manifestIn(new Uint8Array(bytes));
-    for (const { key } of manifest === undefined ? [] : blobsOf(manifest)) {
+    const manifest = await manifestAt(bucket, id);
+    for (const { key } of manifest ? blobsOf(manifest) : []) {
       if (wanted.has(key)) {
         spared.add(key);
       }
