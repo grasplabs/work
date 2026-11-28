@@ -89,7 +89,11 @@ const crc32c = (bytes: Uint8Array): number => {
 };
 /* oxlint-enable no-bitwise */
 
-/** The JSON `what` answers to `init` at `url`, or the end, with what it said. */
+/**
+ * The JSON `what` answers to `init` at `url`, or the end, with what it
+ * said. A redirect is an error: each address is the service's own, and a
+ * token is never sent on to another.
+ */
 const ask = async (
   what: string,
   url: string,
@@ -97,7 +101,7 @@ const ask = async (
 ): Promise<unknown> => {
   let response: Response;
   try {
-    response = await fetch(url, init);
+    response = await fetch(url, { ...init, redirect: "error" });
   } catch (error) {
     return fail(`${what} couldn't be reached (${String(error)})`);
   }

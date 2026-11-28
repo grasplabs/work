@@ -132,11 +132,13 @@ describe("signing a release's manifest in CI", () => {
       requests: [
         {
           method: "GET",
+          redirect: "error",
           url: `${TOKEN_REQUEST_URL}&audience=${encodeURIComponent(`https://iam.googleapis.com/${TEST_PROVIDER}`)}`,
           headers: { authorization: "bearer request-token" },
         },
         {
           method: "POST",
+          redirect: "error",
           url: "https://sts.googleapis.com/v1/token",
           headers: { "content-type": "application/json" },
           body: {
@@ -150,6 +152,7 @@ describe("signing a release's manifest in CI", () => {
         },
         {
           method: "POST",
+          redirect: "error",
           url: `https://cloudkms.googleapis.com/v1/${key.id}:asymmetricSign`,
           headers: {
             authorization: `Bearer ${ACCESS_TOKEN}`,
@@ -521,15 +524,19 @@ describe("the job that holds the signing key", () => {
     });
   });
 
-  it("signs with a file that imports nothing but Node's built-ins", () => {
+  it("signs with a file that imports nothing but Node's built-ins, and loads or runs no code any other way", () => {
     const source = readFileSync(SIGNER, "utf-8");
     const modules = [...source.matchAll(IMPORTED)].map(
       (match) => match.groups?.module
     );
+    // Any import() or require() at all, a require made by hand, code from
+    // a string, and Node's internal or native bindings.
+    const loaders =
+      /\b(?:import|require)\s*\(|createRequire|\beval\s*\(|new\s+Function\b|\bFunction\s*\(|process\s*\.\s*(?:binding|_linkedBinding|dlopen)/u;
     expect({
       outside: modules.filter((name) => name?.startsWith("node:") !== true),
-      dynamic: /\b(?:import|require)\s*\(/u.test(source),
+      loads: loaders.exec(source)?.[0],
       any: modules.length > 0,
-    }).toStrictEqual({ outside: [], dynamic: false, any: true });
+    }).toStrictEqual({ outside: [], loads: undefined, any: true });
   });
 });

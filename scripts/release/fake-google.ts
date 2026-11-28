@@ -66,6 +66,7 @@ type FakeGoogle = z.infer<typeof fakeGoogleSchema>;
 const takenRequestSchema = z.object({
   method: z.string(),
   url: z.string(),
+  redirect: z.string().optional(),
   headers: z.record(z.string(), z.string()),
   body: z.unknown().optional(),
 });
@@ -155,6 +156,7 @@ const respond = (
   const taken: TakenRequest = {
     method: init?.method ?? "GET",
     url,
+    ...(init?.redirect === undefined ? {} : { redirect: init.redirect }),
     headers: Object.fromEntries(new Headers(init?.headers)),
   };
   if (typeof init?.body === "string") {
