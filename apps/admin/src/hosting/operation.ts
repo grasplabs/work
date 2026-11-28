@@ -1795,7 +1795,6 @@ const snapshot = async (
 ): Promise<void> => {
   const { api, db } = context;
   const { operation } = loaded;
-  const taken: Record<string, string> = {};
   // Still being provisioned, it has served nobody: nothing to keep.
   const databases = loaded.client.unpublished
     ? new Map<string, string>()
@@ -1835,12 +1834,17 @@ const snapshot = async (
     };
     // oxlint-disable-next-line no-await-in-loop -- kept before the next
     await recordProgress(db, loaded, progress);
-    taken[`bookmark:${name}`] = bookmark;
   }
-  // The bookmarks themselves too: the audit log outlives the progress.
+  // Every one kept for this change, an earlier attempt's too, and the
+  // bookmarks themselves: the audit log outlives the progress.
+  const kept = Object.entries(progress.bookmarks).filter(
+    ([, point]) => point.change === operation.change
+  );
   await recordStep(db, loaded, "snapshot", {
-    bookmarks: Object.keys(taken).length,
-    ...taken,
+    bookmarks: kept.length,
+    ...Object.fromEntries(
+      kept.map(([name, { bookmark }]) => [`bookmark:${name}`, bookmark])
+    ),
   });
 };
 

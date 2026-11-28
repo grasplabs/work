@@ -260,8 +260,29 @@ describe("an operation's phases, its restore point and its probe", () => {
       // oxlint-enable no-await-in-loop
     }
 
+    // Each run of the snapshot step names the restore point kept for the
+    // change, the one after an earlier run's too.
+    const snapshots = await db
+      .select({ detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.clientId, clientId),
+          eq(auditEvents.action, "provision.snapshot"),
+          eq(auditEvents.target, b.releaseId)
+        )
+      );
+    const named = snapshots.map(
+      ({ detail }) =>
+        z
+          .object({ bookmarks: z.number() })
+          .loose()
+          .parse(JSON.parse(detail ?? "{}")).bookmarks
+    );
+
     expect({
       outcomes,
+      named,
       bookmarks: bookmarkCalls().length - before.bookmarks,
       sent: sentOf("0001_more"),
       uploads: {
@@ -273,6 +294,7 @@ describe("an operation's phases, its restore point and its probe", () => {
       routed: await routed(clientId),
     }).toMatchObject({
       outcomes: operationPhases.flatMap(() => [undefined, undefined]),
+      named: [1, 1],
       bookmarks: 1,
       sent: 1,
       uploads: { core: 1, connect: 1 },
