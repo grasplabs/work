@@ -24,8 +24,8 @@
  *   previous release does not know it writes as NULL or its default),
  * - adds or changes a trigger that can refuse a write (`RAISE(`) on a
  *   table that was there: this codebase uses them as constraints,
- * - drops an index code names with `INDEXED BY`, where SQLite fails
- *   rather than scans without it.
+ * - drops or changes an index code names with `INDEXED BY`, where SQLite
+ *   fails rather than scans when the index is gone or no longer fits.
  *
  * Not judged: dropping any other index, and what a migration does to the
  * data (an UPDATE or DELETE, a rebuild that copies nothing or swaps
@@ -105,8 +105,8 @@ interface Trigger {
 export interface Schema {
   tables: Map<string, Table>;
   views: Set<string>;
-  /** Every index created by name, lower-cased. */
-  indexes: Set<string>;
+  /** Every index created by name, lower-cased, to its definition. */
+  indexes: Map<string, string>;
   triggers: Map<string, Trigger>;
 }
 
@@ -363,8 +363,11 @@ export const schemaOf = (db: DatabaseSync): Schema => {
         ])
     ),
     views: new Set(ofType("view").map((entry) => text(entry.name))),
-    indexes: new Set(
-      ofType("index").map((entry) => text(entry.name).toLowerCase())
+    indexes: new Map(
+      ofType("index").map((entry) => [
+        text(entry.name).toLowerCase(),
+        normalized(text(entry.sql)),
+      ])
     ),
     triggers: new Map(
       ofType("trigger").map((entry) => [
@@ -504,11 +507,21 @@ export const unsafeChanges = (
       detail: "dropped or renamed",
     })),
   ...[...before.indexes]
-    .filter((name) => indexedBy.has(name) && !after.indexes.has(name))
-    .map((name) => ({
-      subject: `drop index ${name}`,
-      detail: "code names it with INDEXED BY",
-    })),
+    .filter(
+      ([name, definition]) =>
+        indexedBy.has(name) && after.indexes.get(name) !== definition
+    )
+    .map(([name]) =>
+      after.indexes.has(name)
+        ? {
+            subject: `change index ${name}`,
+            detail: "code names it with INDEXED BY",
+          }
+        : {
+            subject: `drop index ${name}`,
+            detail: "code names it with INDEXED BY",
+          }
+    ),
   ...[...after.triggers]
     .filter(
       ([name, trigger]) =>

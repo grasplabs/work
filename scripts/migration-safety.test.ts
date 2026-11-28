@@ -68,6 +68,11 @@ const columns = {
 const all = Object.values(columns);
 const withColumns = (...list: string[]) => list.join(",\n\t");
 
+/** `chats_owner` dropped and created again as `definition`. */
+const recreated = (definition: string) =>
+  `DROP INDEX \`chats_owner\`;--> statement-breakpoint
+${definition}`;
+
 /** A trigger that refuses changing a chat's owner, its body as given. */
 const ownerKept = (body = "SELECT RAISE(ABORT, 'owner kept');") =>
   `CREATE TRIGGER \`chats_owner_kept\` BEFORE UPDATE OF \`owner_id\` ON \`chats\`
@@ -241,10 +246,27 @@ ALTER TABLE \`__new_events\` RENAME TO \`events\`;`,
       changes("DROP INDEX `chats_owner`;", earlier, new Set(["chats_owner"]))
     ).toStrictEqual(["drop index chats_owner (code names it with INDEXED BY)"]);
     expect(changes("DROP INDEX `chats_owner`;", earlier)).toStrictEqual([]);
+  });
+
+  it("flags changing an index code names with INDEXED BY, and passes one written again as it was", () => {
+    const earlier =
+      "CREATE INDEX `chats_owner` ON `chats` (`owner_id`) WHERE `kind` = 'chat';";
     expect(
       changes(
-        `DROP INDEX \`chats_owner\`;--> statement-breakpoint
-${earlier}`,
+        recreated(
+          "CREATE INDEX `chats_owner` ON `chats` (`owner_id`) WHERE `kind` = 'task';"
+        ),
+        earlier,
+        new Set(["chats_owner"])
+      )
+    ).toStrictEqual([
+      "change index chats_owner (code names it with INDEXED BY)",
+    ]);
+    expect(
+      changes(
+        recreated(
+          'CREATE INDEX  "chats_owner"  ON "chats" ("owner_id") WHERE "kind" = \'chat\';'
+        ),
         earlier,
         new Set(["chats_owner"])
       )
