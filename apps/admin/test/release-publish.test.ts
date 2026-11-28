@@ -588,6 +588,35 @@ describe("CI's publish through the staging admin", () => {
     });
   });
 
+  it("gives no manifest link once a model file the release names is gone since start, as retention may delete one", async () => {
+    const release = await buildRelease(
+      {
+        notes: "feat(core): model gone",
+        modelFiles: { "model.onnx": `weights ${crypto.randomUUID()}` },
+      },
+      "dev-build"
+    );
+    await putBlobs(release);
+    const plan = await start(release);
+    const id = "id" in plan ? plan.id : "";
+    const [model] = release.manifest.modelFiles;
+    await env.RELEASES.delete(model?.r2Key ?? "");
+    const manifest = stamped(release, id);
+    const status = await statusOf(
+      "finish",
+      manifest,
+      await githubToken(publishClaims(release.manifest.commit)),
+      await signed(manifest)
+    );
+
+    expect({
+      status,
+      signature: await env.RELEASES.head(
+        signatureKey(await sha256OfBytes(encoder.encode(manifest)))
+      ),
+    }).toStrictEqual({ status: 409, signature: null });
+  });
+
   it("never takes an id of a month gone: a commit marked with one is given this month's next", async () => {
     const release = await built("feat(core): across a month's end");
     await env.RELEASES.put(commitKey(release.manifest.commit), "26.10.7\n");

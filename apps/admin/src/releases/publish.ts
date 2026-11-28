@@ -17,9 +17,10 @@
  *   match is deleted and gets a link again. Each model file the release
  *   names must be there as the import takes it (`storedModelFileProblem`).
  * - `?step=finish`, the manifest stamped with that id, still this month's,
- *   with its signature as sign-release made it (`signatureHeader`): every
- *   blob it names must be there, and each the import would read is read
- *   back and hashed first (`blobsProblem`); the signature must verify
+ *   with its signature as sign-release made it (`signatureHeader`): its
+ *   model files must still be there as the import takes them, every blob
+ *   it names must be there, and each the import would read is read back
+ *   and hashed first (`blobsProblem`); the signature must verify
  *   against the keys Grasp trusts (@grasp-os/shared/release-signature),
  *   and is stored at the manifest's hash; then a link is given for the
  *   manifest itself, which CI puts last. Already published as the
@@ -383,18 +384,31 @@ const blobsProblem = async (
 };
 
 /** `?step=start`: the release's id, and links for the blobs the bucket lacks. */
-const start = async (env: Env, ask: Ask): Promise<Response> => {
-  const { manifest } = ask;
+/**
+ * Why a model file `manifest` names isn't stored as the import takes it
+ * (`storedModelFileProblem`), or undefined: checked at start and again at
+ * finish, as retention may delete one in between.
+ */
+const modelFilesProblem = async (
+  bucket: R2Bucket,
+  manifest: ReleaseManifest
+): Promise<string | undefined> => {
   for (const file of manifest.modelFiles) {
     // oxlint-disable-next-line no-await-in-loop -- a few files
-    const head = await stored(env.RELEASES, file.r2Key);
+    const head = await stored(bucket, file.r2Key);
     const problem = storedModelFileProblem(file, head);
     if (problem !== undefined) {
-      return answer(
-        409,
-        `Model file ${file.name} at ${file.r2Key} ${problem}: put it there with release:model-files`
-      );
+      return `Model file ${file.name} at ${file.r2Key} ${problem}: put it there with release:model-files`;
     }
+  }
+  return undefined;
+};
+
+const start = async (env: Env, ask: Ask): Promise<Response> => {
+  const { manifest } = ask;
+  const missingModel = await modelFilesProblem(env.RELEASES, manifest);
+  if (missingModel !== undefined) {
+    return answer(409, missingModel);
   }
   const marked = await markedRelease(env.RELEASES, manifest.commit);
   if (marked?.published === true) {
@@ -484,11 +498,9 @@ const finish = async (env: Env, ask: Ask): Promise<Response> => {
       `Release ${manifest.releaseId} ${unsigned ?? "isn't signed"}`
     );
   }
-  const problem = await blobsProblem(
-    env.RELEASES,
-    adminDatabase(env.DB),
-    manifest
-  );
+  const problem =
+    (await modelFilesProblem(env.RELEASES, manifest)) ??
+    (await blobsProblem(env.RELEASES, adminDatabase(env.DB), manifest));
   if (problem !== undefined) {
     return answer(409, `${problem}: publish again`);
   }
