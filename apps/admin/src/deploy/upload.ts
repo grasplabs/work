@@ -357,24 +357,45 @@ export const uploadFingerprint = async (
 /**
  * A digest of a script as Cloudflare reads it back: `state`, its code's
  * digest and when it was last modified, and `settings`, its bindings (a
- * secret by name), compatibility, limits and observability. Recorded after
- * an upload and compared before the next (src/hosting/operation.ts,
- * `runsAlready`), so a change made beside the admin's (a binding or
- * setting changed by hand, a secret set, the script put again or deleted
- * and made anew) makes the next run upload it whole, whatever the admin
- * recorded. Nothing secret goes into it.
+ * secret by name), compatibility, limits and observability, every field
+ * kept, and the lists whose order means nothing (bindings by name, the
+ * flags and tags) in order, so Cloudflare listing them otherwise doesn't read as a
+ * change. Recorded after an upload and compared before the next
+ * (src/hosting/operation.ts, `runsAlready`), so a change made beside the
+ * admin's that reads back (a binding or setting changed by hand, the
+ * script put again, or deleted and made anew) makes the next release's
+ * run upload it whole, whatever the admin recorded. A secret's value set
+ * by hand reads back only if Cloudflare moves `modified_on` for it, which
+ * isn't verified: Apply settings now uploads every Worker whole for that.
+ * Nothing secret goes into it.
  */
 export const liveDigest = async (
   state: TargetState,
   settings: TargetSettings
-): Promise<string> =>
-  await sha256Hex(
+): Promise<string> => {
+  // Every list of names at the top (its flags, its tags) in order, and
+  // its bindings by their names, each unique to the script.
+  const ordered = Object.fromEntries(
+    Object.entries(settings).map(([field, value]) => [
+      field,
+      Array.isArray(value) && value.every((item) => typeof item === "string")
+        ? value.toSorted()
+        : value,
+    ])
+  );
+  return await sha256Hex(
     canonicalJson(
       z.json().parse({
         etag: state.etag ?? null,
         modifiedOn: state.modifiedOn ?? null,
         migrationTag: state.migrationTag ?? null,
-        settings,
+        settings: {
+          ...ordered,
+          bindings: settings.bindings.toSorted((a, b) =>
+            a.name < b.name ? -1 : 1
+          ),
+        },
       })
     )
   );
+};

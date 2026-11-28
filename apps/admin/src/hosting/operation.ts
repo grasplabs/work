@@ -1915,21 +1915,28 @@ const holdsExactly = (
 
 /**
  * Whether Worker `app`'s script, read as `state` (`digest`, `liveDigest`),
- * runs the upload `fingerprint` names already: that upload recorded live
- * in `progress`, the script reading back as it did after it, at the
- * release's last Durable Object migration (`lastTag`), and holding exactly
- * the secrets `given` by name (`present`).
+ * runs the upload `fingerprint` names already, for a change of kind
+ * `what` that leaves such a Worker be: a release (a rollback too) and its
+ * retries alone. A run of settings or secrets on the release it runs
+ * (Apply settings now, a secrets rollout) uploads every Worker whole: it
+ * is how staff repair a client, and what reads back of a script doesn't
+ * show everything it runs (a secret's value set by hand). Otherwise: that
+ * upload recorded live in `progress`, the script reading back as it did
+ * after it, at the release's last Durable Object migration (`lastTag`),
+ * and holding exactly the secrets `given` by name (`present`).
  */
 const runsAlready = (
   progress: Progress,
   app: App,
   {
+    what,
     fingerprint,
     state,
     digest,
     lastTag,
     secrets,
   }: {
+    what: ChangeKind | null;
     fingerprint: string;
     state: TargetState;
     digest: string | undefined;
@@ -1937,6 +1944,7 @@ const runsAlready = (
     secrets: { given: ReadonlySet<string>; present: ReadonlySet<string> };
   }
 ): boolean =>
+  (what ?? "release") === "release" &&
   progress.uploads[app] === fingerprint &&
   digest !== undefined &&
   progress.live[app] === digest &&
@@ -2146,12 +2154,12 @@ const sendOrResend = async (
  * uploaded as its script with its secrets, unless the script runs an
  * upload with the same fingerprint already (`uploadFingerprint`): one
  * recorded live (`uploads`), the script, its bindings and settings reading
- * back as they did after it (`live`: no change made beside it, a binding
- * or setting changed, a secret set or the script put by hand, or the
+ * back as they did after it (`live`: no change made beside it that reads
+ * back, a binding or setting changed or the script put by hand, or the
  * script deleted and made again), at the release's last Durable Object
- * migration and holding exactly those secrets by name.
- * Of a later release too, or a run of its settings or secrets: a Worker
- * whose upload is the same is left be, and its Durable Objects run on.
+ * migration and holding exactly those secrets by name. Only on a release
+ * or a rollback, and their retries (`runsAlready`): a Worker whose upload
+ * is the same is left be, and its Durable Objects run on.
  * Then observed at the release's last Durable Object migration, and
  * recorded as what the client runs. A secret the script held that the
  * upload no longer gives (a previous generation's key past its window, a
@@ -2233,6 +2241,7 @@ const upload = async (
       .map(({ name }) => name)
   );
   const done = runsAlready(progress, app, {
+    what: loaded.operation.what,
     fingerprint,
     state: before,
     digest:

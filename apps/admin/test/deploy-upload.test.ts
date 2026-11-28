@@ -254,6 +254,7 @@ describe("an upload's fingerprint", () => {
 describe("a script as read back", () => {
   const settings = {
     compatibility_date: "2026-09-15",
+    compatibility_flags: ["nodejs_compat", "global_fetch_strictly_public"],
     bindings: [
       { name: "DB", type: "d1", id: "uuid" },
       { name: "KEY", type: "secret_text" },
@@ -266,11 +267,18 @@ describe("a script as read back", () => {
     etag: "e",
   };
 
-  it("reads otherwise once its code, a binding or a setting changed, or it was modified at all", async () => {
+  it("reads the same listed in another order, and otherwise once its code, a binding or a setting changed, or it was modified at all", async () => {
     const base = await liveDigest(state, settings);
     const same = async (changed: Promise<string>) => (await changed) === base;
     expect({
       same: await same(liveDigest({ ...state }, { ...settings })),
+      reordered: await same(
+        liveDigest(state, {
+          ...settings,
+          compatibility_flags: settings.compatibility_flags.toReversed(),
+          bindings: settings.bindings.toReversed(),
+        })
+      ),
       code: await same(liveDigest({ ...state, etag: "f" }, settings)),
       modified: await same(
         liveDigest(
@@ -295,6 +303,7 @@ describe("a script as read back", () => {
       ),
     }).toStrictEqual({
       same: true,
+      reordered: true,
       code: false,
       modified: false,
       binding: false,

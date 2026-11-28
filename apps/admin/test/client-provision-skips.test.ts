@@ -58,6 +58,18 @@ const runAgain = async (clientId: string): Promise<void> => {
   await runClientProvision(context, await attempt(clientId));
 };
 
+/**
+ * Releases client `clientId` to a new release whose core alone changed,
+ * its code `core`, and runs it.
+ */
+const releaseCore = async (clientId: string, core: string): Promise<void> => {
+  const next = await importRelease({ notes: "feat(core): next", core });
+  await startClientRelease(db, staff, await attempt(clientId), {
+    releaseId: next.releaseId,
+  });
+  await runClientProvision(context, await attempt(clientId));
+};
+
 /** Lets every call an earlier run marked count as landed (`sendSettleMs`). */
 const ageOutMarks = async (clientId: string): Promise<void> => {
   await db
@@ -153,7 +165,7 @@ describe("which Workers a run uploads", () => {
     });
   });
 
-  it("uploads a Worker again when its secrets change: a rotation", async () => {
+  it("uploads a Worker again on a release when its secrets changed: a rotation", async () => {
     const first = await importRelease();
     const { account, clientId } = await liveClient(first);
     const { connect } = await scriptsOf(clientId);
@@ -164,11 +176,8 @@ describe("which Workers a run uploads", () => {
       .update(clients)
       .set({ generation: 2, rotatedAt: new Date() })
       .where(eq(clients.id, clientId));
-    await startClientRelease(db, staff, await attempt(clientId), {
-      again: true,
-      what: "secrets",
-    });
-    await runClientProvision(context, await attempt(clientId));
+    // A release whose connect sends the same code: its secrets differ.
+    await releaseCore(clientId, "export default { core: 2 };");
     const after = secretsOf() ?? new Map<string, string>();
 
     expect({
@@ -177,18 +186,18 @@ describe("which Workers a run uploads", () => {
     }).toStrictEqual({ uploads: 2, changed: true });
   });
 
-  it("leaves a Worker be when its settings are run again unchanged, and uploads it whole once it was deleted, or its bindings changed, beside the admin", async () => {
+  it("uploads a Worker whole on a release once it was deleted, or its bindings changed, beside the admin", async () => {
     const first = await importRelease();
     const { account, clientId } = await liveClient(first);
     const { connect } = await scriptsOf(clientId);
     const scripts = clientScripts(account);
 
-    await runAgain(clientId);
+    await releaseCore(clientId, "export default { core: 2 };");
     const unchanged = uploadsOf(account, connect);
 
     // Deleted out of band.
     scripts.delete(connect);
-    await runAgain(clientId);
+    await releaseCore(clientId, "export default { core: 3 };");
     const afterDeletion = {
       uploads: uploadsOf(account, connect),
       exists: scripts.has(connect),
@@ -207,7 +216,7 @@ describe("which Workers a run uploads", () => {
       ...live.metadata,
       bindings: [...bindings, { type: "json", name: "STRAY", json: true }],
     };
-    await runAgain(clientId);
+    await releaseCore(clientId, "export default { core: 4 };");
     const repaired = z
       .array(z.object({ name: z.string() }).loose())
       .parse(scripts.get(connect)?.versions.at(-1)?.metadata.bindings)
@@ -224,6 +233,24 @@ describe("which Workers a run uploads", () => {
       afterBindings: 3,
       stray: false,
     });
+  });
+
+  it("uploads every Worker whole on Apply settings now, though its upload and the script as read back are the same", async () => {
+    const first = await importRelease();
+    const { account, clientId } = await liveClient(first);
+    const { core, connect } = await scriptsOf(clientId);
+    // A release that leaves connect be: what's recorded matches it.
+    await releaseCore(clientId, "export default { core: 2 };");
+    const before = uploadsOf(account, connect);
+
+    await runAgain(clientId);
+
+    expect({
+      before,
+      connect: uploadsOf(account, connect),
+      core: uploadsOf(account, core),
+      status: await statusOf(clientId),
+    }).toStrictEqual({ before: 1, connect: 2, core: 3, status: "done" });
   });
 
   it("uploads every Worker whole on the run after core failed its probe, though nothing they send changed", async () => {
@@ -254,7 +281,7 @@ describe("which Workers a run uploads", () => {
     });
   });
 
-  it("never takes an upload whose answer was lost for the one before it: the rollback uploads that one again", async () => {
+  it("uploads the release before again on a rollback from a release whose upload landed with no answer", async () => {
     const first = await importRelease();
     const { account, clientId } = await liveClient(first);
     const { connect } = await scriptsOf(clientId);
@@ -291,6 +318,53 @@ describe("which Workers a run uploads", () => {
 
 describe("an upload Cloudflare refuses as a replay", () => {
   useStoreSecrets({ deployer: token });
+
+  it("doesn't take a retry refused for its spent token (100312) as done when the attempt before it never landed: the script reads as before it", async () => {
+    const first = await importRelease();
+    const { account, clientId } = await liveClient(first);
+    const { core } = await scriptsOf(clientId);
+    const later = await importRelease({
+      notes: "feat(core): later",
+      core: "export default { core: 2 };",
+    });
+    await startClientRelease(db, staff, await attempt(clientId), {
+      releaseId: later.releaseId,
+    });
+    // Core's first attempt goes out whole, spends its token and never
+    // lands (no answer); its retry is refused for the spent token. The
+    // script stays at the migration it had, unmodified.
+    let spent = false;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input, init);
+      const { pathname } = new URL(request.url);
+      if (spent || request.method !== "PUT" || !pathname.endsWith(`/${core}`)) {
+        return await cloudflare.fetch(input, init);
+      }
+      spent = true;
+      const form = await request.formData();
+      const metadata = form.get("metadata");
+      const { jwt } = z
+        .object({ assets: z.object({ jwt: z.string() }) })
+        .parse(
+          JSON.parse(metadata instanceof Blob ? await metadata.text() : "{}")
+        ).assets;
+      account.spent.add(jwt);
+      throw new TypeError("Network connection lost.");
+    });
+    const stopped = z
+      .object({ codes: z.array(z.number()) })
+      .parse(await failing(await attempt(clientId))).codes;
+
+    expect({
+      stopped,
+      code: codeOn(account, core),
+      status: await statusOf(clientId),
+    }).toStrictEqual({
+      stopped: [100_312],
+      code: "export default { core: 1 };",
+      status: "failed",
+    });
+  });
 
   it("takes a retry refused for its spent static files token (100312) as the attempt before it, whose answer was lost, once the script reads as it", async () => {
     const first = await importRelease();
