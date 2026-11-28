@@ -28,7 +28,9 @@
  * (src/rollout/deploy.ts).
  *
  * `/mcp` is the admin's MCP server for Grasp's staff (src/admin/mcp.ts),
- * behind the same Access check.
+ * behind the same Access check. `/release-publish` alone is not: CI's
+ * publish asks there for a release's id and its upload links, with
+ * GitHub's token for its run as the credential (src/releases/publish.ts).
  */
 import "@tanstack/react-start/server-only";
 import { log } from "@grasp-os/shared/log";
@@ -47,6 +49,7 @@ import { errorCode } from "./deploy/errors.ts";
 import { reconcileProvisioning } from "./hosting/reconcile.ts";
 import { importReleases } from "./releases/import.ts";
 import type { ImportResult } from "./releases/import.ts";
+import { publishRelease, releasePublishPath } from "./releases/publish.ts";
 import { deleteExpiredBundles } from "./releases/retention.ts";
 import { reconcile } from "./rollout/reconciler.ts";
 
@@ -125,7 +128,9 @@ export default {
   // Past the Access check, a page may move to the admin's own hostname
   // (src/admin-host.ts), so nothing about it shows to anyone else.
   fetch: async (request: Request, env: Env) =>
-    await withStaff(request, env, () => adminHostRedirect(request, env)),
+    new URL(request.url).pathname === releasePublishPath
+      ? await publishRelease(request, env)
+      : await withStaff(request, env, () => adminHostRedirect(request, env)),
   scheduled: async (controller, env) => {
     const at = new Date(controller.scheduledTime);
     if (controller.cron === watchCron) {

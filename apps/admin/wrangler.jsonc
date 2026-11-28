@@ -56,9 +56,12 @@
       "migrations_dir": "src/db/migrations",
     },
   ],
-  // The releases CI publishes (scripts/release/upload-release.ts), in the
-  // EU. The admin only reads them: src/releases/import.ts takes the
-  // binding as a store with nothing but `get` and `list`.
+  // The releases CI publishes (scripts/release/publish-release.ts), in the
+  // EU. The import only reads them (src/releases/import.ts takes the
+  // binding as a store with nothing but `get`, `head` and `list`); CI's
+  // publish writes only each commit's marker and each manifest's signature
+  // through it, the blobs and manifests by upload links
+  // (src/releases/publish.ts).
   "r2_buckets": [
     {
       "binding": "RELEASES",
@@ -278,6 +281,22 @@
       "store_id": "account-secrets-store",
       "secret_name": "DISCORD_ALERTS_WEBHOOK",
     },
+    // The R2 key CI's upload links are signed with (src/releases/publish.ts),
+    // as JSON: `{"accessKeyId": …, "secretAccessKey": …}`, of an R2 API
+    // token for Object Read & Write on the stage's releases bucket alone:
+    // the narrowest R2 has (no write without delete). Kept by hand, never
+    // in 1Password, so no bucket key is ever in CI and Deploy platform
+    // never reads it (scripts/optional-secrets.ts, `handKeptSecrets`):
+    // only staging's store has one, as CI publishes to staging alone.
+    // Bound at the next Deploy platform once it's there; production's
+    // stays unbound, named here for the tests, which run this top level.
+    // Whoever can deploy a Worker here could read it, and could already
+    // bind the bucket itself.
+    {
+      "binding": "RELEASE_UPLOAD_KEY",
+      "store_id": "account-secrets-store",
+      "secret_name": "RELEASE_UPLOAD_KEY",
+    },
   ],
   // Staging (`wrangler deploy --env staging`, deploy-platform with stage
   // staging): every name from @grasp-os/shared/names with -staging appended,
@@ -450,6 +469,11 @@
           "binding": "DISCORD_ALERTS_WEBHOOK",
           "store_id": "account-secrets-store",
           "secret_name": "DISCORD_ALERTS_WEBHOOK_STAGING",
+        },
+        {
+          "binding": "RELEASE_UPLOAD_KEY",
+          "store_id": "account-secrets-store",
+          "secret_name": "RELEASE_UPLOAD_KEY_STAGING",
         },
       ],
     },

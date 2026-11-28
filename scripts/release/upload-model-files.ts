@@ -13,6 +13,9 @@
  * write, only if absent; one already there is skipped only when its
  * stored SHA-256 matches.
  *
+ * Run by a person, not CI, with a key that writes the bucket: CI's keys
+ * read it only (model-files.yml) and its publish holds none.
+ *
  * Env: R2_ENDPOINT, R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
  * Usage: vp run release:model-files --dir <dir>
  */

@@ -1009,22 +1009,21 @@ jobs:
   # until someone promotes it, once staging ran it, with the Promote
   # release workflow. Three jobs, as signing is a job of its own
   # (sign-release) that runs none of the repo's dependencies:
-  # stage-release uploads the blobs and stamps the manifest with the
-  # month's next id (`YY.MM.N`, from the bucket;
-  # @grasp-os/shared/release-id); sign-release signs that manifest;
-  # publish-release puts the signature, then the manifest, which claims
-  # the id (scripts/release/upload-release.ts). Only the manifest's id
-  # changes from the release job's bundle, never a blob. The bucket's name
-  # comes from the names module (scripts/platform-names.ts). The R2 key
-  # comes from the staging 1Password Environment, never from GitHub:
-  # OP_SERVICE_ACCOUNT_TOKEN, the staging GitHub environment's read-only
-  # service account token, is the only value kept there
-  # (.github/actions/load-1password). It's passed only to the steps that
-  # use it; all steps share one runner, so that isn't a security boundary.
-  # Pushes to main share the workflow's concurrency group, which keeps only
-  # the newest pending run: in a burst of merges a middle commit may never
-  # be published, and its changes ship in the next release. One run at a
-  # time, so no other publish claims an id between stage and publish.
+  # stage-release gets the release's id and upload links from the staging
+  # admin, uploads the blobs and stamps the manifest with the id;
+  # sign-release signs that manifest; publish-release hands the admin the
+  # signed manifest, which checks it and gives the manifest's link, and
+  # puts it last (scripts/release/publish-release.ts). Only the manifest's
+  # id changes from the release job's bundle, never a blob. Neither holds
+  # a secret: GitHub's token for the run (id-token) is their credential at
+  # the staging admin, whose links each put one object, only if absent,
+  # for 15 minutes. No bucket key is ever in CI, and the signing key only
+  # in sign-release. The admin's address comes from the names module
+  # (scripts/platform-names.ts). Pushes to main share the workflow's
+  # concurrency group, which keeps only the newest pending run: in a burst
+  # of merges a middle commit may never be published, and its changes ship
+  # in the next release. One run at a time, so no other publish takes an
+  # id between stage and publish.
   stage-release:
     name: stage-release
     needs: [release, deploy-platform]
@@ -1032,13 +1031,14 @@ jobs:
     # has moved past publishes nothing, and the newer push's release carries
     # its changes (Deploy platform, `head`).
     if: github.event_name == 'push' && needs.deploy-platform.outputs.current == 'true'
-    # It holds the staging 1Password token: GitHub-hosted runners only, so
-    # no secret leaves GitHub's machines.
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # The staging environment, which only main deploys to: GitHub's token
+    # names it, and the staging admin takes only a token that does.
     environment: staging
     permissions:
       contents: read
+      id-token: write
     outputs:
       staged: ${{ steps.stage.outputs.staged }}
     steps:
@@ -1046,22 +1046,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      # Staging's releases bucket and the account's R2 endpoint, by the names
-      # module, for every step after: the release goes to it.
-      - run: |
-          set -euo pipefail
-          echo "R2_BUCKET=$(vp exec node scripts/platform-names.ts staging releasesBucket)" >> "$GITHUB_ENV"
-          echo "R2_ENDPOINT=$(vp exec node scripts/platform-names.ts staging r2Endpoint)" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release
           path: release-out
-      - uses: ./.github/actions/load-1password
-        with:
-          environment: staging
-          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          secrets: R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
-          required: R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
       # Only while the commit is still main's head, asked here, not taken
       # from Deploy platform's `head`: "Re-run failed jobs" keeps the
       # outputs of the jobs it doesn't re-run, so a re-run of a push main
@@ -1072,7 +1060,9 @@ jobs:
         run: |
           set -euo pipefail
           head=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
-          vp run release:upload --release release-out --stage release-manifest/manifest.json --head "$head"
+          RELEASE_PUBLISH_URL="https://$(vp exec node scripts/platform-names.ts staging adminHost)/release-publish"
+          export RELEASE_PUBLISH_URL
+          vp run release:publish stage --release release-out --out release-manifest/manifest.json --head "$head"
           if [ -f release-manifest/manifest.json ]; then
             echo "staged=true" >> "$GITHUB_OUTPUT"
           fi
@@ -1137,49 +1127,36 @@ jobs:
           retention-days: 14
 
   # Publishes the signed manifest under the id it was staged with: the
-  # signature first, then the manifest, only if absent, which claims the id.
-  # Its blobs are checked as they are stored again before.
+  # staging admin reads its blobs back, checks the signature, stores it,
+  # and gives the manifest's link, which claims the id.
   publish-release:
     name: publish-release
-    needs: [release, stage-release, sign-release]
+    needs: [stage-release, sign-release]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: staging
     permissions:
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - run: |
-          set -euo pipefail
-          echo "R2_BUCKET=$(vp exec node scripts/platform-names.ts staging releasesBucket)" >> "$GITHUB_ENV"
-          echo "R2_ENDPOINT=$(vp exec node scripts/platform-names.ts staging r2Endpoint)" >> "$GITHUB_ENV"
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: release
-          path: release-out
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-manifest
-          path: release-signed
+          path: release-manifest
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-signature
-          path: release-signed
-      # The stamped manifest in place of the built one, and its signature.
-      - run: cp release-signed/manifest.json release-signed/manifest.signature.json release-out/
-      - uses: ./.github/actions/load-1password
-        with:
-          environment: staging
-          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          secrets: R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
-          required: R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
+          path: release-manifest
       - run: |
           set -euo pipefail
           head=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
-          vp run release:upload --release release-out --head "$head"
+          RELEASE_PUBLISH_URL="https://$(vp exec node scripts/platform-names.ts staging adminHost)/release-publish"
+          export RELEASE_PUBLISH_URL
+          vp run release:publish finish --manifest release-manifest/manifest.json --head "$head"
         env:
           GH_TOKEN: ${{ github.token }}
 

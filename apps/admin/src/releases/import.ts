@@ -1,5 +1,5 @@
 /**
- * Imports the releases CI publishes to R2 (scripts/release/upload-release.ts)
+ * Imports the releases CI publishes to R2 (scripts/release/publish-release.ts)
  * into the admin's database: as soon as R2 tells the admin a manifest was
  * written (its event notification, through the admin's queue), and on the
  * admin's cron every minute, which catches whatever the queue doesn't
@@ -408,7 +408,7 @@ const parseManifest = (
  * release is imported, or its manifest no longer parses as this admin's
  * (another manifest version): then every blob is read.
  */
-const checkedBefore = async (
+export const checkedBefore = async (
   db: AdminDatabase
 ): Promise<Map<string, ReadonlySet<string>>> => {
   const [newest] = await db
@@ -488,7 +488,7 @@ const checkBlobs = async (
 /**
  * Throws unless the bucket holds each model file `manifest` names at its
  * size, stored with its SHA-256: R2 computes and checks that when CI
- * stores it (scripts/release/upload-release.ts), so its head says what
+ * stores it (scripts/release/upload-model-files.ts), so its head says what
  * the bytes are without this reading them. One stored without it is
  * refused, not read.
  */
