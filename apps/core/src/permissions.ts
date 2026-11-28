@@ -67,11 +67,7 @@ import { activeMember, organizationId } from "./auth/auth.ts";
 import { memberRole } from "./auth/identity.ts";
 import type { Acting } from "./auth/identity.ts";
 import { storedTeamsOf, unreadableTeam } from "./brain-grant-teams.ts";
-import {
-  personalWorkspaceSql,
-  workspaceOf,
-  workspaceOfRow,
-} from "./chat-ref.ts";
+import { personalWorkspaceSql } from "./chat-ref.ts";
 import { madeSensitiveByGrant, widenedByGrant } from "./data-policy.ts";
 import type { Grantee } from "./data-policy.ts";
 import {
@@ -241,12 +237,9 @@ export const toPermission = (row: Row): Permission => ({
   revokedAt: row.revokedAt?.toISOString() ?? null,
   requestedVia: row.requestedVia ?? null,
   chat:
-    row.chatId === null
+    row.workspaceId === null || row.chatId === null
       ? null
-      : {
-          workspaceId: workspaceOfRow(row.workspaceId, row.requestedBy),
-          chatId: row.chatId,
-        },
+      : { workspaceId: row.workspaceId, chatId: row.chatId },
 });
 
 /** Where a check runs: the context, and the person it acts for. */
@@ -260,8 +253,7 @@ export interface Where {
  * their subject works, and, in a chat, those of that chat alone
  * (chat-connections.ts), for the person who asked for them there. In SQL
  * that is: its chat's ID, its `requested_by` the person the check acts
- * for, and its workspace that person's own (`personalWorkspaceId`; a row
- * the release before wrote has none, and is its `requested_by`'s), which
+ * for, and its workspace that person's own (`personalWorkspaceId`), which
  * the context's workspace is, checked here first. Together that is the
  * chat's ref and its person. Anywhere else (a workspace not the person's
  * own included), or with no chat and person, a chat's permission holds
@@ -276,7 +268,7 @@ const holdsIn = ({ context, onBehalfOf }: Where = {}): SQL =>
   context?.type === "chat" &&
   onBehalfOf !== undefined &&
   context.workspaceId === personalWorkspaceId(onBehalfOf)
-    ? sql`(${permissions.chatId} IS NULL OR (${permissions.chatId} = ${context.chatId} AND ${permissions.requestedBy} = ${onBehalfOf} AND ${workspaceOf(permissions, permissions.requestedBy)} = ${personalWorkspaceSql(permissions.requestedBy)}))`
+    ? sql`(${permissions.chatId} IS NULL OR (${permissions.chatId} = ${context.chatId} AND ${permissions.requestedBy} = ${onBehalfOf} AND ${permissions.workspaceId} = ${personalWorkspaceSql(permissions.requestedBy)}))`
     : isNull(permissions.chatId);
 
 /**

@@ -1,5 +1,4 @@
 import type { ChatRef } from "@grasp-os/shared/ids";
-import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { chatRefOf, ofChat } from "./chat-ref.ts";
@@ -46,12 +45,10 @@ export const audienceOf = async (
 
 /**
  * Keeps who is in chat `chat` for its agent's reads from now on: the
- * person who asked always among them. Never over another workspace's
- * chat's: until the contract migration the table's key is the chat's ID
- * alone, as the release before upserts on it, so a row of another
- * workspace's under the same ID is left as it is, and this chat keeps
- * none: its agent then reads nothing at all (history-access.ts). A chat
- * that keeps an audience is a chat app's, whose ID core makes at random.
+ * person who asked always among them. Until the table's key moves onto
+ * the ref (db/core/schema.ts), another workspace's chat under the same ID
+ * refuses it; a chat that keeps an audience is a chat app's, whose ID core
+ * makes at random.
  */
 export const keepAudience = async (
   env: Env,
@@ -68,8 +65,7 @@ export const keepAudience = async (
     .insert(chatAudiences)
     .values({ ...chatRefOf(chat), ...kept })
     .onConflictDoUpdate({
-      target: chatAudiences.chatId,
+      target: [chatAudiences.workspaceId, chatAudiences.chatId],
       set: kept,
-      setWhere: eq(chatAudiences.workspaceId, chat.workspaceId),
     });
 };

@@ -460,10 +460,7 @@ export const revokedSince = async (
         // before anyone granted it is revoked without one.
         isNotNull(permissions.grantedAt),
         // A chat's own permission holds in that chat alone.
-        or(
-          isNull(permissions.chatId),
-          ofChat(permissions, scope, permissions.requestedBy)
-        )
+        or(isNull(permissions.chatId), ofChat(permissions, scope))
       )
     )
     .limit(1);

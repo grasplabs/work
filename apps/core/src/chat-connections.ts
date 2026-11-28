@@ -32,7 +32,7 @@ import {
 } from "./audit-outbox.ts";
 import { activeMember } from "./auth/auth.ts";
 import { memberOf } from "./auth/identity.ts";
-import { chatRefOf, ofChat, workspaceOfRow } from "./chat-ref.ts";
+import { chatRefOf, ofChat } from "./chat-ref.ts";
 import {
   offeredAmong,
   offeredConnections,
@@ -391,7 +391,7 @@ const whyNotStored = async (
       .from(permissions)
       .where(
         and(
-          ofChat(permissions, chat, permissions.requestedBy),
+          ofChat(permissions, chat),
           eq(permissions.status, "revoked"),
           eq(permissions.objectId, objectId),
           resource === null
@@ -531,8 +531,8 @@ export const askInChat = async (
   const insert = insertWhere(
     db,
     row,
-    sql`(SELECT count(*) FROM ${permissions} WHERE ${ofChat(permissions, scope, permissions.requestedBy)} AND status = 'requested') < ${maxWaitingRequests}
-      AND NOT EXISTS (SELECT 1 FROM ${permissions} WHERE ${ofChat(permissions, scope, permissions.requestedBy)} AND status = 'revoked' AND object_id = ${row.objectId} AND resource IS ${row.resource} AND actions = ${row.actions})
+    sql`(SELECT count(*) FROM ${permissions} WHERE ${ofChat(permissions, scope)} AND status = 'requested') < ${maxWaitingRequests}
+      AND NOT EXISTS (SELECT 1 FROM ${permissions} WHERE ${ofChat(permissions, scope)} AND status = 'revoked' AND object_id = ${row.objectId} AND resource IS ${row.resource} AND actions = ${row.actions})
       AND NOT EXISTS (SELECT 1 FROM ${permissions} WHERE subject_type = 'agent' AND subject_id = ${row.subjectId} AND binding = ${binding} AND chat_id IS NULL AND status <> 'revoked')`
   );
   try {
@@ -585,12 +585,7 @@ export const chatRequests = async (
   const rows = await drizzle(env.DB)
     .select()
     .from(permissions)
-    .where(
-      and(
-        ofChat(permissions, chat, permissions.requestedBy),
-        eq(permissions.status, "requested")
-      )
-    )
+    .where(and(ofChat(permissions, chat), eq(permissions.status, "requested")))
     .orderBy(asc(permissions.requestedAt), asc(permissions.id));
   if (rows.length === 0) {
     return [];
@@ -638,7 +633,7 @@ const decide = async (
   const found = id === undefined ? undefined : await findRow(env, id);
   if (
     found === undefined ||
-    workspaceOfRow(found.workspaceId, found.requestedBy) !== chat.workspaceId ||
+    found.workspaceId !== chat.workspaceId ||
     found.chatId !== chat.chatId ||
     found.requestedBy !== by.userId ||
     !found.personal
@@ -668,7 +663,7 @@ const decide = async (
         and(
           eq(permissions.id, found.id),
           eq(permissions.status, "requested"),
-          ofChat(permissions, chat, permissions.requestedBy),
+          ofChat(permissions, chat),
           eq(permissions.requestedBy, by.userId),
           activeMember(by.userId),
           granting ? noBindingClash : undefined
@@ -748,7 +743,7 @@ export const revokeChatPermissions = async (
   const live = inArray(permissions.status, ["requested", "active"]);
   const selected: SQL | undefined =
     "chat" in of
-      ? ofChat(permissions, of.chat, permissions.requestedBy)
+      ? ofChat(permissions, of.chat)
       : and(
           eq(permissions.requestedBy, of.requestedBy),
           isNotNull(permissions.chatId)

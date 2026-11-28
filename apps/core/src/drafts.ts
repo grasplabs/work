@@ -27,12 +27,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxed, outboxedWhere } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
-import {
-  ofChat,
-  workspaceOf,
-  workspaceOfColumns,
-  workspaceOfRow,
-} from "./chat-ref.ts";
+import { ofChat } from "./chat-ref.ts";
 import {
   appVersions,
   draftBlobs,
@@ -502,7 +497,6 @@ const latestCheckpoint = async (
   | {
       number: number;
       revision: number;
-      personId: string;
       workspaceId: WorkspaceId | null;
       chatId: ChatId | null;
       turnId: string | null;
@@ -514,7 +508,6 @@ const latestCheckpoint = async (
     .select({
       number: draftCheckpoints.number,
       revision: draftCheckpoints.revision,
-      personId: draftCheckpoints.personId,
       workspaceId: draftCheckpoints.workspaceId,
       chatId: draftCheckpoints.chatId,
       turnId: draftCheckpoints.turnId,
@@ -649,10 +642,7 @@ const keepCheckpoint = async (
     latest !== undefined &&
     author.turnId !== null &&
     latest.turnId === author.turnId &&
-    (latest.chatId === null
-      ? null
-      : workspaceOfRow(latest.workspaceId, latest.personId)) ===
-      author.workspaceId &&
+    latest.workspaceId === author.workspaceId &&
     latest.chatId === author.chatId &&
     latest.revision === read;
   const number = amends ? latest.number : (latest?.number ?? 0) + 1;
@@ -1344,10 +1334,7 @@ export const turnSubjects = async (
     })
     .from(draftCheckpoints)
     .where(
-      and(
-        ofChat(draftCheckpoints, chat, draftCheckpoints.personId),
-        eq(draftCheckpoints.turnId, turnId)
-      )
+      and(ofChat(draftCheckpoints, chat), eq(draftCheckpoints.turnId, turnId))
     )
     .all();
   return rows;
@@ -1372,8 +1359,8 @@ export const chatWork = async (
     .from(draftCheckpoints)
     .where(
       and(
-        ofChat(draftCheckpoints, chat, draftCheckpoints.personId),
-        sql`${draftCheckpoints.number} = (SELECT MAX(number) FROM draft_checkpoints AS own WHERE own.subject_kind = ${draftCheckpoints.subjectKind} AND own.subject_id = ${draftCheckpoints.subjectId} AND own.chat_id = ${chat.chatId} AND ${workspaceOfColumns(sql`own.workspace_id`, sql`own.person_id`)} = ${chat.workspaceId})`
+        ofChat(draftCheckpoints, chat),
+        sql`${draftCheckpoints.number} = (SELECT MAX(number) FROM draft_checkpoints AS own WHERE own.subject_kind = ${draftCheckpoints.subjectKind} AND own.subject_id = ${draftCheckpoints.subjectId} AND own.workspace_id = ${chat.workspaceId} AND own.chat_id = ${chat.chatId})`
       )
     )
     .orderBy(desc(draftCheckpoints.createdAt))
@@ -1403,7 +1390,7 @@ export const chatsWorkedOn = async (
     .where(
       and(
         ofSubject(draftCheckpoints, subject),
-        sql`${workspaceOf(draftCheckpoints, draftCheckpoints.personId)} = ${workspaceId}`
+        eq(draftCheckpoints.workspaceId, workspaceId)
       )
     )
     .all();

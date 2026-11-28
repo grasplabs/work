@@ -50,11 +50,8 @@ const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
 // A chat is unique only within its workspace (each person's own Workspace
 // object names its chats, and a page may name a new one), so every table
-// that names a chat names it by its `ChatRef`: both columns, in a key and
-// index that holds the chat, workspace first (chat-ref.test.ts). The keys
-// by a chat's ID alone, which the release before still writes under, stay
-// beside them until the contract migration drops them (expand, then
-// contract); so do its `workspace_id`s left null (chat-ref.ts, `ofChat`).
+// that names a chat names it by its `ChatRef`: both columns, in every key
+// and index that holds the chat, workspace first (chat-ref.test.ts).
 
 /** The chat a row is of: its workspace and its ID there. */
 const chatColumns = () => ({
@@ -62,14 +59,15 @@ const chatColumns = () => ({
   chatId: text("chat_id").$type<ChatId>().notNull(),
 });
 
-/**
- * As `chatColumns`, for a row that may be of no chat; and, until the
- * contract migration, of one the release before wrote with no workspace.
- */
+/** As `chatColumns`, for a row that may be of no chat: both or neither. */
 const optionalChatColumns = () => ({
   workspaceId: text("workspace_id").$type<WorkspaceId>(),
   chatId: text("chat_id").$type<ChatId>(),
 });
+
+/** Holds `optionalChatColumns` to both or neither. */
+const wholeChat = (table: string) =>
+  check(`${table}_whole_chat`, sql`(workspace_id IS NULL) = (chat_id IS NULL)`);
 
 /** A person. Found by their IdP account, never by email alone. */
 export const users = sqliteTable("users", {
@@ -508,8 +506,6 @@ export const chatWorkflowOffers = sqliteTable(
     toldAt: timestamp("told_at"),
   },
   (table) => [
-    // By its ID alone, for the release before: dropped by the contract.
-    index("chat_workflow_offers_chat_idx").on(table.chatId),
     index("chat_workflow_offers_chat_ref_idx").on(
       table.workspaceId,
       table.chatId
@@ -541,19 +537,6 @@ export const channelSignals = sqliteTable(
 );
 
 /**
- * Unused since a chat's ID is unique only within its person's own
- * Workspace object (chat-ref.ts): the release before takes each new chat's
- * ID here, company-wide, and this release writes and reads nothing of it.
- * Dropped by the contract migration (expand, then contract).
- */
-export const chatIds = sqliteTable("chat_ids", {
-  id: text().primaryKey(),
-  personId: text("person_id").notNull(),
-  requestKey: text("request_key"),
-  createdAt: timestamp("created_at").notNull(),
-});
-
-/**
  * Who is in a chat that others share, a group chat or channel on a chat
  * platform, as its agent reads for it (chat-audiences.ts): kept by the
  * Workspace object that holds the chat, before each turn, from the
@@ -566,8 +549,8 @@ export const chatAudiences = sqliteTable(
   "chat_audiences",
   {
     /**
-     * Its key alone until the contract migration, as the release before
-     * upserts on it; then the key is `(workspace_id, chat_id)`.
+     * Its key alone until the next migration moves the key onto the ref:
+     * the release before upserts on it. Written and found by the ref.
      */
     chatId: text("chat_id").$type<ChatId>().primaryKey(),
     /** The Workspace object that holds the chat. */
@@ -1039,10 +1022,6 @@ export const permissions = sqliteTable(
     uniqueIndex("permissions_live_binding_idx")
       .on(table.subjectType, table.subjectId, table.binding)
       .where(sql`status <> 'revoked' AND chat_id IS NULL`),
-    // By its ID alone, for the release before: dropped by the contract.
-    uniqueIndex("permissions_live_chat_binding_idx")
-      .on(table.chatId, table.subjectType, table.subjectId, table.binding)
-      .where(sql`status <> 'revoked' AND chat_id IS NOT NULL`),
     uniqueIndex("permissions_live_chat_ref_binding_idx")
       .on(
         table.workspaceId,
@@ -1052,6 +1031,7 @@ export const permissions = sqliteTable(
         table.binding
       )
       .where(sql`status <> 'revoked' AND chat_id IS NOT NULL`),
+    wholeChat("permissions"),
   ]
 );
 
@@ -1744,13 +1724,12 @@ export const draftCheckpoints = sqliteTable(
       columns: [table.subjectKind, table.subjectId, table.number],
     }),
     // What a chat worked on, and what its turn wrote, without a scan.
-    // By its ID alone, for the release before: dropped by the contract.
-    index("draft_checkpoints_chat").on(table.chatId, table.turnId),
     index("draft_checkpoints_chat_ref").on(
       table.workspaceId,
       table.chatId,
       table.turnId
     ),
+    wholeChat("draft_checkpoints"),
   ]
 );
 
@@ -4225,6 +4204,7 @@ export const agentWakes = sqliteTable(
     index("agent_wakes_next_idx")
       .on(table.nextAt)
       .where(sql`${table.nextAt} IS NOT NULL`),
+    wholeChat("agent_wakes"),
   ]
 );
 
@@ -5581,8 +5561,6 @@ export const agentHeldStarts = sqliteTable(
     refusal: text(),
   },
   (table) => [
-    // By its ID alone, for the release before: dropped by the contract.
-    uniqueIndex("agent_held_starts_key").on(table.chatId, table.key),
     uniqueIndex("agent_held_starts_ref_key").on(
       table.workspaceId,
       table.chatId,
@@ -6927,11 +6905,6 @@ export const stephenRequests = sqliteTable(
     place: text().notNull(),
     personId: text("person_id").notNull(),
     teamId: text("team_id"),
-    /**
-     * Unused: the release before writes the chat it was answered in, and
-     * nothing reads it. Dropped by the contract migration.
-     */
-    chatId: text("chat_id"),
     kind: text({
       enum: ["answered", "lookedUp", "changed", "workflow"],
     }).notNull(),
@@ -6948,7 +6921,7 @@ export const stephenRequests = sqliteTable(
   },
   (table) => [
     index("stephen_requests_day_idx").on(table.day),
-    index("stephen_requests_person_idx").on(table.personId, table.chatId),
+    index("stephen_requests_person_idx").on(table.personId),
     index("stephen_requests_question_idx").on(table.questionId),
     index("stephen_requests_topic_idx").on(table.topicId),
   ]
@@ -7210,12 +7183,7 @@ export const chatTurns = sqliteTable(
   {
     /** The turn's ID: its question's request ID, so a record written again is kept once. */
     id: text().primaryKey(),
-    /**
-     * The turn's chat. Its workspace is null in a row the release before
-     * wrote, and NOT NULL from the contract migration.
-     */
-    workspaceId: text("workspace_id").$type<WorkspaceId>(),
-    chatId: text("chat_id").$type<ChatId>().notNull(),
+    ...chatColumns(),
     /** Where it was asked: `web`, a chat platform (`slack`, `teams`), or `wake` for a turn nobody asked for there and then. */
     surface: text().notNull(),
     /** `<provider>/<model>`, as the turn asked for it. */
