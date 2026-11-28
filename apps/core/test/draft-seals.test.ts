@@ -287,6 +287,52 @@ describe("a draft's seal", { timeout: 180_000 }, () => {
     });
   });
 
+  it("lets a live query go while it is under way, never pushing that as final, and answers it once sealed", async () => {
+    const { builder, app, revision, write } = await setUp();
+    const lease = await previewLease(builder, app);
+    await write(
+      {
+        "server/notes.ts":
+          notesFiles(crypto.randomUUID()).files["server/notes.ts"] ?? "",
+      },
+      revision
+    );
+    const { key } = await unsealed(app);
+
+    const { held, after } = await withSandbox(
+      { hold: true },
+      async (sandbox) => {
+        const during = livePushes();
+        await previewWatch(builder, app, titles, during.push, lease);
+        await sandbox.reached();
+        // Past the read's own deadline (query-subscriptions.ts, 30 s).
+        await scheduler.wait(31_000);
+        sandbox.release();
+        await vi.waitFor(
+          async () => {
+            await expect(readCache(env, key)).resolves.toBeDefined();
+          },
+          { timeout: 60_000 }
+        );
+        // Followed again, as the page does once its query was let go.
+        const again = livePushes();
+        await previewWatch(builder, app, titles, again.push, lease);
+        await again.until((latest) => {
+          expect(latest?.result).toStrictEqual({ ok: true, value: [] });
+        });
+        return {
+          held: during.pushed.map(({ result }) => result),
+          after: again.pushed.at(-1)?.result,
+        };
+      }
+    );
+
+    expect({ held, after }).toStrictEqual({
+      held: [],
+      after: { ok: true, value: [] },
+    });
+  });
+
   it("is read back from R2 once the object that made it restarted, sealing nothing", async () => {
     const { app, draft, seal } = await notes();
     const made = await previewOf(app).seal(seal);

@@ -64,7 +64,7 @@ import { appCodeAndTestFiles } from "./pages.ts";
 // - Someone who doesn't build the App: nothing here reads who asks. Every
 //   way to a sealed draft (draft-runs.ts) checks that they build it first.
 // - What a removed App leaves: its preview's discard deletes its seals
-//   (`forgetSealedDrafts`); the build cache's sweep deletes any seal 30
+//   (`DraftSeals.forget`); the build cache's sweep deletes any seal 30
 //   days after it was last read, as any entry (pages.ts `sweepBuilds`).
 
 /** What a sealed draft's key and entry are made of; another is a miss. */
@@ -420,7 +420,7 @@ export class DraftSeals {
         }
         // Kept only under the key of what it read: an approval that
         // landed while it built is another key, which the next ask seals.
-        if (!this.#discarded && (await draftSealKey(env, seal)) === key) {
+        if ((await draftSealKey(env, seal)) === key && !this.#discarded) {
           await writeCache(env, key, text);
           this.#kept(key);
         }

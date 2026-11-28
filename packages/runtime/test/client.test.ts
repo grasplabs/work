@@ -1248,37 +1248,6 @@ describe("the session client and a change it confirmed", () => {
 });
 
 describe("the session client following a query", () => {
-  it("follows a query again, showing no failure, while the draft's server code is still being sealed", async () => {
-    let follows = 0;
-    const transport: ClientTransport = {
-      call: async () => await Promise.resolve(answered(null)),
-      watch: async () => {
-        follows += 1;
-        await Promise.resolve();
-        throw Object.assign(new Error("Still being prepared."), {
-          code: "version.seal_slow",
-        });
-      },
-    };
-    const client = new GraspClient(transport);
-    const internals = clientInternals(client);
-    const entry = internals.entry(api.notes.get, { id: noteId });
-    const stop = internals.subscribe(entry, () => {
-      // A component reading it.
-    });
-    try {
-      await vi.waitFor(
-        () => {
-          expect(follows).toBeGreaterThan(1);
-        },
-        { timeout: 10_000 }
-      );
-      expect(entry.snapshot.error).toBeUndefined();
-    } finally {
-      stop();
-    }
-  });
-
   it("waits as long as a refusal for the request budget says before following again", async () => {
     let follows = 0;
     const transport: ClientTransport = {

@@ -172,11 +172,12 @@ const finalPushMs = 10_000;
  * Refusals that end a subscription: the person, the session or the build
  * lost access, or the reference no longer names the App's current
  * version. Pushed as the last result; reading again would only repeat
- * them.
+ * them. Never a draft's server code still being sealed, which a read
+ * answers once it is: let go of, as any failure worth trying again.
  */
 const endsSubscription = (code: string): boolean =>
   code.startsWith("auth.") ||
-  code.startsWith("version.") ||
+  (code.startsWith("version.") && code !== "version.seal_slow") ||
   code === "role.forbidden" ||
   code === "app.not_found" ||
   code === "app.unreadable" ||
