@@ -82,7 +82,7 @@ export const sessionEndedCloseCode = 4401;
  * call answered (`verify`): the page connects again, and never makes the
  * call twice.
  */
-export const sessionUnverifiedCloseCode = 4503;
+const sessionUnverifiedCloseCode = 4503;
 
 /** The close code that asks the page to connect again at once. */
 export const reconnectCloseCode = 1012;

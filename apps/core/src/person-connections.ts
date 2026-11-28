@@ -47,7 +47,7 @@ const listTag = "list";
 const maxConnections = 50;
 
 /** What a connection is told: read your session again now. */
-export const recheckFrame = { recheck: true } as const;
+const recheckFrame = { recheck: true } as const;
 
 /** A frame a connection's socket carries (`recheckFrame`). */
 export const recheckFrameSchema = z.object({ recheck: z.literal(true) });

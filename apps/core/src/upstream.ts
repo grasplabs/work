@@ -57,7 +57,7 @@ const steadyMs = 30_000;
 export const reopenJitter = { draw: (): number => Math.random() };
 
 /** What a page's watch of an object is made of. */
-export interface UpstreamWatch<T> {
+interface UpstreamWatch<T> {
   /**
    * Opens the socket: an upgrade request to the object, from where the
    * page got to. Called for each try.
@@ -83,7 +83,7 @@ export interface UpstreamWatch<T> {
 }
 
 /** Thrown when the first open answered no socket: the object's answer. */
-export class NoSocketError extends Error {
+class NoSocketError extends Error {
   readonly status: number;
 
   constructor(status: number) {

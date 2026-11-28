@@ -1136,7 +1136,7 @@ describe("a chat's ChatSession", () => {
       workspaceId: id,
       chatId: chatIdSchema.parse(chat.id),
     })
-      .note("The connection you asked for was granted.")
+      .note("The connection you asked for was granted.", crypto.randomUUID())
       .then(
         () => "taken",
         () => "refused"

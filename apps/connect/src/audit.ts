@@ -86,7 +86,7 @@ const eventText = (
  * `where`, as it runs in its batch (`recordEventsIf`): for a batch that
  * records some events whatever happens and this one only with its change.
  */
-export const guardedEvent = (
+const guardedEvent = (
   db: ReturnType<typeof drizzle>,
   entry: AuditEntry,
   { from, where, counted }: Pick<GuardedChange, "from" | "where" | "counted">

@@ -42,7 +42,7 @@ const fileNameOf = (title: string): string =>
     .slice(0, 80) || "grasp-chat";
 
 /** A chat's rename where its name stands: the change, the most a name holds, and what is said when it fails. */
-export interface ChatRename {
+interface ChatRename {
   /** Renames it to `name`, trimmed; rejects where core can't, so the rename stays open. */
   onRename: (name: string) => Promise<void>;
   maxLength: number;

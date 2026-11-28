@@ -39,7 +39,7 @@ export const watchEnds = {
 } as const;
 
 /** How an object asks the Worker to open a watch again, at once. */
-export const watchReopens = 1012;
+const watchReopens = 1012;
 
 /** The version of what a watcher's socket carries. */
 const watcherStateVersion = 1;
@@ -48,7 +48,7 @@ const watcherStateVersion = 1;
  * Sets what `socket` carries through hibernation (at most 16 KiB as
  * JSON), versioned: what `watchersOf` reads back.
  */
-export const setWatcherState = (socket: WebSocket, state: unknown): void => {
+const setWatcherState = (socket: WebSocket, state: unknown): void => {
   socket.serializeAttachment({ v: watcherStateVersion, state });
 };
 

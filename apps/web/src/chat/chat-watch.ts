@@ -55,7 +55,7 @@ interface Watch {
 const watches = new Map<string, Watch>();
 
 /** How many chats' last views the tab keeps. */
-export const keptViews = 20;
+const keptViews = 20;
 
 /**
  * The last view of each chat nobody shows now, by person and chat, the

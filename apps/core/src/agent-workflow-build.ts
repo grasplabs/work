@@ -124,7 +124,7 @@ const agentDraft = (draft: WorkflowDraft): AgentWorkflowDraft => ({
 });
 
 /** A test run, as the agent reads it. */
-export type AgentTestRun = Pick<
+type AgentTestRun = Pick<
   WorkflowCandidateRun,
   | "id"
   | "draftRevision"
