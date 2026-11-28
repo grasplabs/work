@@ -167,6 +167,11 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // It is kept as company content, like the App's data shown in it, until
   // the App is removed.
   "core.app_versions": { company: "versions they wrote or published" },
+  // An App draft's seals (draft-seals.ts) are derived from it: its code
+  // sealed, kept in R2 rather than a table, the company's as the draft is.
+  // They go with the App (its preview's discard, app-removal.ts) and 30
+  // days after they were last read (the build cache's sweep); an
+  // organisation's deletion deletes its bucket.
   "core.app_drafts": { company: "drafts of Apps they wrote" },
   "core.app_draft_files": { company: "drafts of Apps they wrote" },
   "core.app_draft_points": { company: "drafts of Apps they wrote" },

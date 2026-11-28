@@ -11,6 +11,13 @@ import { appKind } from "./apps.ts";
 import { emptyThrowawayStore } from "./data-stores.ts";
 import { isPageModules } from "./draft-references.ts";
 import type { PageModules } from "./draft-references.ts";
+import {
+  DraftSeals,
+  draftSource,
+  forgetSealedDrafts,
+  sealOfSource,
+} from "./draft-seals.ts";
+import type { DraftSeal } from "./draft-seals.ts";
 import { changesAnything, readDraft } from "./drafts.ts";
 import type { DraftState } from "./drafts.ts";
 import { inJurisdiction } from "./durable-objects.ts";
@@ -36,7 +43,10 @@ import type { Reports } from "./preview-reports.ts";
 //   logged (server-logs.ts);
 // - one build per viewer and revision (preview-builds.ts), and the
 //   references its pages last built against, for while the draft's
-//   server code doesn't build.
+//   server code doesn't build;
+// - the one seal of each content of the draft (draft-seals.ts), made here
+//   for every isolate that asks and kept in R2, so a seal is made once
+//   and outlives whoever asked for it.
 //
 // The draft itself is the App's, in core's database (drafts.ts): read
 // afresh for each step, and followed by the pages open on it through its
@@ -61,6 +71,8 @@ export class AppPreview extends DurableObject<Env> {
   readonly #reports = new PreviewReports();
   /** What bounds the preview's builds (preview-builds.ts). */
   readonly #builds = new PreviewBuilds();
+  /** The draft's seals running here, and its recent failures (draft-seals.ts). */
+  readonly #seals = new DraftSeals();
   /** The App this object previews: the name it was made by. */
   get #app(): AppId {
     return appIdSchema.parse(this.ctx.id.name);
@@ -104,8 +116,13 @@ export class AppPreview extends DurableObject<Env> {
   async draft({
     fallback = false,
   }: { fallback?: boolean } = {}): Promise<DraftState> {
-    const draft = await readDraft(this.env, { kind: "app", id: this.#app });
     this.#reports.opened();
+    return await this.#shown(fallback);
+  }
+
+  /** What the preview shows (`draft`), read without opening it. */
+  async #shown(fallback: boolean): Promise<DraftState> {
+    const draft = await readDraft(this.env, { kind: "app", id: this.#app });
     if (!fallback && changesAnything(draft)) {
       return draft;
     }
@@ -179,13 +196,51 @@ export class AppPreview extends DurableObject<Env> {
   }
 
   /**
-   * Discards everything the preview holds, its test data first: its App
-   * was removed (app-removal.ts).
+   * Discards everything the preview holds, its test data first, and the
+   * App's sealed drafts: its App was removed (app-removal.ts).
    */
   async discard(): Promise<void> {
     await this.#emptyStores();
+    await forgetSealedDrafts(this.env, this.#app);
     this.#reports.drop();
     await this.ctx.storage.deleteAll();
+  }
+
+  /**
+   * The entry of the App's draft `draft` sealed (draft-seals.ts): kept in
+   * R2, or sealed here once for everyone who asks for it meanwhile, and
+   * kept. Its key is worked out here, from what is sealed; the caller
+   * checks the asker builds the App, and loads what this answers
+   * (draft-runs.ts). Throws as the seal does.
+   */
+  async seal(draft: Omit<DraftSeal, "app">): Promise<string> {
+    return await this.#seals.seal(this.env, { ...draft, app: this.#app });
+  }
+
+  /**
+   * Seals what the preview shows now, unless it is sealed already: told by
+   * every change of the App's draft (drafts.ts `draftRevised`), so that
+   * opening or calling the preview reads a seal rather than makes one.
+   * Answers once it is sealed, or failed for the draft's own fault; an App
+   * with nothing to show has nothing to seal.
+   */
+  async prepare(): Promise<void> {
+    let draft: DraftState;
+    try {
+      draft = await this.#shown(false);
+    } catch (error) {
+      if (appErrors.codeOf(error) === "app.not_running") {
+        return;
+      }
+      throw error;
+    }
+    const source = await draftSource(this.env, this.#app, draft);
+    if (source !== null) {
+      await this.#seals.prepare(
+        this.env,
+        sealOfSource(this.#app, (draft.base ?? 0) + 1, source)
+      );
+    }
   }
 
   /**

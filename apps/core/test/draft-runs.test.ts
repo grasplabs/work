@@ -3,10 +3,7 @@ import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { appKind } from "../src/apps.ts";
 import { holdThrowawayStore } from "../src/data-stores.ts";
-import { draftRelease } from "../src/draft-runs.ts";
-import { draftOf } from "../src/drafts.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { testApp } from "./app-definitions.ts";
 import { mockIdp } from "./idp.ts";
@@ -188,51 +185,6 @@ describe("a draft's preview", { timeout: 180_000 }, () => {
       )
     );
     expect(titles).toStrictEqual([]);
-  });
-
-  it("seals a draft for the next to ask once a seal of it whose request was cancelled runs past a seal's time", async () => {
-    const { app } = await setUp();
-    const draft = await draftOf(env, appKind, app);
-    // A sandbox that never answers code it loads unnamed, as the seal's
-    // inspection is: as the first seal's request was cancelled while it
-    // inspected, which workerd never settles. Named loads go through.
-    const hold = { reached: false };
-    const stuck = new Proxy(env.LOADER, {
-      get: (target, property) => {
-        const value: unknown = Reflect.get(target, property);
-        if (property === "get" && typeof value === "function") {
-          return (name: string | null, code: unknown): unknown =>
-            name === null
-              ? {
-                  getEntrypoint: () =>
-                    new Proxy(
-                      {},
-                      {
-                        get: () => async (): Promise<never> => {
-                          hold.reached = true;
-                          return await Promise.withResolvers<never>().promise;
-                        },
-                      }
-                    ),
-                }
-              : Reflect.apply(value, target, [name, code]);
-        }
-        return typeof value === "function"
-          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
-          : value;
-      },
-    });
-    const bounded = { ...env, SEAL_WAIT_MS: "50" };
-    // Never awaited: it never answers.
-    void draftRelease({ ...bounded, LOADER: stuck }, app, draft);
-    await vi.waitFor(
-      () => {
-        expect(hold.reached).toBeTruthy();
-      },
-      { timeout: 150_000 }
-    );
-    const sealed = await draftRelease(bounded, app, draft);
-    expect(sealed?.manifest.resourceId).toBe(app);
   });
 });
 

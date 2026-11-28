@@ -23,6 +23,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { graspLockHash, packageErrors } from "@grasp-os/shared/packages";
 import type { GraspLock } from "@grasp-os/shared/packages";
 import { roleErrors } from "@grasp-os/shared/roles";
+import { waitUntil } from "cloudflare:workers";
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -30,6 +31,7 @@ import { auditedBatch, outboxed, outboxedIfChanged } from "../audit-outbox.ts";
 import type { Acting } from "../auth/identity.ts";
 import { dependencyRequests, users } from "../db/core/schema.ts";
 import { isUniqueViolation } from "../db/d1.ts";
+import { prepareSeal } from "../drafts.ts";
 import { callObject, workspace } from "../durable-objects.ts";
 import {
   latest,
@@ -541,5 +543,9 @@ export const decideDependency = async (
     throw dependencyErrors.create("dependency.stale");
   }
   await tellChats(env, decided, status);
+  // What the App's draft builds with changed: its preview seals it anew.
+  if (approved && subject.type === "app") {
+    waitUntil(prepareSeal(env, subject.id));
+  }
   return await toRequest(env, decided);
 };

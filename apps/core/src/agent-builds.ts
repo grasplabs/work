@@ -1503,7 +1503,14 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         let run: DraftRun;
         let kind: "query" | "mutation" | "action";
         try {
-          run = await draftRunOf(this.env, by, id);
+          // A seal still under way past a call's own time is refused as
+          // such, to try again (`version.seal_slow`), and goes on.
+          run = await draftRunOf(
+            this.env,
+            by,
+            id,
+            Date.now() + platformLimits.serverInvocationWallMs
+          );
           const fn = Object.hasOwn(run.release.app.functions, method)
             ? run.release.app.functions[method]
             : undefined;

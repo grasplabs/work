@@ -1,15 +1,13 @@
-import {
-  definitionText,
-  serverFunctionsIn,
-} from "@grasp-os/runtime/definition";
-import type { AppDefinition } from "@grasp-os/runtime/definition";
+import { serverFunctionsIn } from "@grasp-os/runtime/definition";
 import {
   declaredPermission,
   generateModules,
   manifestText,
 } from "@grasp-os/runtime/host";
 import type { AppDataPage, AppDataTable } from "@grasp-os/shared/app-data";
+import { versionErrors } from "@grasp-os/shared/app-releases";
 import { appErrors } from "@grasp-os/shared/apps";
+import { withinTime } from "@grasp-os/shared/deadline";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { draftSealFailures, functionErrors } from "@grasp-os/shared/functions";
@@ -17,11 +15,10 @@ import type { FunctionResult } from "@grasp-os/shared/functions";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { sharedRun } from "@grasp-os/shared/shared-runs";
-import type { SharedRun } from "@grasp-os/shared/shared-runs";
 import type { WriterRoles } from "@grasp-os/shared/stores";
 import { exports } from "cloudflare:workers";
 
@@ -40,21 +37,29 @@ import {
   memberPeople,
   peopleReadOf,
 } from "./app-people.ts";
-import { loadDraftRelease, sealDraftRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
-import { appKind, draftDefinition, editableApp } from "./apps.ts";
+import { editableApp } from "./apps.ts";
 import { memberRole } from "./auth/identity.ts";
 import { holdThrowawayStore, throwawayStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { pageModulesOf } from "./draft-references.ts";
 import type { PageModules } from "./draft-references.ts";
-import { changesAnything, filesOf } from "./drafts.ts";
+import {
+  draftSealKey,
+  draftSource,
+  keptRelease,
+  releaseOfEntry,
+  requireApprovedPackages,
+  sealOfSource,
+  sealedEntry,
+} from "./draft-seals.ts";
+import type { DraftSeal, DraftSource } from "./draft-seals.ts";
+import { changesAnything } from "./drafts.ts";
 import type { DraftState } from "./drafts.ts";
-import { appPreview } from "./durable-objects.ts";
+import { appPreview, callObject } from "./durable-objects.ts";
 import { hostFunctionCall } from "./function-host.ts";
 import type { Invocation, ProgressSink } from "./function-host.ts";
 import { checkedValue, isWorkflowMutationPath } from "./page-workflows.ts";
-import { appCodeAndTestFiles } from "./pages.ts";
 import { functionProblem } from "./preview-reports.ts";
 import { hostedRelease, noStore } from "./release-runner.ts";
 import type { SchemaIds } from "./schema-changes.ts";
@@ -94,9 +99,10 @@ import {
 //   builders share.
 // - Other code runs than the draft's: it is sealed from the draft's files
 //   as they are now (`sealDraftRelease`, every check a version's seal
-//   makes) and loaded back through `loadRelease`'s own checks; this isolate
-//   keeps it by the hash of exactly the files the seal reads and the
-//   draft's definition (`sealed`).
+//   makes), by the App's preview object once for everyone, and kept under
+//   the hash of everything that decides the seal, signed in R2 and loaded
+//   back through `loadRelease`'s own checks wherever it is read
+//   (draft-seals.ts, which has the threat model of what it keeps).
 // - What someone typed into a preview stays: its store empties itself a
 //   day after its last use (`throwawayStoreMs`), and at once, for good,
 //   when a builder resets the test data or the App is removed
@@ -133,129 +139,144 @@ const throwawayStoreMs = 24 * 60 * 60 * 1000;
 /** How often an isolate holds a throwaway store again while it is used. */
 const holdAgainMs = 60 * 60 * 1000;
 
-/** The most sealed drafts one isolate keeps. */
+/**
+ * The most sealed drafts one isolate keeps: each holds its App's modules
+ * and its own copy of the server SDK, a quarter of a megabyte for a small
+ * App, and R2 holds every one besides.
+ */
 const sealedMax = 16;
 
 /**
- * Drafts sealed in this isolate, by the hash of what the seal reads: the
- * release itself, never a promise of it. Only a seal that worked puts one
- * here, so a failed seal leaves nothing.
+ * Drafts sealed and loaded in this isolate, by their key
+ * (draft-seals.ts), the most recently used last: the release itself,
+ * never a promise of it.
  */
 const sealedDrafts = new Map<string, Release>();
 
-/**
- * The seals running now in this isolate, by that hash: seals of a draft
- * asked for while one runs share it. A seal whose request was cancelled
- * never settles, so it is waited for only as long as a seal may take
- * (`sharedRun`, `sealWaitMs`), never until newer seals evict it.
- */
-const sealing = new Map<string, SharedRun<Release>>();
-
-/**
- * The longest a seal takes: a build of the draft's code, an inspection in
- * the sandbox, then a build and a type check of it with the real modules,
- * and its migrations' evidence. Each build and check is a platform call
- * of at most some 140 s (`callMs`, platform-sandbox.ts: a code read and
- * 60 s of CPU, tried twice), so some 7 minutes, with room for the rest.
- * Past it, a seal is taken for abandoned and the next to ask seals anew.
- */
-const sealWaitMs = 10 * 60_000;
-
-/** {@link sealWaitMs}, or less where tests set `SEAL_WAIT_MS`. */
-const sealWaitOf = (env: Env): number => {
-  const set = Number(env.SEAL_WAIT_MS);
-  return Number.isInteger(set) && set > 0 && set < sealWaitMs
-    ? set
-    : sealWaitMs;
+/** Keeps `release` under `key` as the most recently used. */
+const keepSealed = (key: string, release: Release): void => {
+  sealedDrafts.delete(key);
+  sealedDrafts.set(key, release);
+  if (sealedDrafts.size > sealedMax) {
+    const [oldest] = sealedDrafts.keys();
+    if (oldest !== undefined) {
+      sealedDrafts.delete(oldest);
+    }
+  }
 };
 
-/** A draft's files and definition, as its seal reads them. */
-interface DraftSource {
-  readonly files: Map<string, string>;
-  readonly definition: AppDefinition;
-}
+/**
+ * MIXED VERSIONS, FOR ONE RELEASE ONLY: delete this function, and its one
+ * use in `fromPreview`, in the release after the one that added
+ * `AppPreview.seal`, once that runs on every organisation.
+ *
+ * For the 15 minutes a deploy takes to reach every object, a Worker of
+ * this release may reach an `AppPreview` of the release before, which has
+ * no `seal`: the draft is then sealed here, as that release sealed it,
+ * shared with no one and kept nowhere.
+ */
+const sealedHereWhileObjectsUpdate = async (
+  env: Env,
+  seal: DraftSeal,
+  error: unknown
+): Promise<string> => {
+  log.warn("draft.sealed_here", { app: seal.app, ...errorFields(error) });
+  return await sealedEntry(env, seal);
+};
 
 /**
- * `draft`'s files and definition (apps.ts); null for a draft of an App
- * with no version that holds nothing, which has nothing to seal.
+ * The entry of `seal` as the App's preview object answers it, kept or
+ * sealed there (`AppPreview.seal`), asked again should the object restart
+ * under the call (`callObject`). Throws as the seal does.
  */
-const draftSource = async (
+const fromPreview = async (env: Env, seal: DraftSeal): Promise<string> => {
+  const { app, ...draft } = seal;
+  try {
+    return await callObject(async () => await appPreview(env, app).seal(draft));
+  } catch (error) {
+    if (isExpectedError(error)) {
+      throw error;
+    }
+    return await sealedHereWhileObjectsUpdate(env, seal, error);
+  }
+};
+
+/** `seal`'s release from the App's preview object (`fromPreview`), by `until`. */
+const releaseFromPreview = async (
   env: Env,
-  app: AppId,
-  draft: DraftState
-): Promise<DraftSource | null> => {
-  const held = await draftDefinition(env, app, draft);
-  return held === null
-    ? null
-    : {
-        files: await filesOf(env, appKind, app, draft),
-        definition: held.definition,
-      };
+  seal: DraftSeal,
+  until: number | undefined
+): Promise<Release> => {
+  let text: string;
+  try {
+    text =
+      until === undefined
+        ? await fromPreview(env, seal)
+        : await withinTime(
+            async () => await fromPreview(env, seal),
+            Math.max(until - Date.now(), 0)
+          );
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw versionErrors.create("version.seal_slow");
+    }
+    throw error;
+  }
+  const release = await releaseOfEntry(seal, text);
+  if (release === undefined) {
+    throw new Error("The draft's preview sealed a release that doesn't load.");
+  }
+  return release;
 };
 
 /**
  * `source`, a draft of `app` as `version`, sealed and loaded back through
- * the same checks as a version's release (`loadDraftRelease`): kept in
- * this isolate by the hash of the files its seal reads
- * (`appCodeAndTestFiles`, the very selection its build and check make)
- * and of its definition, so a write of a page seals nothing again. A
- * failed seal isn't kept.
+ * the same checks as a version's release (draft-seals.ts): from this
+ * isolate, from R2, or from the App's preview object, which seals it once
+ * for everyone (`fromPreview`). Only its code and tests are sealed
+ * (`appCodeAndTestFiles`, the very selection its build and check make),
+ * so a write of a page seals nothing again. By `until`, if given, or
+ * refused with `version.seal_slow` while the seal goes on, for the next
+ * to read; a seal that failed is never kept here.
  */
 const sealed = async (
   env: Env,
   app: AppId,
   version: number,
-  { files, definition }: DraftSource
+  source: DraftSource,
+  until?: number
 ): Promise<Release> => {
-  const reads = appCodeAndTestFiles(Object.fromEntries(files));
-  const key = await sha256Hex(
-    canonicalJson([app, version, reads, definitionText(definition)])
-  );
-  const kept = sealedDrafts.get(key);
-  if (kept !== undefined) {
-    return kept;
-  }
-  return await sharedRun(sealing, key, sealWaitOf(env), async () => {
-    const draft = await sealDraftRelease(
-      env,
-      { app, version },
-      files,
-      definition
-    );
-    const release = await loadDraftRelease(
-      { app, version },
-      draft,
-      async (sha256) =>
-        await Promise.resolve(
-          draft.artifacts.find((artifact) => artifact.sha256 === sha256)?.bytes
-        )
-    );
-    // A seal that ran on past being taken for abandoned keeps what is
-    // there already: the same release, as what it read is the same.
-    if (!sealedDrafts.has(key)) {
-      sealedDrafts.set(key, release);
-      if (sealedDrafts.size > sealedMax) {
-        const [oldest] = sealedDrafts.keys();
-        if (oldest !== undefined) {
-          sealedDrafts.delete(oldest);
-        }
-      }
-    }
-    return release;
-  });
+  const seal = sealOfSource(app, version, source);
+  const key = await draftSealKey(env, seal);
+  const inR2 = sealedDrafts.has(key)
+    ? undefined
+    : await keptRelease(env, key, seal);
+  const release =
+    sealedDrafts.get(key) ??
+    inR2?.release ??
+    (await releaseFromPreview(env, seal, until));
+  keepSealed(key, release);
+  await requireApprovedPackages(env, release);
+  return release;
 };
 
 /**
  * What `draft`, a draft of `app`, holds (`draftSource`) and the release it
- * seals to (`sealed`); null for a draft that holds nothing.
+ * seals to (`sealed`), by `until` if given; null for a draft that holds
+ * nothing.
  */
-const sealedDraft = async (env: Env, app: AppId, draft: DraftState) => {
+const sealedDraft = async (
+  env: Env,
+  app: AppId,
+  draft: DraftState,
+  until?: number
+) => {
   const source = await draftSource(env, app, draft);
   return source === null
     ? null
     : {
         source,
-        release: await sealed(env, app, (draft.base ?? 0) + 1, source),
+        release: await sealed(env, app, (draft.base ?? 0) + 1, source, until),
       };
 };
 
@@ -301,16 +322,19 @@ export const draftReferences = async (
 /**
  * What App `app`'s draft runs on now, for `by`: only while they build the
  * App and it isn't archived. The draft that changes nothing previews the
- * App's live version, as its page shows it.
+ * App's live version, as its page shows it. By `until`, if given: a seal
+ * still under way then answers `version.seal_slow`.
  */
 export const draftRunOf = async (
   env: Env,
   by: Pick<Identity, "userId" | "role" | "teams">,
-  app: AppId
+  app: AppId,
+  /** By when a call needs it: past it, `version.seal_slow` (`sealed`). */
+  until?: number
 ): Promise<DraftRun> => {
   await editableApp(env, by, app);
   const { draft, seed } = await appPreview(env, app).run();
-  const drafted = await sealedDraft(env, app, draft);
+  const drafted = await sealedDraft(env, app, draft, until);
   // The draft that holds nothing previews the App's live version, so a
   // draft to preview always has a definition.
   if (drafted === null) {
@@ -653,7 +677,9 @@ export const callDraft = async (
  * now, for `by` (`draftRunOf`, `callDraft`): a draft
  * whose code doesn't seal answers why, as a call answers a refusal, for
  * its page to show while it is being fixed; the agent's check of the
- * draft builds it and hears why itself.
+ * draft builds it and hears why itself. One whose seal is still under way
+ * by the call's deadline answers `version.seal_slow`, which a page tries
+ * again, a live query too, as the seal goes on.
  */
 export const callDraftOn = async (
   env: Env,
@@ -664,9 +690,15 @@ export const callDraftOn = async (
 ): Promise<FunctionAnswer> => {
   let run: DraftRun;
   try {
-    run = await draftRunOf(env, by, app);
+    run = await draftRunOf(env, by, app, options.deadline);
   } catch (error) {
-    if (!(isExpectedError(error) && draftSealFailures.has(error.code))) {
+    if (
+      !(
+        isExpectedError(error) &&
+        (draftSealFailures.has(error.code) ||
+          error.code === "version.seal_slow")
+      )
+    ) {
       throw error;
     }
     return answerOf({
