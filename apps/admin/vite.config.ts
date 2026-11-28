@@ -105,10 +105,22 @@ export const localEnv = Object.fromEntries(
   Object.entries(localVars).map(([name, value]) => [name, bindings.text(value)])
 );
 
-/** The admin's Worker as `command` runs it: local vars for `serve` alone. */
+/**
+ * The admin's Worker as `command` runs it: local vars for `serve` alone.
+ * The plugin's `config` takes the whole loaded config and returns the
+ * whole config to use, so everything else is carried over.
+ */
 export const adminWorker = (command: "serve" | "build"): PluginConfig =>
   command === "serve"
-    ? { config: (worker) => ({ env: { ...worker.env, ...localEnv } }) }
+    ? {
+        config: (loaded) => ({
+          ...loaded,
+          worker: {
+            ...loaded.worker,
+            env: { ...loaded.worker.env, ...localEnv },
+          },
+        }),
+      }
     : {};
 
 export default defineConfig(({ command }) => ({
