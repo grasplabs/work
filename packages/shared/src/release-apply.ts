@@ -1,7 +1,8 @@
 import type { ReleaseManifest } from "./release.ts";
 
 // How one deployment goes from one release to another, wherever it runs:
-// the steps in order, and whether a move may be made at all. Pure, with
+// the steps in order, whether a move may be made at all, and whether what
+// the deployment answers once moved is that release. Pure, with
 // no Cloudflare API, so the admin applies a release to a hosted client by
 // these rules and an on-premises install can apply one by them on plain
 // workerd.
@@ -109,4 +110,55 @@ export const canMove = (
     return { reason: "behind_migration", worker: behind };
   }
   return readsChatsOf(to, from) ? null : { reason: "behind_chat_storage" };
+};
+
+/**
+ * What a deployment's core says it runs, as its probe answers
+ * (@grasp-os/shared/provision-probe): the release its deploy named, and
+ * each database's last migration by binding. Either absent from a core
+ * of a release from before it, which says nothing of it.
+ */
+export interface InstalledAnswer {
+  release?: string | null;
+  schema?: Readonly<Record<string, string | null>>;
+}
+
+/**
+ * Why `answered` isn't release `to` installed, as Worker `worker` of it
+ * says: `release`, it names another release or none; `schema`, the
+ * database `binding` is behind `to`'s last migration for it. Null when
+ * it is, or when it says nothing (a core from before it).
+ *
+ * A database is at `to` when its last migration is `to`'s last, or one
+ * `to` doesn't list: a later release's, its schema ahead, as a release
+ * that goes back runs on the schema of the one after it (migrations are
+ * expand only). A migration `to` lists before its last, or none where it
+ * lists some, is behind. A database the answer names none for, where it
+ * names some, counts as having none.
+ */
+export const installMismatch = (
+  to: ReleaseManifest,
+  worker: string,
+  answered: InstalledAnswer
+): { reason: "release" } | { reason: "schema"; binding: string } | null => {
+  if (answered.release !== undefined && answered.release !== to.releaseId) {
+    return { reason: "release" };
+  }
+  const { schema } = answered;
+  if (schema === undefined) {
+    return null;
+  }
+  const behind = to.workers[worker]?.d1Databases.find(
+    ({ binding, migrations }) => {
+      const names = migrations.map(({ name }) => name);
+      const last = names.at(-1);
+      const at = schema[binding] ?? null;
+      return (
+        last !== undefined && at !== last && (at === null || names.includes(at))
+      );
+    }
+  );
+  return behind === undefined
+    ? null
+    : { reason: "schema", binding: behind.binding };
 };

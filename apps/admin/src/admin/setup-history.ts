@@ -94,7 +94,7 @@ export const eventWords = ({
 
 /** The step a provisioning event is the end of (src/hosting/operation.ts, `provisionSteps`). */
 const provisionStepOf =
-  /^provision\.(?<step>validated|resources|migrations|connect|core|probe|route)$/u;
+  /^provision\.(?<step>validated|resources|snapshot|migrations|connect|core|probe|route)$/u;
 
 /** What the admin did by itself, in a sentence; null for an action it has no words for. */
 const systemEventWords = ({

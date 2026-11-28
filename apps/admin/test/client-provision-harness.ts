@@ -603,7 +603,7 @@ export const stops: Stop[] = [
   },
   {
     step: "migrations",
-    stopped: "resources",
+    stopped: "snapshot",
     code: "cloudflare_0",
     plan: () => {
       cloudflare.failNext(
@@ -691,6 +691,21 @@ export const probeFailures: ProbeFailure[] = [
     name: "connect not answering",
     probe: { down: ["CONNECT"], clocksDown: ["connect"] },
     code: "probe_binding_unanswered",
+  },
+  {
+    name: "core deployed naming another release",
+    probe: { asRelease: "26.01.1" },
+    code: "probe_release_mismatch",
+  },
+  {
+    name: "core deployed naming no release",
+    probe: { asRelease: null },
+    code: "probe_release_mismatch",
+  },
+  {
+    name: "a database with none of the release's migrations",
+    probe: { schemaAt: { DB: null } },
+    code: "probe_schema_mismatch",
   },
   {
     name: "core's clock not armed",

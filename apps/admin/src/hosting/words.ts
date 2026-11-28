@@ -71,6 +71,16 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
     "A private binding the release gives core didn't answer the probe.",
   probe_clock_unarmed:
     "Core's clock or connect's isn't armed with tasks after the probe.",
+  probe_release_mismatch:
+    "Core answered the probe as another release than the one deployed, or as none.",
+  probe_schema_mismatch:
+    "A database core binds is behind the release's last migration for it: not every migration applied.",
+  probe_assets_not_ready:
+    "Core's frontend still answered Cloudflare's stub for static files that aren't deployed yet.",
+  snapshot_unavailable:
+    "Cloudflare gave no Time Travel bookmark of a database, so nothing was migrated without a restore point.",
+  phase_out_of_order:
+    "A step ran before the one it follows finished for this change: resume it, and every step runs in order.",
   probe_starts_open:
     "The release's core doesn't start a company closed for its onboarding, so its address stays unpublished: put it on a release that does.",
   runner_replaced: "Another attempt took the client over.",
@@ -173,6 +183,11 @@ const failureCauses = {
   probe_identity_mismatch: "retry",
   probe_binding_unanswered: "retry",
   probe_clock_unarmed: "retry",
+  probe_release_mismatch: "retry",
+  probe_schema_mismatch: "retry",
+  probe_assets_not_ready: "retry",
+  snapshot_unavailable: "retry",
+  phase_out_of_order: "retry",
   probe_starts_open: "release",
   runner_replaced: "retry",
   operation_gone: "retry",

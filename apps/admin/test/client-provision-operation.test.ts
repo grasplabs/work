@@ -132,6 +132,7 @@ describe("provisioning a placed client", () => {
       "provision.start",
       "provision.validated",
       "provision.resources",
+      "provision.snapshot",
       "provision.migrations",
       "provision.worker_live",
       "provision.connect",

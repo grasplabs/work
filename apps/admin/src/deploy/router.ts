@@ -87,32 +87,25 @@ export const answeringVersion = async (
 };
 
 /**
- * Tries core's health check at `core` until it answers a version
- * `accepts` takes, to a request carrying the client's router secret as
- * the router sends it: a few tries, each with its own deadline, waiting
- * longer between them (a new hostname, or the old version still
- * answering, can take a moment). Its version and how many tries it took,
- * or undefined after the last try.
+ * Asks `ask` until it answers something `accepts` takes: a few tries,
+ * each with its own deadline, waiting longer between them (a new
+ * hostname, the old version still answering, or a new version's static
+ * files still on their way, can take a moment). What it answered and how
+ * many tries it took, or undefined after the last try.
  */
-const smokeTries = async (
-  core: CoreAddress,
-  routerSecret: string,
-  accepts: (version: string) => boolean,
+const tries = async <T>(
+  ask: (timeoutMs: number) => Promise<T | undefined>,
+  accepts: (answer: T) => boolean,
   {
     retryDelayMs = defaultSmokeDelayMs,
     attemptTimeoutMs = defaultAttemptTimeoutMs,
   }: SmokeOptions
-): Promise<{ version: string; attempts: number } | undefined> => {
+): Promise<{ answer: T; attempts: number } | undefined> => {
   for (let attempt = 1; attempt <= smokeAttempts; attempt += 1) {
     // oxlint-disable-next-line no-await-in-loop -- tries in turn
-    const answering = await answeringVersion(
-      core.fetch,
-      core.origin,
-      routerSecret,
-      attemptTimeoutMs
-    );
-    if (answering !== undefined && accepts(answering)) {
-      return { version: answering, attempts: attempt };
+    const answer = await ask(attemptTimeoutMs);
+    if (answer !== undefined && accepts(answer)) {
+      return { answer, attempts: attempt };
     }
     if (attempt < smokeAttempts) {
       // oxlint-disable-next-line no-await-in-loop -- waits between tries
@@ -137,9 +130,9 @@ export const smokeAnswering = async (
   routerSecret: string,
   { refuses, ...options }: SmokeOptions & { refuses?: string } = {}
 ): Promise<{ version: string; attempts: number }> => {
-  const answered = await smokeTries(
-    core,
-    routerSecret,
+  const answered = await tries(
+    async (timeoutMs) =>
+      await answeringVersion(core.fetch, core.origin, routerSecret, timeoutMs),
     (version) => version !== refuses,
     options
   );
@@ -149,8 +142,65 @@ export const smokeAnswering = async (
       `Core at ${core.origin} didn't answer its health check`
     );
   }
-  return answered;
+  return { version: answered.answer, attempts: answered.attempts };
 };
+
+/**
+ * What Cloudflare answers in place of a Worker's static files while they
+ * aren't deployed yet: plain text, "Assets have not yet been deployed..."
+ * (Void's platform reads it so: voidzero-dev/void, `deploy/migrations.ts`).
+ */
+const assetsStub = "Assets have";
+
+/**
+ * Whether core's frontend at `origin` answers `/`, to a request carrying
+ * `routerSecret`, with anything but Cloudflare's stub for static files not
+ * deployed yet (`assetsStub`); undefined when it doesn't answer within
+ * `timeoutMs`, its body included. Only the stub counts as not ready: what
+ * the page is otherwise is core's, and the probe checks the rest.
+ */
+const frontendServed = async (
+  fetchCore: typeof fetch,
+  origin: string,
+  routerSecret: string,
+  timeoutMs: number
+): Promise<boolean | undefined> => {
+  const limit = deadline(timeoutMs);
+  try {
+    const answer = async () => {
+      const response = await fetchCore(`${origin}/`, {
+        headers: { [routerSecretHeader]: routerSecret },
+        redirect: "manual",
+        signal: limit.signal,
+      });
+      const page = await response.text();
+      return !page.startsWith(assetsStub);
+    };
+    return await Promise.race([answer(), whenAborted(limit.signal)]);
+  } catch {
+    return undefined;
+  } finally {
+    limit.clear();
+  }
+};
+
+/**
+ * Whether `core` serves its frontend's static files, tried as the health
+ * check is (`tries`): a new version's files can reach Cloudflare's edge a
+ * moment after its code does, and until then `/` answers Cloudflare's
+ * stub. False once the last try still did.
+ */
+export const assetsReady = async (
+  core: CoreAddress,
+  routerSecret: string,
+  options: SmokeOptions = {}
+): Promise<boolean> =>
+  (await tries(
+    async (timeoutMs) =>
+      await frontendServed(core.fetch, core.origin, routerSecret, timeoutMs),
+    (served) => served,
+    options
+  )) !== undefined;
 
 /** The entry the map has for `key`: absent, or checked against the router's schema. */
 const storedEntry = async (

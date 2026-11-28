@@ -589,7 +589,7 @@ const migrationBatches = (pending: readonly D1Migration[]): D1Migration[][] => {
 };
 
 /** The names of the migrations database `databaseId` has recorded. */
-const recordedNames = async (
+export const appliedMigrationNames = async (
   api: CloudflareApi,
   accountId: string,
   databaseId: string
@@ -640,7 +640,7 @@ const applyBatch = async (
       throw new D1MigrationError(only.name, error);
     }
   }
-  const done = await recordedNames(api, accountId, databaseId);
+  const done = await appliedMigrationNames(api, accountId, databaseId);
   for (const migration of batch.filter(({ name }) => !done.has(name))) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- in order, each after the last
@@ -694,7 +694,7 @@ export const applyD1Migrations = async (
     await Promise.resolve();
   }
 ): Promise<string[]> => {
-  const done = await recordedNames(api, accountId, databaseId);
+  const done = await appliedMigrationNames(api, accountId, databaseId);
   const pending = migrations.filter(({ name }) => !done.has(name));
   await applyInOrder(api, accountId, databaseId, pending, before);
   return pending.map(({ name }) => name);

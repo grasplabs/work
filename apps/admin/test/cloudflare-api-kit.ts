@@ -162,7 +162,19 @@ export interface CoreState {
         noConnectVersion?: boolean;
         /** As a core from before a company could start closed: it says nothing of it. */
         beforeStartingClosed?: boolean;
+        /** As a core from before the probe named its release and schema: it names neither. */
+        beforeRelease?: boolean;
+        /** The release it names instead of the one its deploy set, as a misdeployed core would; null for none. */
+        asRelease?: string | null;
+        /** What it names as each database's last migration instead of what the database has. */
+        schemaAt?: Readonly<Record<string, string | null>>;
       };
+  /**
+   * How many more requests for its frontend (`/`) its core answers with
+   * Cloudflare's stub for static files not deployed yet, as one just
+   * uploaded can for a moment.
+   */
+  assetsStub?: number;
   /**
    * What its core answers the admin's signed onboarding summary request
    * with (@grasp-os/shared/onboarding-summary): none begun unless set, or

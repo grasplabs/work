@@ -329,6 +329,25 @@ const databaseOf = async (uuid: string): Promise<D1Database> => {
 };
 
 /**
+ * The name of the last migration fake database `uuid` recorded, as core
+ * reads its own (core's src/provision-probe.ts): null when it records
+ * none, or has no record of them at all.
+ */
+export const lastMigrationOf = async (uuid: string): Promise<string | null> => {
+  const database = await databaseOf(uuid);
+  const table = await database
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'd1_migrations'"
+    )
+    .first();
+  return table === null
+    ? null
+    : await database
+        .prepare("SELECT name FROM d1_migrations ORDER BY id DESC LIMIT 1")
+        .first<string>("name");
+};
+
+/**
  * A script upload into `scripts` (the account's own, or a dispatch
  * namespace's): live at once, running the Durable Object migrations it
  * carries only from the tag the script is at, as the API checks it.
@@ -673,6 +692,15 @@ export const workerRoutes: Route[] = [
         schedules: script.schedules.map((cron) => ({ cron })),
       });
     },
+  },
+  // A database's Time Travel bookmark now, as D1's API answers it.
+  {
+    method: "GET",
+    path: /^\/d1\/database\/(?<database>[^/]+)\/time_travel\/bookmark$/u,
+    answer: ({ account, params }) =>
+      account.d1.some(({ uuid }) => uuid === params.database)
+        ? envelope({ bookmark: `00000001-${crypto.randomUUID()}` })
+        : notFound(),
   },
   {
     method: "POST",
