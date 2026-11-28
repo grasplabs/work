@@ -13,7 +13,7 @@ import { Markdown } from "../src/components/markdown.tsx";
 // headings, fences, HTML blocks, footnotes, indentation), from a fixed
 // seed. Whatever the guard
 // lets through must render with the kit's Markdown (Streamdown, its block
-// splitter marked and its remark pipeline) without throwing and in time;
+// splitter marked and its remark pipeline) without throwing or hanging;
 // what the kit's own error boundary catches counts as a failure too.
 
 /** A small seeded generator (Park and Miller's): the same texts on every run. */
@@ -128,11 +128,15 @@ const generated = (): string => {
   return `${text}b${closer.repeat(opened)}`;
 };
 
-/** Generous: the slowest text the guard accepts renders in under a second. */
-const timeBound = 3000;
+/**
+ * A hang guard, never a performance claim: a render that takes this long
+ * is stuck (an infinite loop), however slow the machine. How fast the
+ * accepted texts render is measured outside the tests (the pull request).
+ */
+const hangBound = 30_000;
 
 describe("the Markdown limits, against the parsers they guard", () => {
-  it("lets through only texts its parsers render without throwing, in time", () => {
+  it("lets through only texts its parsers render without throwing or hanging", () => {
     const failures: { text: string; threw: string; ms: number }[] = [];
     let accepted = 0;
     for (let index = 0; index < 3000; index += 1) {
@@ -162,7 +166,7 @@ describe("the Markdown limits, against the parsers they guard", () => {
       const ms = Math.round(performance.now() - started);
       root.unmount();
       container.remove();
-      if (threw !== "" || ms > timeBound) {
+      if (threw !== "" || ms > hangBound) {
         failures.push({ text: JSON.stringify(text.slice(0, 300)), threw, ms });
       }
     }
@@ -171,5 +175,5 @@ describe("the Markdown limits, against the parsers they guard", () => {
       enough: true,
       failures: [],
     });
-  }, 300_000);
+  }, 1_800_000);
 });

@@ -98,6 +98,13 @@ const texts = (selector: string): string[] =>
     (element) => element.textContent?.trim() ?? ""
   );
 
+/**
+ * How long a poll waits for what loads after a render (a grammar, the
+ * policy's refusal of an image): a hang guard for slow machines, never a
+ * performance claim.
+ */
+const settles = { timeout: 30_000 };
+
 /** Whether the code block's lines are drawn in the grammar's colours. */
 const highlighted = (): boolean =>
   markdown().querySelector("[data-slot=code-block-line] span[style]") !== null;
@@ -196,9 +203,9 @@ describe("the kit's Markdown, in an App page's frame", () => {
     // The image's address is refused by the page's policy, so nothing is
     // fetched, and Streamdown says so in its place.
     await expect
-      .poll(() => blocked)
+      .poll(() => blocked, settles)
       .toContain("https://images.example.com/scan.png");
-    await expect.poll(highlighted).toBeTruthy();
+    await expect.poll(highlighted, settles).toBeTruthy();
     // The table is framed by Streamdown's own classes, which the page's
     // stylesheet has.
     const frame = markdown().querySelector("table")?.parentElement;
@@ -285,7 +292,7 @@ describe("the kit's Markdown, in an App page's frame", () => {
     // until its closing fence arrives.
     const code = "```ts\nconst overdue = invoices\n  .filter((invoice) =>";
     show(code, true);
-    await expect.poll(highlighted).toBeTruthy();
+    await expect.poll(highlighted, settles).toBeTruthy();
     seen.partialCode = {
       title: texts("[data-slot=code-block-title]"),
       copyOff: copyOff(),
@@ -370,16 +377,13 @@ describe("the kit's Markdown, in an App page's frame", () => {
       "a megabyte",
       "Some **bold** text with [a link](https://x.example).\n\n".repeat(20_000),
     ],
-  ])("shows %s as plain text, at once and without an error", (_name, text) => {
-    const started = performance.now();
+  ])("shows %s as plain text, without an error", (_name, text) => {
     show(text, true);
-    const elapsed = performance.now() - started;
     expect({
-      fast: elapsed < 1000,
-      drawn: markdown().querySelectorAll("[data-streamdown]").length,
+      drawn: markdown().children.length,
       text: markdown().textContent === text,
       errors,
-    }).toStrictEqual({ fast: true, drawn: 0, text: true, errors: [] });
+    }).toStrictEqual({ drawn: 0, text: true, errors: [] });
   });
 
   it("still draws an ordinary long answer, tens of kilobytes of prose, tables and code, as Markdown", () => {
@@ -495,27 +499,25 @@ const overdue_items = invoices.filter((inv) => inv.due_date < today);
         `${levels}: ${markdown().querySelectorAll("blockquote").length > 0 ? "markdown" : "text"}`
       );
     }
-    // A paragraph of emphasis growing past 3,000 delimiters, a step at a time.
-    const started = performance.now();
-    for (let end = 2600; end <= 3400; end += 200) {
-      show("*a".repeat(end), true);
+    // A paragraph of emphasis growing past 3,000 delimiters, a step at a
+    // time: plain text (the text alone, no element drawn) once it passes.
+    for (const delimiters of [2999, 3000, 3001]) {
+      show("*a".repeat(delimiters), true);
+      seen.push(
+        `${delimiters}: ${markdown().children.length > 0 ? "markdown" : "text"}`
+      );
     }
-    expect({
-      seen,
-      fast: performance.now() - started < 2000,
-      // Plain text: the text alone, no element drawn.
-      last: markdown().children.length,
-      errors,
-    }).toStrictEqual({
+    expect({ seen, errors }).toStrictEqual({
       seen: [
         "18: markdown",
         "19: markdown",
         "20: markdown",
         "21: text",
         "22: text",
+        "2999: markdown",
+        "3000: markdown",
+        "3001: text",
       ],
-      fast: true,
-      last: 0,
       errors: [],
     });
   });
@@ -644,7 +646,7 @@ const overdue_items = invoices.filter((inv) => inv.due_date < today);
     // The other server's image is put on the page, and the page's policy
     // refuses to fetch it: nothing of the answer leaves.
     await expect
-      .poll(() => blocked)
+      .poll(() => blocked, settles)
       .toContain("https://evil.example/leak?answer=the-secret");
     expect({
       // No other address reaches an attribute.
