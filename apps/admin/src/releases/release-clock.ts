@@ -5,4 +5,6 @@
  * run in that month (test/release-clock.ts, by an alias in
  * vite.test.config.ts).
  */
+import "@tanstack/react-start/server-only";
+
 export const releaseNow = (): Date => new Date();
