@@ -1,9 +1,10 @@
 import { definitionText } from "@grasp-os/runtime/definition";
-import { chatIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { appKind } from "../src/apps.ts";
+import { draftRelease } from "../src/draft-runs.ts";
 import { chatWork, readDraft, saveDraft } from "../src/drafts.ts";
 import {
   appName,
@@ -372,6 +373,13 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         definition: definitionText(files.definition),
       },
       await agentWriting(person, chatId)
+    );
+    // The seal the write started for the App's preview (draft-seals.ts),
+    // over before the sandbox is set: only the check's inspections count.
+    await draftRelease(
+      env,
+      appIdSchema.parse(app),
+      await readDraft(env, { kind: "app", id: app })
     );
     // The sandbox ends the first inspection only, as its deadline would.
     const { LOADER: loader } = env;

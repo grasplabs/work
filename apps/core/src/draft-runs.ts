@@ -166,15 +166,22 @@ const keepSealed = (key: string, release: Release): void => {
 };
 
 /**
- * MIXED VERSIONS, FOR ONE RELEASE ONLY: delete this function, and its one
- * use in `fromPreview`, in the release after the one that added
- * `AppPreview.seal`, once that runs on every organisation.
+ * MIXED VERSIONS, FOR ONE RELEASE ONLY: delete this function and
+ * `sealedHereWhileObjectsUpdate`, and their one use in `fromPreview`, in
+ * the release after the one that added `AppPreview.seal`, once that runs
+ * on every organisation.
  *
  * For the 15 minutes a deploy takes to reach every object, a Worker of
  * this release may reach an `AppPreview` of the release before, which has
- * no `seal`: the draft is then sealed here, as that release sealed it,
- * shared with no one and kept nowhere.
+ * no `seal` (workerd's refusal of a method an object lacks): the draft is
+ * then sealed here, as that release sealed it, shared with no one and kept
+ * nowhere. Any other failure is the object's to answer.
  */
+const lacksSeal = (error: unknown): boolean =>
+  error instanceof Error &&
+  error.message === 'The RPC receiver does not implement the method "seal".';
+
+/** See `lacksSeal`: the seal of the release before, in this request. */
 const sealedHereWhileObjectsUpdate = async (
   env: Env,
   seal: DraftSeal,
@@ -194,7 +201,7 @@ const fromPreview = async (env: Env, seal: DraftSeal): Promise<string> => {
   try {
     return await callObject(async () => await appPreview(env, app).seal(draft));
   } catch (error) {
-    if (isExpectedError(error)) {
+    if (!lacksSeal(error)) {
       throw error;
     }
     return await sealedHereWhileObjectsUpdate(env, seal, error);

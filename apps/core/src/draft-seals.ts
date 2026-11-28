@@ -283,6 +283,12 @@ export class DraftSeals {
   readonly #failed = new Map<string, { error: Error; until: number }>();
   /** The keys sealed or found kept lately, the latest last: nothing to prepare. */
   readonly #done = new Set<string>();
+  /** Whether a prepare runs now. */
+  #preparing = false;
+  /** Whether the draft changed while one ran, to be read again after it. */
+  #again = false;
+  /** Whether the App was removed: nothing is kept for it any more. */
+  #discarded = false;
 
   /** The entry of `seal`, kept or made now (see above). */
   async seal(env: Env, seal: DraftSeal): Promise<string> {
@@ -302,21 +308,72 @@ export class DraftSeals {
   }
 
   /**
-   * Seals `seal` unless it is sealed already, answering once it is: the
-   * draft changed (drafts.ts), so that opening or calling it finds it
-   * sealed. A draft's own failure is kept as `seal` keeps it, not thrown.
+   * Seals what `shown` reads, the draft as it is now, unless it is sealed
+   * already: the draft changed (drafts.ts), so that opening or calling it
+   * finds it sealed. One prepare at a time: a change while one runs has
+   * the draft read again once it settled, so of a burst of writes only
+   * the first and the last are sealed, never each in between. Answers
+   * once none is left; never throws (logged), as the next to need a seal
+   * makes it.
    */
-  async prepare(env: Env, seal: DraftSeal): Promise<void> {
-    if (this.#done.has(await draftSealKey(env, seal))) {
+  async prepare(
+    env: Env,
+    shown: () => Promise<DraftSeal | null>
+  ): Promise<void> {
+    if (this.#preparing) {
+      this.#again = true;
       return;
     }
+    this.#preparing = true;
     try {
-      await this.seal(env, seal);
+      do {
+        this.#again = false;
+        // oxlint-disable-next-line no-await-in-loop -- one after the other, by design
+        await this.#prepareNow(env, shown);
+      } while (this.#again);
+    } finally {
+      this.#preparing = false;
+    }
+  }
+
+  /** Seals what `shown` reads unless it is sealed (`prepare`). */
+  async #prepareNow(
+    env: Env,
+    shown: () => Promise<DraftSeal | null>
+  ): Promise<void> {
+    try {
+      const seal = await shown();
+      if (seal !== null && !this.#done.has(await draftSealKey(env, seal))) {
+        await this.seal(env, seal);
+      }
     } catch (error) {
+      // A draft's own failure is kept by `seal`; anything else is the
+      // next ask's to meet.
       if (!(isExpectedError(error) && draftSealFailures.has(error.code))) {
-        throw error;
+        log.warn("draft.seal_unprepared", errorFields(error));
       }
     }
+  }
+
+  /**
+   * Deletes every sealed draft of `app`, and keeps none from now on, a
+   * seal under way included: its App was removed (app-removal.ts).
+   */
+  async forget(env: Pick<Env, "FILES">, app: AppId): Promise<void> {
+    this.#discarded = true;
+    let cursor: string | undefined = undefined;
+    do {
+      // oxlint-disable-next-line no-await-in-loop -- one page after the other
+      const listed: R2Objects = await env.FILES.list({
+        prefix: sealsPrefix(app),
+        ...(cursor === undefined ? {} : { cursor }),
+      });
+      if (listed.objects.length > 0) {
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await env.FILES.delete(listed.objects.map(({ key }) => key));
+      }
+      cursor = listed.truncated ? listed.cursor : undefined;
+    } while (cursor !== undefined);
   }
 
   /** Notes that `key` is kept in R2, as the latest. */
@@ -361,8 +418,12 @@ export class DraftSeals {
           });
           throw error;
         }
-        await writeCache(env, key, text);
-        this.#kept(key);
+        // Kept only under the key of what it read: an approval that
+        // landed while it built is another key, which the next ask seals.
+        if (!this.#discarded && (await draftSealKey(env, seal)) === key) {
+          await writeCache(env, key, text);
+          this.#kept(key);
+        }
         // How long a seal takes, made: what a caller's deadline is set against.
         log.info("draft.seal", {
           outcome: "sealed",
@@ -378,23 +439,3 @@ export class DraftSeals {
     return await work;
   }
 }
-
-/** Deletes every sealed draft of `app`: its App was removed (app-removal.ts). */
-export const forgetSealedDrafts = async (
-  env: Pick<Env, "FILES">,
-  app: AppId
-): Promise<void> => {
-  let cursor: string | undefined = undefined;
-  do {
-    // oxlint-disable-next-line no-await-in-loop -- one page after the other
-    const listed: R2Objects = await env.FILES.list({
-      prefix: sealsPrefix(app),
-      ...(cursor === undefined ? {} : { cursor }),
-    });
-    if (listed.objects.length > 0) {
-      // oxlint-disable-next-line no-await-in-loop -- see above
-      await env.FILES.delete(listed.objects.map(({ key }) => key));
-    }
-    cursor = listed.truncated ? listed.cursor : undefined;
-  } while (cursor !== undefined);
-};

@@ -11,12 +11,7 @@ import { appKind } from "./apps.ts";
 import { emptyThrowawayStore } from "./data-stores.ts";
 import { isPageModules } from "./draft-references.ts";
 import type { PageModules } from "./draft-references.ts";
-import {
-  DraftSeals,
-  draftSource,
-  forgetSealedDrafts,
-  sealOfSource,
-} from "./draft-seals.ts";
+import { DraftSeals, draftSource, sealOfSource } from "./draft-seals.ts";
 import type { DraftSeal } from "./draft-seals.ts";
 import { changesAnything, readDraft } from "./drafts.ts";
 import type { DraftState } from "./drafts.ts";
@@ -201,7 +196,7 @@ export class AppPreview extends DurableObject<Env> {
    */
   async discard(): Promise<void> {
     await this.#emptyStores();
-    await forgetSealedDrafts(this.env, this.#app);
+    await this.#seals.forget(this.env, this.#app);
     this.#reports.drop();
     await this.ctx.storage.deleteAll();
   }
@@ -225,22 +220,21 @@ export class AppPreview extends DurableObject<Env> {
    * with nothing to show has nothing to seal.
    */
   async prepare(): Promise<void> {
-    let draft: DraftState;
-    try {
-      draft = await this.#shown(false);
-    } catch (error) {
-      if (appErrors.codeOf(error) === "app.not_running") {
-        return;
+    await this.#seals.prepare(this.env, async () => {
+      let draft: DraftState;
+      try {
+        draft = await this.#shown(false);
+      } catch (error) {
+        if (appErrors.codeOf(error) === "app.not_running") {
+          return null;
+        }
+        throw error;
       }
-      throw error;
-    }
-    const source = await draftSource(this.env, this.#app, draft);
-    if (source !== null) {
-      await this.#seals.prepare(
-        this.env,
-        sealOfSource(this.#app, (draft.base ?? 0) + 1, source)
-      );
-    }
+      const source = await draftSource(this.env, this.#app, draft);
+      return source === null
+        ? null
+        : sealOfSource(this.#app, (draft.base ?? 0) + 1, source);
+    });
   }
 
   /**

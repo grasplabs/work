@@ -47,11 +47,12 @@ export const refusal = (code: string, message: string): Error =>
 /**
  * Refusals after which following a query or a run again would only be
  * refused again: the App moved to another version, the page follows too
- * many, or the request itself. (A refusal of the person or the build
+ * many, or the request itself; never a draft's server code still being
+ * sealed, which answers once it is. (A refusal of the person or the build
  * fences the whole client.)
  */
 export const endsFollowing = (code: string): boolean =>
-  code.startsWith("version.") ||
+  (code.startsWith("version.") && code !== "version.seal_slow") ||
   code === "app.not_running" ||
   code === "page.too_many_queries" ||
   code === "page.invalid" ||
