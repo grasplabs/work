@@ -7,7 +7,7 @@ import { chatIdSchema } from "@grasp-os/shared/ids";
 import { RpcStub } from "capnweb";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 
 import { ChatListWatch } from "../src/chat-list-watch.ts";
 import { ChatsRpc, personalWorkspaceId } from "../src/chats-rpc.ts";
@@ -388,5 +388,47 @@ describe("a person's list of chats", () => {
     await dropped.promise;
 
     expect({ calls, letGo }).toStrictEqual({ calls: 1, letGo: 1 });
+  });
+
+  it("lets go of a chat a page follows once it is deleted, quietly, never following it again", async () => {
+    const ann = await person();
+    const chat = await startedChat(ann, "To delete");
+    const released = { now: false };
+    const updates: unknown[] = [];
+    await ann.api.chats.watch(
+      chat.id,
+      null,
+      Object.assign(
+        (update: unknown) => {
+          updates.push(update);
+        },
+        {
+          [Symbol.dispose]: () => {
+            released.now = true;
+          },
+        }
+      )
+    );
+    await until(() => {
+      expect(updates.length).toBeGreaterThan(0);
+    });
+    const warned = vi.spyOn(console, "warn");
+    onTestFinished(() => {
+      warned.mockRestore();
+    });
+
+    await ann.api.chats.remove(chat.id);
+
+    await until(() => {
+      expect(released.now).toBeTruthy();
+    });
+    expect(
+      warned.mock.calls.filter(
+        ([line]) =>
+          typeof line === "object" &&
+          line !== null &&
+          Reflect.get(line, "event") === "chat.rewatch_failed"
+      )
+    ).toStrictEqual([]);
   });
 });
