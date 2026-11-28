@@ -70,6 +70,8 @@ export const inTurn = async <T>(
   if (turnsUnderWay(turns) >= maxQueuedPerRun) {
     throw functionErrors.create("function.sandbox_busy");
   }
+  // Held past its deadline for as long again, while it winds down: its
+  // answer recorded, its sandbox's child let go.
   return await inTurnOf(turns, Math.max(until - Date.now(), 0), work, {
     at: until,
     error: () => functionErrors.create("function.deadline_exceeded"),

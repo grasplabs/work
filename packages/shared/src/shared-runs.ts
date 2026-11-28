@@ -237,10 +237,13 @@ export const turnsUnderWay = (turns: Turns): number => {
  * or was taken for abandoned: each turn may take `turnMs` from when the
  * one before it was due to end, as a cancelled request's turn never ends
  * (see above). For work that must never overlap within an isolate, such
- * as reads that each hold a large part of its memory. With `until`, a turn
- * that hasn't come by `until.at` gives up with `until.error()`, and the
- * turns after it wait for the one before it: giving up never lets one
- * run beside a turn still running.
+ * as reads that each hold a large part of its memory.
+ *
+ * With `until`, a turn whose time hasn't come by `until.at` gives up with
+ * `until.error()`, and the turns after it wait for the one before it, so
+ * giving up never lets one run beside a turn still running. Such a turn
+ * is due to end `turnMs` after `until.at` (its work may run on past its
+ * deadline while it winds down), and never before the turn before it.
  */
 export const inTurn = async <T>(
   turns: Turns,
@@ -249,19 +252,19 @@ export const inTurn = async <T>(
   until?: { readonly at: number; readonly error: () => Error }
 ): Promise<T> => {
   const before = waitedFor(turns.last);
+  const after = before?.endsBy ?? 0;
   const turn: Turn = {
     before,
-    endsBy: Math.max(Date.now(), before?.endsBy ?? 0) + turnMs,
+    endsBy:
+      until === undefined
+        ? Math.max(Date.now(), after) + turnMs
+        : Math.max(after, until.at + turnMs),
   };
   turns.last = turn;
   // Its turn comes once the one it waits for is over, on this request's
   // own timer: never by awaiting another request's promise.
   let lookMs = lookFirstMs;
-  for (
-    let waited = waitedFor(turn.before);
-    waited !== undefined && !over(waited, Date.now());
-    waited = waitedFor(turn.before)
-  ) {
+  for (;;) {
     const now = Date.now();
     if (until !== undefined && until.at <= now) {
       turn.ended = "gave up";
@@ -269,6 +272,12 @@ export const inTurn = async <T>(
         turns.last = turn.before;
       }
       throw until.error();
+    }
+    // Past the turns that gave up since, so none is held on to.
+    turn.before = waitedFor(turn.before);
+    const waited = turn.before;
+    if (waited === undefined || over(waited, now)) {
+      break;
     }
     const left = Math.min(
       waited.endsBy - now,

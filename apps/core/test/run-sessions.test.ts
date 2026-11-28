@@ -72,4 +72,29 @@ describe("a run's calls in turn", () => {
       Array.from({ length: maxQueuedPerRun + 1 }, (_, round) => round)
     );
   });
+
+  it("makes a call made once one ran past its deadline wait for it to end", async () => {
+    const key = `run-${crypto.randomUUID()}`;
+    const ran: string[] = [];
+    const { promise: aMayEnd, resolve: endA } = Promise.withResolvers<true>();
+    // A runs on past its own deadline, as one winding down does.
+    const a = inTurn(key, Date.now() + 1000, async () => {
+      ran.push("A started");
+      await aMayEnd;
+      ran.push("A ended");
+    });
+    await scheduler.wait(1100);
+    const c = inTurn(key, Date.now() + 10_000, async () => {
+      ran.push("C");
+      await Promise.resolve();
+    });
+    await scheduler.wait(300);
+    const beforeA = [...ran];
+    endA(true);
+    await Promise.all([a, c]);
+    expect({ beforeA, ran }).toStrictEqual({
+      beforeA: ["A started"],
+      ran: ["A started", "A ended", "C"],
+    });
+  });
 });
