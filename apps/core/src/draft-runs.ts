@@ -20,6 +20,8 @@ import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { sharedRun } from "@grasp-os/shared/shared-runs";
+import type { SharedRun } from "@grasp-os/shared/shared-runs";
 import type { WriterRoles } from "@grasp-os/shared/stores";
 import { exports } from "cloudflare:workers";
 
@@ -134,8 +136,38 @@ const holdAgainMs = 60 * 60 * 1000;
 /** The most sealed drafts one isolate keeps. */
 const sealedMax = 16;
 
-/** Drafts sealed in this isolate, by the hash of what the seal reads. */
-const sealedDrafts = new Map<string, Promise<Release>>();
+/**
+ * Drafts sealed in this isolate, by the hash of what the seal reads: the
+ * release itself, never a promise of it. Only a seal that worked puts one
+ * here, so a failed seal leaves nothing.
+ */
+const sealedDrafts = new Map<string, Release>();
+
+/**
+ * The seals running now in this isolate, by that hash: seals of a draft
+ * asked for while one runs share it. A seal whose request was cancelled
+ * never settles, so it is waited for only as long as a seal may take
+ * (`sharedRun`, `sealWaitMs`), never until newer seals evict it.
+ */
+const sealing = new Map<string, SharedRun<Release>>();
+
+/**
+ * The longest a seal takes: a build of the draft's code, an inspection in
+ * the sandbox, then a build and a type check of it with the real modules,
+ * and its migrations' evidence. Each build and check is a platform call
+ * of at most some 140 s (`callMs`, platform-sandbox.ts: a code read and
+ * 60 s of CPU, tried twice), so some 7 minutes, with room for the rest.
+ * Past it, a seal is taken for abandoned and the next to ask seals anew.
+ */
+const sealWaitMs = 10 * 60_000;
+
+/** {@link sealWaitMs}, or less where tests set `SEAL_WAIT_MS`. */
+const sealWaitOf = (env: Env): number => {
+  const set = Number(env.SEAL_WAIT_MS);
+  return Number.isInteger(set) && set > 0 && set < sealWaitMs
+    ? set
+    : sealWaitMs;
+};
 
 /** A draft's files and definition, as its seal reads them. */
 interface DraftSource {
@@ -181,16 +213,16 @@ const sealed = async (
   );
   const kept = sealedDrafts.get(key);
   if (kept !== undefined) {
-    return await kept;
+    return kept;
   }
-  const sealing = (async () => {
+  return await sharedRun(sealing, key, sealWaitOf(env), async () => {
     const draft = await sealDraftRelease(
       env,
       { app, version },
       files,
       definition
     );
-    return await loadDraftRelease(
+    const release = await loadDraftRelease(
       { app, version },
       draft,
       async (sha256) =>
@@ -198,20 +230,19 @@ const sealed = async (
           draft.artifacts.find((artifact) => artifact.sha256 === sha256)?.bytes
         )
     );
-  })();
-  sealedDrafts.set(key, sealing);
-  if (sealedDrafts.size > sealedMax) {
-    const [oldest] = sealedDrafts.keys();
-    if (oldest !== undefined) {
-      sealedDrafts.delete(oldest);
+    // A seal that ran on past being taken for abandoned keeps what is
+    // there already: the same release, as what it read is the same.
+    if (!sealedDrafts.has(key)) {
+      sealedDrafts.set(key, release);
+      if (sealedDrafts.size > sealedMax) {
+        const [oldest] = sealedDrafts.keys();
+        if (oldest !== undefined) {
+          sealedDrafts.delete(oldest);
+        }
+      }
     }
-  }
-  try {
-    return await sealing;
-  } catch (error) {
-    sealedDrafts.delete(key);
-    throw error;
-  }
+    return release;
+  });
 };
 
 /**

@@ -7061,9 +7061,12 @@ export class Workspace extends DurableObject<Env> {
   ): Promise<void> {
     const chat = this.#ownChat(chatId, personId);
     const { id, action } = heldSchema.parse(held);
+    // Once by the held call's ID: it is decided once, and its decider sends
+    // this again should this object reset under the call (pending-actions.ts).
     await this.#note(
       chat.id,
-      `The call you asked for, "${action}" (pending ID ${id}), was decided. ${heldOutcomes[outcome]} Read how it ended, with what it returned, with \`env.connections.outcome("${id}")\`.`
+      `The call you asked for, "${action}" (pending ID ${id}), was decided. ${heldOutcomes[outcome]} Read how it ended, with what it returned, with \`env.connections.outcome("${id}")\`.`,
+      `held:${id}`
     );
   }
 
@@ -7072,17 +7075,23 @@ export class Workspace extends DurableObject<Env> {
    * up its person's list: often decided elsewhere, it is where the agent
    * can now go on. Refused while the chat is deleted or its person
    * erased: what is told then would outlive the erasure. Its callers keep
-   * the decision all the same.
+   * the decision all the same. Told once by `requestId`: a caller whose
+   * own call may be sent again names the notice, else each call is its own.
    */
-  async #note(chatId: ChatId, text: string): Promise<void> {
+  async #note(
+    chatId: ChatId,
+    text: string,
+    requestId: string = crypto.randomUUID()
+  ): Promise<void> {
     if (this.#isDeleting(chatId) || this.#erasing) {
       throw agentErrors.create("agent.chat_not_found");
     }
     // Again on a stub of its own should the chat's object reset under the
     // call, as one that opens cold under load can: a decision's notice is
-    // never dropped for a restart (`#toSession`).
+    // never dropped for a restart (`#toSession`), and not told twice for one
+    // that came after it was kept: each retry sends the same `requestId`.
     await this.#toSession(chatId, async (session) => {
-      await session.note(text);
+      await session.note(text, requestId);
     });
     this.#db
       .update(chats)

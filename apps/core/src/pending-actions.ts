@@ -264,8 +264,8 @@ const tellChat = async (
   }
   const { workspaceId, chatId } = held.context;
   try {
-    // Again should the object reset under the call (`callObject`): a
-    // second notice of the same outcome tells the agent nothing new.
+    // Again should the object reset under the call (`callObject`): the
+    // notice is told once by the held call's ID (`Workspace.heldDecided`).
     await callObject(async () => {
       await workspace(env, workspaceId).heldDecided(
         chatId,

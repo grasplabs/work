@@ -11,7 +11,7 @@ import { z } from "zod";
 import { questionDataOf } from "../src/chat-harness.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { personOf } from "../src/connections.ts";
-import { chatSession, workspace } from "../src/durable-objects.ts";
+import { callObject, chatSession, workspace } from "../src/durable-objects.ts";
 import { analysisPurpose } from "../src/turn-recall.ts";
 import {
   chatOf,
@@ -141,6 +141,27 @@ const keptOf = async (
         return stopReason === undefined ? role : `${role}:${stopReason}`;
       })
   );
+
+/** How many attempts `callObject` makes when the first throws `error`. */
+const attemptsAfter = async (error: Error): Promise<number> => {
+  let attempts = 0;
+  try {
+    // oxlint-disable-next-line require-await -- a call that answers at once
+    await callObject(async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw error;
+      }
+    });
+  } catch {
+    // Not retried: the attempts say so.
+  }
+  return attempts;
+};
+
+/** An error as workerd marks it. */
+const platformError = (message: string, marks: Record<string, boolean>) =>
+  Object.assign(new Error(message), marks);
 
 describe("a chat's ChatSession", () => {
   it("takes one question at a time: another turn's is refused before it is taken, and the same turn's joins it", async () => {
@@ -473,6 +494,51 @@ describe("a chat's ChatSession", () => {
       await expect(overran).resolves.toBe("reset");
     }
   );
+
+  it("tells the chat's agent a held call's decision once, though it is sent again after both objects restarted, and another decision too", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const asking = await chatOf(userId, says("Noted."));
+    const { session } = sessionOf(asking, userId);
+    // A stub of its own each time: one to an object that restarted stays
+    // broken.
+    const decide = async (id: string) => {
+      await workspace(env, asking.id).heldDecided(
+        asking.chat.id,
+        userId,
+        { id, action: "mail.send" },
+        "confirmed"
+      );
+    };
+    const held = crypto.randomUUID();
+    const other = crypto.randomUUID();
+    await decide(held);
+    // Both objects restart after the notice was kept, and its decider
+    // sends the decision again, as it does when its call broke
+    // (pending-actions.ts).
+    for (const stub of [session(), workspace(env, asking.id)]) {
+      // oxlint-disable-next-line no-await-in-loop -- one restart after the other
+      await runInDurableObject(stub, (_instance, state) => {
+        state.abort("Restarted by the test");
+      }).catch(() => {
+        // Aborting fails the call that aborted: that is the restart.
+      });
+    }
+    await decide(held);
+    await decide(other);
+    await workspace(env, asking.id).ask(asking.chat.id, {
+      text: "Anything new?",
+      model,
+    });
+    // The turn's request: the one its notices went into.
+    const body =
+      asking.provider.requests
+        .map((request) => JSON.stringify(request.body))
+        .find((sent) => sent.includes(held)) ?? "";
+    expect({
+      held: body.split(`pending ID ${held}`).length - 1,
+      other: body.split(`pending ID ${other}`).length - 1,
+    }).toStrictEqual({ held: 1, other: 1 });
+  });
 
   it("ends a turn whose step pi parked after restarts cut it off, so the chat can be deleted and its person erased", async () => {
     const { userId, person: signedIn } = await signedInWithRole(idp, "user");
@@ -1553,6 +1619,49 @@ describe("what a question's entry keeps", () => {
         },
       },
       none: { files: [] },
+    });
+  });
+});
+
+describe("a call to an object (callObject)", () => {
+  it("retries a call whose object reset, or reset for holding its calls too long, and nothing else the platform marks overloaded", async () => {
+    const overrun =
+      "A call to blockConcurrencyWhile() in a Durable Object waited for too long. The call was canceled and the Durable Object was reset.";
+    expect({
+      reset: await attemptsAfter(
+        platformError("Durable Object reset because its code was updated.", {
+          durableObjectReset: true,
+        })
+      ),
+      overloaded: await attemptsAfter(
+        platformError(
+          "Durable Object is overloaded. Too many requests queued.",
+          {
+            overloaded: true,
+          }
+        )
+      ),
+      overrun: await attemptsAfter(
+        platformError(overrun, { durableObjectReset: true, overloaded: true })
+      ),
+      lostConnection: await attemptsAfter(
+        platformError("Network connection lost.", { retryable: true })
+      ),
+      otherOverloadedReset: await attemptsAfter(
+        platformError(
+          "Durable Object's isolate exceeded its memory limit and was reset.",
+          {
+            durableObjectReset: true,
+            overloaded: true,
+          }
+        )
+      ),
+    }).toStrictEqual({
+      reset: 2,
+      overloaded: 1,
+      overrun: 2,
+      lostConnection: 2,
+      otherOverloadedReset: 1,
     });
   });
 });
