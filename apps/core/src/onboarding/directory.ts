@@ -20,6 +20,7 @@ import { appendAuditEvent } from "../audit-outbox.ts";
 import { signInConfig } from "../auth/config.ts";
 import { tenantOf } from "../connections.ts";
 import { startOnboardingConnection } from "./connections.ts";
+import { proofsOf } from "./staff-ties.ts";
 
 // Who works where, from the organization's directory (GRA-369): the admin
 // connects their Microsoft or Google sign-in in the onboarding's company
@@ -27,7 +28,8 @@ import { startOnboardingConnection } from "./connections.ts";
 // for the admin's browser to make a roster of, as it makes one of a staff
 // list (the web app's staff-list.ts), so people keep their IDs and links
 // whichever way they came in. Core keeps nothing of the read itself: the
-// roster the browser saves is what stays.
+// roster the browser saves is what stays, each person with core's proof
+// of who they are in the directory (staff-ties.ts, GRA-2249).
 
 /**
  * The directory connection the onboarding and the daily read
@@ -148,7 +150,9 @@ export const readOnboardingDirectory = async (
     }
     cursor = read.next;
     if (cursor === null) {
-      return { suite: directorySuiteOf(connection.provider), people };
+      const suite = directorySuiteOf(connection.provider);
+      // oxlint-disable-next-line no-await-in-loop -- once, as the last page is in
+      return { suite, people, proofs: await proofsOf(env, suite, people) };
     }
   }
   throw directoryErrors.create("directory.too_large");

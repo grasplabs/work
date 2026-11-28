@@ -131,6 +131,22 @@ export const people = sqliteTable("people", {
   team: text().notNull(),
   title: text().notNull(),
   away: integer({ mode: "boolean" }).notNull(),
+  /**
+   * Who they are in the organization's directory (GRA-2249): its suite
+   * (`microsoft`, `google`), the provider's ID of them, and core's keyed
+   * proof that its own read named them so with this entry's address and
+   * name (onboarding/staff-ties.ts). All three or none; none for an entry
+   * from an uploaded list. Personal data: gone with their erasure.
+   */
+  directorySuite: text("directory_suite"),
+  directoryId: text("directory_id"),
+  directoryProof: text("directory_proof"),
+  /**
+   * When they were found gone (GRA-2249): the directory's daily read no
+   * longer holds them, or their member was removed. Only on an entry with
+   * a directory ID; cleared once neither holds.
+   */
+  leftAt: text("left_at"),
 });
 
 /**

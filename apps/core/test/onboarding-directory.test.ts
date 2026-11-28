@@ -30,6 +30,9 @@ import {
 
 const idp = mockIdp();
 
+/** A keyed hash, as core proves who it read: SHA-256, in hex. */
+const keyedHash = /^[0-9a-f]{64}$/u;
+
 const asStaff = async () => {
   const session = await signedIn(idp, "grasp-staff", staffPerson());
   const { core } = await openRpc(session);
@@ -78,7 +81,15 @@ describe("the onboarding's directory", () => {
       back: `${back.pathname}?step=${back.searchParams.get("step") ?? ""}`,
       connection: back.searchParams.has("connection"),
       directory: await admin.api.onboarding.directory(),
-      read,
+      read: read && {
+        ...read,
+        proofs: Object.fromEntries(
+          Object.entries(read.proofs).map(([id, proof]) => [
+            id,
+            keyedHash.test(proof),
+          ])
+        ),
+      },
       recorded: events
         .filter(({ action }) => action === "onboarding.directory_read")
         .map(({ actor, target }) => ({
@@ -130,6 +141,8 @@ describe("the onboarding's directory", () => {
             manager: lead,
           },
         ],
+        // Core's proof of each, for a save to tie their entry by (GRA-2249).
+        proofs: { [lead]: true, [lisa]: true },
       },
       recorded: [{ actor: "person", target: "connection" }],
       memberDirectory: "role.forbidden",

@@ -15,6 +15,8 @@ import type { AuditActor, AuditDetailValue } from "@grasp-os/shared/audit";
 import type { StatementKind } from "@grasp-os/shared/brain";
 import { brainRecordSchema } from "@grasp-os/shared/brain-records";
 import type { WorkflowVersionRecord } from "@grasp-os/shared/brain-records";
+import { directorySuiteSchema } from "@grasp-os/shared/directory";
+import type { DirectorySuite } from "@grasp-os/shared/directory";
 import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
 import {
   erasedFact,
@@ -60,6 +62,7 @@ import {
 import type {
   Agreements,
   Difference,
+  DirectoryTie,
   InterviewKind,
   InterviewLocale,
   FailedMail,
@@ -187,6 +190,7 @@ import {
   erasedEmailsAmong,
   isErasedEmail,
   normalizedEmail,
+  subjectHashOf,
 } from "../erased-people.ts";
 import {
   deliverMail,
@@ -245,6 +249,7 @@ import {
 import type { InterviewState, TeamCount } from "./rules.ts";
 import { SourcesFallError } from "./sources-fall.ts";
 import type { FallingSource, SourceRemover } from "./sources-fall.ts";
+import { tieKey, tieSubject } from "./staff-ties.ts";
 import { interviewBrief, setupView } from "./stephen-setup.ts";
 import { onboardingStoreName } from "./store-name.ts";
 import { checksFor, teamClaims } from "./team-claims.ts";
@@ -1746,6 +1751,23 @@ export class Onboarding extends DurableObject<Env> {
         .all()
         .map((row) => [row.id, row])
     );
+    // When each person found gone was (GRA-2249), by who they are in the
+    // directory: their entry keeps it while it keeps that tie.
+    const leftBefore = new Map(
+      this.#db
+        .select({
+          suite: people.directorySuite,
+          id: people.directoryId,
+          leftAt: people.leftAt,
+        })
+        .from(people)
+        .all()
+        .flatMap(({ suite, id, leftAt }) =>
+          suite === null || id === null || leftAt === null
+            ? []
+            : [[tieKey({ suite, id }), leftAt] as const]
+        )
+    );
     this.#db.delete(teams).run();
     this.#db.delete(people).run();
     for (const [position, team] of roster.teams.entries()) {
@@ -1765,7 +1787,7 @@ export class Onboarding extends DurableObject<Env> {
         })
         .run();
     }
-    const closedNow = this.#writePeople(roster.people, hashes, now);
+    const closedNow = this.#writePeople(roster.people, hashes, leftBefore, now);
     // Checked again here: someone erased since their code was made
     // (`#freshCodes` waits) gets none.
     const closed = this.#erasedPeople();
@@ -1844,17 +1866,26 @@ export class Onboarding extends DurableObject<Env> {
   #writePeople(
     listed: Roster["people"],
     hashes: ReadonlyMap<string, string>,
+    leftBefore: ReadonlyMap<string, string>,
     now: string
   ): string[] {
     const keptOff = this.#keptOff(listed, hashes);
     const closedBefore = this.#erasedPeople();
     for (const [position, person] of listed.entries()) {
+      const { directory, left: _left, ...entry } = person;
+      // The tie core checked (rpc.ts), none on an entry kept off.
+      const tie = keptOff.has(person.id) ? undefined : directory;
       this.#db
         .insert(people)
         .values({
-          ...person,
+          ...entry,
           email: keptOff.has(person.id) ? "" : person.email,
           position,
+          directorySuite: tie?.suite ?? null,
+          directoryId: tie?.id ?? null,
+          directoryProof: tie?.proof ?? null,
+          leftAt:
+            tie === undefined ? null : (leftBefore.get(tieKey(tie)) ?? null),
         })
         .run();
     }
@@ -5747,6 +5778,121 @@ export class Onboarding extends DurableObject<Env> {
     return link?.person ?? null;
   }
 
+  /** The list's entries tied to a person in the directory (GRA-2249), by `tieKey`. */
+  #ties(): {
+    person: string;
+    key: string;
+    suite: DirectorySuite;
+    id: string;
+  }[] {
+    return this.#db
+      .select({
+        person: people.id,
+        suite: people.directorySuite,
+        id: people.directoryId,
+      })
+      .from(people)
+      .where(isNotNull(people.directoryId))
+      .all()
+      .flatMap(({ person, suite, id }) => {
+        const known = directorySuiteSchema.safeParse(suite);
+        return known.success && id !== null
+          ? [
+              {
+                person,
+                key: tieKey({ suite: known.data, id }),
+                suite: known.data,
+                id,
+              },
+            ]
+          : [];
+      });
+  }
+
+  /**
+   * The keyed hash erasure keeps of the subject each of `ties` names
+   * (erased-people.ts `subjectHashOf`), by `tieKey`: made before a
+   * transaction, which can't wait on one.
+   */
+  async #tieHashesOf(
+    ties: readonly { key: string; suite: DirectorySuite; id: string }[]
+  ): Promise<Map<string, string>> {
+    return new Map(
+      await Promise.all(
+        ties.map(
+          async (tie) =>
+            [tie.key, await subjectHashOf(this.env, tieSubject(tie))] as const
+        )
+      )
+    );
+  }
+
+  /**
+   * Everyone on the list, with who they are in the directory where a
+   * save kept that (GRA-2249): for core alone, never shown. The proof is
+   * core's, for a save to check again (staff-ties.ts `tiesOf`).
+   */
+  staffTies(): {
+    id: string;
+    email: string;
+    title: string;
+    tie: DirectoryTie | null;
+  }[] {
+    return this.#db
+      .select()
+      .from(people)
+      .orderBy(asc(people.position))
+      .all()
+      .map(
+        ({ id, email, title, directorySuite, directoryId, directoryProof }) => {
+          const suite = directorySuiteSchema.safeParse(directorySuite);
+          return {
+            id,
+            email,
+            title,
+            tie:
+              suite.success && directoryId !== null && directoryProof !== null
+                ? { suite: suite.data, id: directoryId, proof: directoryProof }
+                : null,
+          };
+        }
+      );
+  }
+
+  /**
+   * Marks who left (GRA-2249), as core found it at `asOf` for each person
+   * of `looked` (staff-ties.ts `leftAmong`): an entry tied to one of
+   * `left` is marked from now, unless it was already; one tied to anyone
+   * else of `looked` is no longer, unless marked after `asOf`, by a look
+   * this one didn't see. Ties nobody looked at stay as they were.
+   */
+  markLeft(
+    looked: readonly Pick<DirectoryTie, "suite" | "id">[],
+    left: readonly Pick<DirectoryTie, "suite" | "id">[],
+    asOf: string
+  ): void {
+    const lookedAt = new Set(looked.map((tie) => tieKey(tie)));
+    const gone = new Set(left.map((tie) => tieKey(tie)));
+    const now = new Date().toISOString();
+    this.ctx.storage.transactionSync(() => {
+      for (const { person, key } of this.#ties()) {
+        if (gone.has(key)) {
+          this.#db
+            .update(people)
+            .set({ leftAt: now })
+            .where(and(eq(people.id, person), isNull(people.leftAt)))
+            .run();
+        } else if (lookedAt.has(key)) {
+          this.#db
+            .update(people)
+            .set({ leftAt: null })
+            .where(and(eq(people.id, person), lt(people.leftAt, asOf)))
+            .run();
+        }
+      }
+    });
+  }
+
   /**
    * Takes whoever core erases as `account` (person-erasure.ts) off the
    * list's addresses, in one transaction (GRA-2111): their entries, found
@@ -5765,33 +5911,45 @@ export class Onboarding extends DurableObject<Env> {
    * (`erasedAddresses`, under `account`), so no save writes it again
    * until an admin releases it (GRA-2189). One an admin released for this
    * erasure already was released after this attempt began: it writes
-   * nothing by it. How many entries it found.
+   * nothing by it. Entries tied to them in the directory (GRA-2249) are
+   * found by `subjects`, the keyed hashes erasure keeps of who they are
+   * at their sign-ins (erased-people.ts `subjectHashOf`), and erased the
+   * same way; every entry it erases loses its tie. How many entries it
+   * found.
    */
-  async eraseEntries(account: string, hash: string | null): Promise<number> {
+  async eraseEntries(
+    account: string,
+    hash: string | null,
+    subjects: readonly string[] = []
+  ): Promise<number> {
     return await this.#fallenFirst(
-      async () => await this.#eraseEntriesOnce(account, hash)
+      async () => await this.#eraseEntriesOnce(account, hash, subjects)
     );
   }
 
   /** `eraseEntries`, once: made again by `#fallenFirst` while claims fall. */
   async #eraseEntriesOnce(
     account: string,
-    hash: string | null
+    hash: string | null,
+    subjects: readonly string[]
   ): Promise<number> {
     // A transaction can't wait on a hash: they are made first, and made
-    // again when an address came into the store meanwhile, so the erasure
-    // misses nothing written as it hashed.
+    // again when an address or a tie came into the store meanwhile, so
+    // the erasure misses nothing written as it hashed.
     const hashes = await this.#hashesOf(this.#addressesHeld());
+    const tieHashes = await this.#tieHashesOf(this.#ties());
     const hashOf = (address: string | null | undefined): string | undefined =>
       address === null || address === undefined
         ? undefined
         : hashes.get(normalizedEmail(address));
+    const theirSubjects = new Set(subjects);
     const now = new Date().toISOString();
     const done = this.ctx.storage.transactionSync(() => {
       if (
         this.#addressesHeld().some(
           (address) => !hashes.has(normalizedEmail(address))
-        )
+        ) ||
+        this.#ties().some(({ key }) => !tieHashes.has(key))
       ) {
         return null;
       }
@@ -5800,6 +5958,14 @@ export class Onboarding extends DurableObject<Env> {
         .select({ id: people.id, email: people.email })
         .from(people)
         .all();
+      const tiedToThem = new Set(
+        this.#ties().flatMap(({ person, key }) => {
+          const subject = tieHashes.get(key);
+          return subject !== undefined && theirSubjects.has(subject)
+            ? [person]
+            : [];
+        })
+      );
       const [ownedLink] = this.#db
         .select({ sentTo: links.sentTo })
         .from(links)
@@ -5830,7 +5996,7 @@ export class Onboarding extends DurableObject<Env> {
       let found = 0;
       let closed = 0;
       for (const { id, email } of listed) {
-        if (id === owned || theirs(email)) {
+        if (id === owned || theirs(email) || tiedToThem.has(id)) {
           found += 1;
           // Their erasure takes their name and job off the entry too; it
           // stays in its team, so the counts stay right. Only here: an
@@ -5848,7 +6014,7 @@ export class Onboarding extends DurableObject<Env> {
       return { found, closed };
     });
     if (done === null) {
-      return await this.#eraseEntriesOnce(account, hash);
+      return await this.#eraseEntriesOnce(account, hash, subjects);
     }
     if (done.closed > 0) {
       this.#deliverAudit();
@@ -5878,9 +6044,16 @@ export class Onboarding extends DurableObject<Env> {
       .from(links)
       .where(eq(links.person, person))
       .all();
+    // Who they are in the directory goes with their address (GRA-2249).
     this.#db
       .update(people)
-      .set({ email: "" })
+      .set({
+        email: "",
+        directorySuite: null,
+        directoryId: null,
+        directoryProof: null,
+        leftAt: null,
+      })
       .where(eq(people.id, person))
       .run();
     // A link someone else's account opened is theirs (GRA-1790), and so is
@@ -11228,13 +11401,14 @@ export class Onboarding extends DurableObject<Env> {
         .from(people)
         .orderBy(asc(people.position))
         .all()
-        .map(({ id, name, email, team, title, away }) => ({
+        .map(({ id, name, email, team, title, away, leftAt }) => ({
           id,
           name,
           email,
           team,
           title,
           away,
+          ...(leftAt === null ? {} : { left: true as const }),
         })),
     };
   }
