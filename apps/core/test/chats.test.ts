@@ -2266,37 +2266,6 @@ describe("chats", () => {
     );
   });
 
-  it("finish a deletion whose chat's row is gone already, and keep its ID taken", async () => {
-    const ann = await person();
-    const kept = objectOf(ann);
-    const id = crypto.randomUUID();
-    const annAsConnect = await personOf(env, await ann.api.whoami());
-    // A mark with no row, as a release before this one could leave.
-    await runInDurableObject(kept, async (_instance, state) => {
-      state.storage.sql.exec(
-        "INSERT INTO chat_deletes (chat_id, person, actor, audited, next_at) VALUES (?, ?, ?, 1, ?)",
-        id,
-        JSON.stringify(annAsConnect),
-        JSON.stringify({ type: "person", userId: ann.userId }),
-        Date.now()
-      );
-      await state.storage.setAlarm(Date.now() + 60_000);
-    });
-    await finishDeletesNow(kept);
-    const taken = await runInDurableObject(kept, (_instance, state) =>
-      state.storage.sql
-        .exec<{ count: number }>(
-          "SELECT count(*) AS count FROM deleted_chats WHERE id = ?",
-          id
-        )
-        .one()
-    );
-    expect({ left: await deletesOf(kept), taken }).toStrictEqual({
-      left: [],
-      taken: { count: 1 },
-    });
-  });
-
   it("leave nothing of a deletion that finishes after their person's erasure wiped the object", async () => {
     const ann = await person();
     await answering(ann, says("Hi."));

@@ -63,7 +63,6 @@ import {
   offeredToolNames,
   pastAddressesAfter,
   readToolNames,
-  statusOf,
   toolResourcesOf,
 } from "./connections.ts";
 import {
@@ -1701,7 +1700,7 @@ export const listConnections = async (
     provider: row.provider,
     name: http.get(row.id)?.name ?? reachedName({ ...row, connectorName }),
     scope: row.scope,
-    status: statusOf(row),
+    status: row.status,
     ownerUserId: row.ownerUserId,
     connectedBy: row.connectedBy,
     accountName: row.accountName,
@@ -1751,7 +1750,7 @@ export const organizationConnections = async (
         source: row.serverKind,
         provider: row.provider,
         scope: row.scope,
-        status: statusOf({ ...row, status: row.status }),
+        status: row.status,
         composio: isComposio ? (composio.get(row.id) ?? "unread") : null,
         connectedBy: shared ? row.connectedBy : null,
         accountName: shared ? row.accountName : null,

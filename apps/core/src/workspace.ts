@@ -6550,16 +6550,7 @@ export class Workspace extends DurableObject<Env> {
       return;
     }
     const { person, actor: by, audited } = marked;
-    // The chat's row may be gone already (a release before this one
-    // deleted it and left the mark): what lives outside goes all the same,
-    // for the person the mark names, and the mark with it.
-    const personId =
-      this.#db
-        .select({ personId: chats.personId })
-        .from(chats)
-        .where(eq(chats.id, id))
-        .get()?.personId ?? person.userId;
-    await eraseChat(this.env, personId, id);
+    await eraseChat(this.env, person.userId, id);
     const ref = this.#refOf(id);
     const declined = await this.env.CONNECT.declineChatActions({
       person,
@@ -6575,7 +6566,7 @@ export class Workspace extends DurableObject<Env> {
     await revokeChatPermissions(
       this.env,
       { chat: ref },
-      { userId: personId, actor: by },
+      { userId: person.userId, actor: by },
       "chat_deleted"
     );
     // Nor any workflow start its agent asked its person to confirm.

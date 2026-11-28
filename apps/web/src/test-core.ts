@@ -8,7 +8,7 @@ import type { RpcStub } from "capnweb";
 // method the connection comes to call is added here, once, for them all.
 
 /** What the tab's connection calls on core's API itself, never a page. */
-export interface CoreStandIn {
+interface CoreStandIn {
   /** Signs the connection in: what a test fakes a page's reads on. */
   authenticate: () => Promise<unknown>;
   /** Whether the socket still answers (`CoreConnection`'s probe and status). */

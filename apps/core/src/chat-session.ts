@@ -425,10 +425,9 @@ export class ChatSession extends DurableObject<Env> {
 
   /**
    * Tells the chat's agent `text` for its turn under way or its next, once
-   * by `requestId` however often it is sent (`ChatHarness.note`). None from
-   * a Workspace of the release before, which sent no ID: taken as sent.
+   * by `requestId` however often it is sent (`ChatHarness.note`).
    */
-  async note(text: string, requestId?: string): Promise<void> {
+  async note(text: string, requestId: string): Promise<void> {
     await this.#work(async (harness) => {
       await harness.note(text, requestId);
     });

@@ -45,7 +45,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { guardedEvent, recordEvents, recordEventsIf } from "./audit.ts";
+import { recordEvents, recordEventsIf } from "./audit.ts";
 import { composioEntry, composioTools, keyAuthOf } from "./catalog.ts";
 import { keepComposioTools } from "./composio-contracts.ts";
 import { ComposioError, composioKey, composioRequest } from "./composio.ts";
@@ -996,12 +996,7 @@ export const purgeExpiredToolkitFlows = async (env: Env): Promise<void> => {
   await handOverFlows(env, "expires_at <= ?", [now], now);
 };
 
-/**
- * Whether `toolkit` has a shared Composio connection that isn't
- * disconnected and has a session: one without (made before sessions,
- * `statusOf`) is taken over by the next connection of its toolkit
- * (`legacyToReplace`), so it doesn't stand in the way of one.
- */
+/** Whether `toolkit` has a shared Composio connection that isn't disconnected. */
 const hasLiveShared = async (env: Env, toolkit: string): Promise<boolean> => {
   const [live] = await drizzle(env.DB)
     .select({ id: connections.id })
@@ -1011,47 +1006,12 @@ const hasLiveShared = async (env: Env, toolkit: string): Promise<boolean> => {
         eq(connections.provider, toolkit),
         eq(connections.serverKind, "composio"),
         eq(connections.scope, "shared"),
-        ne(connections.status, "disconnected"),
-        isNotNull(connections.composioSessionId)
+        ne(connections.status, "disconnected")
       )
     )
     .limit(1);
   return live !== undefined;
 };
-
-/** Where a connection made before sessions still stands (`legacyToReplace`). */
-const isLegacyOf = (id: string) =>
-  sql`${connections.id} = ${id} AND ${connections.status} <> 'disconnected' AND ${connections.composioSessionId} IS NULL`;
-
-/**
- * The shared connection of `toolkit` made before sessions (`statusOf`)
- * that a new one of the toolkit takes the place of, if any: the oldest,
- * so each connecting again takes over one, as the Connectors page takes a
- * working connection of a toolkit to stand for a stopped one (Composio
- * never says which account a connection is).
- */
-const legacyToReplace = async (
-  db: ReturnType<typeof drizzle>,
-  toolkit: string
-) =>
-  await db
-    .select({
-      id: connections.id,
-      accountId: connections.accountId,
-      authConfigId: connections.composioAuthConfigId,
-    })
-    .from(connections)
-    .where(
-      and(
-        eq(connections.provider, toolkit),
-        eq(connections.serverKind, "composio"),
-        eq(connections.scope, "shared"),
-        ne(connections.status, "disconnected"),
-        isNull(connections.composioSessionId)
-      )
-    )
-    .orderBy(asc(connections.createdAt), asc(connections.id))
-    .get();
 
 /**
  * Composio's statuses of an account whose auth it is still completing: its
@@ -1351,54 +1311,6 @@ const sessionMismatch = (
 };
 
 /**
- * What follows taking over `replaced`, a connection made before sessions,
- * once the new connection is stored (`serveAndStore`), only if this one
- * disconnected it (its cleanup row `cleanupId` is there): the actions
- * held for it, which can no longer run, are dropped, and its account and
- * auth config deleted at Composio, or left recorded for the clock. Never
- * thrown: the new connection stands, whatever becomes of this.
- */
-const afterReplacing = async (
-  env: Env,
-  person: ConnectionPerson,
-  replaced: {
-    id: string;
-    accountId: string | null;
-    authConfigId: string | null;
-  },
-  cleanupId: string
-): Promise<void> => {
-  try {
-    const db = drizzle(env.DB);
-    const ours = await db
-      .select({ id: composioCleanups.id })
-      .from(composioCleanups)
-      .where(eq(composioCleanups.id, cleanupId))
-      .get();
-    if (ours === undefined) {
-      return;
-    }
-    await dropPendingActions(
-      env,
-      eq(pendingActions.connectionId, replaced.id),
-      "connection.disconnected",
-      person
-    );
-    await carryOutCleanup(
-      env,
-      cleanupId,
-      {
-        connectedAccountId: replaced.accountId,
-        authConfigId: replaced.authConfigId,
-      },
-      null
-    );
-  } catch (error) {
-    log.warn("composio.replaced_cleanup_failed", errorFields(error));
-  }
-};
-
-/**
  * Serves the connected account `account`, settled active
  * (`settledAccount`), as a connection of `person`'s: makes its Composio
  * session (`sessionBodyOf`, noted in `made` and in its cleanup row),
@@ -1461,40 +1373,12 @@ const serveAndStore = async (
   const connectionId = crypto.randomUUID();
   const now = new Date();
   const db = drizzle(env.DB);
-  // A connection of the toolkit made before sessions is disconnected as
-  // this one is stored, in the same transaction (before it, so a key
-  // toolkit's one live connection is this one), its account and auth
-  // config deleted at Composio after, as a disconnect deletes them. Its
-  // legacy MCP server stays at Composio: connect's key can't delete it.
-  const replaced = await legacyToReplace(db, account.toolkit);
-  const replacedCleanup = crypto.randomUUID();
   try {
     await recordEvents(env, events(connectionId), [
       // The connection takes over what the cleanup row held.
       db
         .delete(composioCleanups)
         .where(eq(composioCleanups.id, account.flowId)),
-      // Recorded only by the one that disconnects it, should two
-      // connections of the toolkit be stored at once, each with its own.
-      ...(replaced === undefined
-        ? []
-        : [
-            guardedEvent(
-              db,
-              connectionEvent(person, "connection.disconnect", replaced.id, {
-                ...detailOf(account.toolkit),
-                outcome: "ok",
-                tokenHolder: "composio",
-                replacedBy: connectionId,
-              }),
-              { from: connections, where: isLegacyOf(replaced.id) }
-            ),
-            disconnectCleanup(db, replacedCleanup, isLegacyOf(replaced.id)),
-            db
-              .update(connections)
-              .set({ status: "disconnected", updatedAt: now })
-              .where(isLegacyOf(replaced.id)),
-          ]),
       db.insert(connections).values({
         id: connectionId,
         provider: account.toolkit,
@@ -1521,9 +1405,6 @@ const serveAndStore = async (
       throw connectionErrors.create("connection.already_connected");
     }
     throw error;
-  }
-  if (replaced !== undefined) {
-    await afterReplacing(env, person, replaced, replacedCleanup);
   }
   // Its tools as its session lists them, kept for the chat's search from
   // the start; a failure is logged, and a search reads them later.

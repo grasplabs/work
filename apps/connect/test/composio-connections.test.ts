@@ -9,7 +9,6 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { z } from "zod";
 
 import { forgetComposioCatalog } from "../src/catalog.ts";
 import {
@@ -47,7 +46,6 @@ import {
 } from "./composio-connections-harness.ts";
 import type { Start } from "./composio-connections-harness.ts";
 import {
-  addConnection,
   agentFor,
   callAs,
   clientOrigin,
@@ -1015,25 +1013,6 @@ describe("connecting a Composio toolkit", () => {
   });
 });
 
-/**
- * Migration 0044's statements on stored data, as the release that adds
- * sessions runs them once: its columns are there already in tests.
- */
-const migrateStoredData = async (): Promise<void> => {
-  const migrations = z
-    .array(z.object({ name: z.string(), queries: z.array(z.string()) }))
-    .parse(Reflect.get(env, "CONNECT_MIGRATIONS"));
-  const queries =
-    migrations
-      .find(({ name }) => name.startsWith("0044_"))
-      ?.queries.filter((query) => /^UPDATE /mu.test(query)) ?? [];
-  expect(queries).toHaveLength(3);
-  for (const query of queries) {
-    // oxlint-disable-next-line no-await-in-loop -- in order, as a migration runs
-    await env.DB.prepare(query).run();
-  }
-};
-
 /** The clock's reconcile, past the wait after any failures so far. */
 const clockReconciles = async (): Promise<void> => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -1048,148 +1027,6 @@ const clockReconciles = async (): Promise<void> => {
 /** How many tool changes connect sent Composio's sessions so far. */
 const patches = () =>
   composio.state.requests.filter(({ method }) => method === "PATCH").length;
-
-/** A connection as the legacy route stored it: a server, no session. */
-const legacyConnection = async (status: "active" | "disconnected") =>
-  await addConnection({
-    provider: "hubspot",
-    status,
-    server: `https://backend.composio.dev/v3/mcp/${crypto.randomUUID()}?connected_account_id=ca_legacy`,
-    composioServerId: crypto.randomUUID(),
-    composioSessionId: null,
-    accountId: "ca_legacy",
-    composioAuthConfigId: "ac_legacy",
-    tools: JSON.stringify(allowed),
-  });
-
-/** How connection `id` stands: its status, legacy server and update. */
-const standing = async (id: string) =>
-  await env.DB.prepare(
-    "SELECT status, composio_server_id AS serverId, updated_at AS updatedAt FROM connections WHERE id = ?"
-  )
-    .bind(id)
-    .first<{ status: string; serverId: string | null; updatedAt: number }>();
-
-describe("a Composio connection made through Composio's legacy MCP servers", () => {
-  it("asks to be connected again, once, keeps no legacy server, takes no call, and connecting again makes a session in its place, deleting its account and auth config", async () => {
-    const admin = someone("admin");
-    const current = await connectHubSpot(admin);
-    const legacy = await legacyConnection("active");
-    const gone = await legacyConnection("disconnected");
-    await env.DB.prepare(
-      "INSERT INTO composio_cleanups (id, server_id, attempts, retry_at, created_at) VALUES (?, ?, 0, ?, ?)"
-    )
-      .bind(crypto.randomUUID(), "legacy-server", Date.now(), Date.now())
-      .run();
-
-    await migrateStoredData();
-    const once = await standing(legacy);
-    await migrateStoredData();
-    const twice = await standing(legacy);
-    const listed = await exports.default.listConnections(admin);
-    const called = await outcome(
-      callAs(agentFor("user-anna"), call(legacy, "HUBSPOT_LIST_CONTACTS"))
-    );
-    // Connecting again, as the Connectors page offers it: a new connection,
-    // served by a session, in the stopped one's place.
-    const deletesBefore = composio.state.requests.length;
-    const again = await connectHubSpot(admin);
-    await runMaintenance();
-    const legacyNow = await standing(legacy);
-    const deleted = composio.state.requests
-      .slice(deletesBefore)
-      .filter(({ method }) => method === "DELETE")
-      .map(({ path }) => path);
-    const recordedNow = await events();
-    const replacedEvent = recordedNow.find(
-      ({ action, target }) =>
-        action === "connection.disconnect" && target?.id === legacy
-    );
-    const goneNow = await standing(gone);
-    const currentNow = await standing(current);
-    const againStored = await stored(again);
-    const againNow = await standing(again);
-
-    expect({
-      once: { status: once?.status, serverId: once?.serverId },
-      // Its second run finds nothing to change: not even its time.
-      twice: twice?.updatedAt === once?.updatedAt,
-      gone: goneNow?.status,
-      current: currentNow?.status,
-      listed: listed.find(({ id }) => id === legacy)?.status,
-      called,
-      again: {
-        stored: againStored?.sessionId.startsWith("trs_"),
-        status: againNow?.status,
-      },
-      replaced: legacyNow?.status,
-      replacedBy: replacedEvent?.detail.replacedBy,
-      deleted,
-      cleanups: await cleanupsLeft(),
-    }).toStrictEqual({
-      once: { status: "needs_reauth", serverId: null },
-      twice: true,
-      gone: "disconnected",
-      current: "active",
-      listed: "needs_reauth",
-      called: "connect.connection_inactive",
-      again: { stored: true, status: "active" },
-      replaced: "disconnected",
-      replacedBy: again,
-      // Its account and auth config: never its legacy server, which
-      // connect's key can't reach.
-      deleted: ["/connected_accounts/ca_legacy", "/auth_configs/ac_legacy"],
-      cleanups: 0,
-    });
-  });
-
-  it("asks to be connected again and takes no call while it reads active still, as one made while the migration ran", async () => {
-    const admin = someone("admin");
-    // The migration had run before the release before made it.
-    const legacy = await legacyConnection("active");
-    const listed = await exports.default.listConnections(admin);
-    const owners = await exports.default.connectionOwners([legacy]);
-    expect({
-      listed: listed.find(({ id }) => id === legacy)?.status,
-      owner: owners[0]?.status,
-      called: await outcome(
-        callAs(agentFor("user-anna"), call(legacy, "HUBSPOT_LIST_CONTACTS"))
-      ),
-      changed: await outcome(change(admin, legacy, allowed)),
-      requests: composio.state.mcp.requests,
-    }).toStrictEqual({
-      listed: "needs_reauth",
-      owner: "needs_reauth",
-      called: "connect.connection_inactive",
-      changed: "connect.connection_not_found",
-      requests: 0,
-    });
-  });
-
-  it("is disconnected without asking Composio's legacy API anything, deleting its account and auth config", async () => {
-    const admin = someone("admin");
-    const { callback, account } = composio.authorize(await start(admin));
-    const { connectionId } = await back(admin, callback);
-    // As a connection made by the legacy route stands after the migration.
-    await env.DB.prepare(
-      "UPDATE connections SET status = 'needs_reauth', composio_session_id = NULL, server = ? WHERE id = ?"
-    )
-      .bind(
-        "https://backend.composio.dev/v3/mcp/legacy?connected_account_id=ca_1",
-        connectionId
-      )
-      .run();
-    composio.state.holds.sessions.clear();
-
-    await exports.default.disconnect({ person: admin, connectionId });
-
-    expect({
-      held: heldAtComposio(),
-      account: [...composio.state.holds.accounts.values()].includes(account),
-      cleanups: await cleanupsLeft(),
-    }).toStrictEqual({ held: nothingHeld, account: false, cleanups: 0 });
-  });
-});
 
 describe("a Composio connection", () => {
   const workflow = agentFor("user-anna");

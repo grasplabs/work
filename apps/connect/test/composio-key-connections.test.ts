@@ -519,50 +519,6 @@ describe("connecting a Composio toolkit with a key", () => {
     });
   });
 
-  it("connects again after the move to sessions, in place of the connection made before, whose account and auth config are deleted at Composio", async () => {
-    const admin = someone("admin");
-    const legacy = await connectWithKey(admin);
-    const before = await stored(legacy);
-    // As a connection made through the legacy route stands after the
-    // migration: no session, needing to be connected again.
-    await env.DB.prepare(
-      "UPDATE connections SET status = 'needs_reauth', composio_session_id = NULL, server = ? WHERE id = ?"
-    )
-      .bind(
-        "https://backend.composio.dev/v3/mcp/legacy?connected_account_id=ca_1",
-        legacy
-      )
-      .run();
-    composio.state.holds.sessions.clear();
-
-    const again = await connectWithKey(admin);
-    const { results: live } = await env.DB.prepare(
-      "SELECT id, status FROM connections WHERE id IN (?, ?) ORDER BY created_at"
-    )
-      .bind(legacy, again)
-      .all<{ id: string; status: string }>();
-    expect({
-      live: live.map(({ id, status }) => [
-        new Map([
-          [legacy, "legacy"],
-          [again, "again"],
-        ]).get(id) ?? id,
-        status,
-      ]),
-      oldAccount: composio.state.holds.accounts.has(before?.accountId ?? ""),
-      held: heldAtComposio(),
-      cleanups: await cleanupsLeft(),
-    }).toStrictEqual({
-      live: [
-        ["legacy", "disconnected"],
-        ["again", "active"],
-      ],
-      oldAccount: false,
-      held: { authConfigs: 1, accounts: 1, sessions: 1 },
-      cleanups: 0,
-    });
-  });
-
   it("is deleted at Composio, key and all, when disconnected", async () => {
     const admin = someone("admin");
     const connectionId = await connectWithKey(admin);

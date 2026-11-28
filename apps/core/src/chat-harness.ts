@@ -2212,7 +2212,7 @@ export class ChatHarness {
    * Taken once by `requestId`, however often it is sent, as a call that
    * broke on its way back is sent again (`callObject`).
    */
-  async note(text: string, requestId?: string): Promise<void> {
+  async note(text: string, requestId: string): Promise<void> {
     while (this.#rebasing !== undefined) {
       try {
         // oxlint-disable-next-line no-await-in-loop -- until no rebase runs
@@ -2224,10 +2224,7 @@ export class ChatHarness {
     await this.#conversation.submit(
       {
         type: "write",
-        requestId:
-          requestId === undefined
-            ? undefined
-            : `${noteRequestPrefix}${requestId}`,
+        requestId: `${noteRequestPrefix}${requestId}`,
         entry: {
           kind: noteKind,
           model: [{ role: "user", content: text, timestamp: Date.now() }],
