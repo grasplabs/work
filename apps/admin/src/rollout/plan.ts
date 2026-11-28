@@ -40,13 +40,14 @@ import type { ChannelReleases, ClientFacts } from "./desired.ts";
 export const rolloutLimits = {
   /**
    * Runs out at once across the fleet. About 30 to 35 requests each over
-   * about 2 minutes, against Cloudflare's 1,200 per 5 minutes: 8 stay
-   * under it with nothing else to go by. Raise it to 16 only once the
-   * organization runs write the API's `Ratelimit` count to `api_budget`,
-   * so the budget binds before the slots do; until then no row exists and
-   * the budget reads as unknown (`budgetRoom`).
+   * about 2 minutes, against Cloudflare's 1,200 per 5 minutes: 16 would
+   * pass it, so the budget binds before the slots do. Each organization's
+   * run writes the API's `Ratelimit` count to `api_budget` as each step
+   * ends (src/rollout/api-budget.ts); until the first has, the budget
+   * reads as unknown (`budgetRoom`), and slow start keeps a rollout's
+   * first runs few.
    */
-  maxInFlight: 8,
+  maxInFlight: 16,
   /**
    * Platform faults in a row on one organization after which its rollout
    * sets it aside, alerted, until staff resume or retry it.

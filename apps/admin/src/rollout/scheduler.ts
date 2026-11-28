@@ -6,7 +6,9 @@
  * (src/server.ts), after an import, and after each staff change
  * (src/rollout/functions.ts). `runRolloutPass` is also the hook an
  * organization's run calls as it ends, to refill the slot it frees at
- * once; until one does, the cron refills it within a minute.
+ * once (src/rollout/org-rollout.ts). The cron is then a safety net: each
+ * minute it settles runs that ended without saying so, and on an idle
+ * fleet costs one read and nothing else (`onlyWhenBusy`).
  *
  * Each pass, while it holds the `reconciler` lease (src/db/lease.ts):
  * 1. self-heals each channel's rollout row (`healRollouts`): one the
@@ -70,9 +72,9 @@ import { deployerToken } from "./api-budget.ts";
 import { channelIds } from "./channel-ids.ts";
 import type { Channel } from "./channel-ids.ts";
 import { recordEnd } from "./deploy.ts";
-import type { DeployParams } from "./deploy.ts";
 import { isSecretsBehind } from "./desired.ts";
 import type { ChannelReleases, SharedByWorker } from "./desired.ts";
+import type { OrgRolloutParams } from "./org-rollout.ts";
 import {
   isPlatformFault,
   liveRolloutStatuses,
@@ -214,9 +216,9 @@ export const eachPage = async (
   }
 };
 
-/** The workflow the pass starts an organization's run under. */
+/** The workflow the pass starts an organization's run under (src/rollout/org-rollout.ts). */
 const organizationRuns = (env: Env) =>
-  adminWorkflow<DeployParams>(env, adminWorkflows.deploy);
+  adminWorkflow<OrgRolloutParams>(env, adminWorkflows.orgRollout);
 
 /**
  * The workflows an organization's deploy may be a run of: a rollout, a
@@ -331,7 +333,7 @@ const claim = async (
   { releaseId, rolloutId }: Admission
 ): Promise<boolean> => {
   const now = new Date();
-  const runner = { runId, kind: "deploy" as const, claimedAt: now };
+  const runner = { runId, kind: "rollout" as const, claimedAt: now };
   const fresh = { attempt: 0, attemptKey: null, step: 0 };
   const takeRunner =
     replacing === null

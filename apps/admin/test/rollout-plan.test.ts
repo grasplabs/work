@@ -246,7 +246,7 @@ describe("how many start at once", () => {
     const { passes } = simulate(factsOf(fleet(40)));
 
     expect(passes.map((admitted) => admitted.length)).toStrictEqual([
-      1, 2, 4, 8, 8, 8, 8, 1,
+      1, 2, 4, 8, 16, 9,
     ]);
   });
 
@@ -268,7 +268,11 @@ describe("how many start at once", () => {
       free: free.admit.length,
       busy: busy.admit.length,
       full: full.admit.length,
-    }).toStrictEqual({ free: rolloutLimits.maxInFlight, busy: 3, full: 0 });
+    }).toStrictEqual({
+      free: rolloutLimits.maxInFlight,
+      busy: rolloutLimits.maxInFlight - 5,
+      full: 0,
+    });
   });
 
   it("takes rollouts in turn, Edge, Beta, then Stable, so none starves another", () => {
@@ -288,15 +292,14 @@ describe("how many start at once", () => {
       })
     );
 
-    expect(plan.admit.map(({ rolloutId }) => rolloutId)).toStrictEqual([
-      ...Array.from({ length: 2 }, () => [
-        "r-edge",
-        "r-beta",
-        "r-stable",
-      ]).flat(),
-      "r-edge",
-      "r-beta",
-    ]);
+    // One each in turn until the fleet's slots are full.
+    const turns = ["r-edge", "r-beta", "r-stable"];
+    expect(plan.admit.map(({ rolloutId }) => rolloutId)).toStrictEqual(
+      Array.from(
+        { length: rolloutLimits.maxInFlight },
+        (_, index) => turns[index % turns.length]
+      )
+    );
   });
 
   it("gives one slot freed to the rollout with fewest out, not always Edge", () => {
