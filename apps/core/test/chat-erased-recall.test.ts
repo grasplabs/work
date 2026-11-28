@@ -18,9 +18,20 @@ import {
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
-import { inJurisdiction, workspace } from "../src/durable-objects.ts";
-import { codeStep, personalChatsOf, says, setObjectEnv } from "./agent-chat.ts";
+import {
+  chatSession,
+  inJurisdiction,
+  workspace,
+} from "../src/durable-objects.ts";
+import {
+  codeStep,
+  model,
+  personalChatsOf,
+  says,
+  setObjectEnv,
+} from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
+import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { finishedByTheClock } from "./brain-next-own-store.ts";
 import {
@@ -29,10 +40,15 @@ import {
   restoreStore,
 } from "./brain-next-store-copy.ts";
 import { mockIdp } from "./idp.ts";
+import { mailConnection } from "./mail-connection.ts";
+import { mailControlUrl } from "./mail-server.ts";
+import type { ToolkitServer } from "./mail-server.ts";
 import { answeringProvider, fakeProvider } from "./model-provider.ts";
 import type { FakeProvider, ProviderReply } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
+import { liveNotes, noteTitles, ownSource } from "./notes-app.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
+import { testBinding } from "./test-env.ts";
 
 // What a chat keeps showing of what it read from the Brain (GRA-1807),
 // through a person's own chats as they ask and open them: the Workspace,
@@ -156,7 +172,7 @@ const resultsOf = (messages: readonly ChatMessage[]): string[] =>
  * text, its records of what it read, anything.
  */
 const objectHolds = async (
-  stub: WorkspaceStub,
+  stub: WorkspaceStub | ReturnType<typeof chatSession>,
   text: string
 ): Promise<boolean> =>
   await runInDurableObject(stub, (_instance, state) => {
@@ -172,6 +188,9 @@ const objectHolds = async (
     );
     return JSON.stringify([rows, [...state.storage.kv.list()]]).includes(text);
   });
+
+const isFetcher = (value: unknown): value is Fetcher =>
+  typeof value === "object" && value !== null && "fetch" in value;
 
 /** An object's call refused: the Brain away. */
 const refused = async (): Promise<never> => {
@@ -706,6 +725,236 @@ describe("what a chat shows of what it read from the Brain", () => {
         narrowedErasedAfter: false,
         awayAfter: true,
         backAfter: false,
+      });
+    }
+  );
+
+  it(
+    "withdraws a write to an App held for its person once a source its request quotes is erased: never confirmed, carried out, listed or handed over with it, kept nowhere in the chat's object, and its agent told to ask afresh",
+    slow,
+    async () => {
+      const depot = word();
+      const quoted = word();
+      const marker = word();
+      const builder = await signedInApi(idp, "builder");
+      const { app, release } = await liveNotes(builder);
+      const asked = { question: quoted, budget: { tokens: 800 } };
+      const reference = {
+        name: "notes.create",
+        kind: release.app.functions["notes.create"]?.kind,
+      };
+      // The code builds the note from what it recalled: the request quotes
+      // the source, the code doesn't.
+      const chats = await personalChatsOf(
+        builder.userId,
+        codeStep(
+          `export default async (self, env) => { const pack = await env.brain.recall(${JSON.stringify(asked)}); const title = pack.items.map(({ text }) => text).join(" ").slice(0, 200); const answer = await env.apps.call(${JSON.stringify(app)}, new Blob([JSON.stringify({ reference: ${JSON.stringify(reference)}, args: { title } })]).stream()); return "held" in answer ? "held" : "not held"; };`
+        ),
+        says("It waits for you."),
+        says("Ok.")
+      );
+      await requestGranted(idp, builder, {
+        subject: chats.agent,
+        object: { type: "app", appId: app },
+        actions: ["read", "write"],
+        binding: "NOTES",
+      });
+      const { chat, ask } = await chats.newChat();
+      // Their own source, which the recall before the question finds: what
+      // the chat writes for others from then on waits for them.
+      await ownSource(builder.userId, `Depot ${depot} opens at seven.`);
+      const source = await added(`${quoted} ${marker}`, { kind: "everyone" });
+      await ask(`When does depot ${depot} open? Note it.`);
+      const [held] = await builder.api.chats.heldCalls(chat.id);
+      const ref = {
+        workspaceId: personalWorkspaceId(builder.userId),
+        chatId: chatIdSchema.parse(chat.id),
+      };
+      const confirm = async () =>
+        await outcome(
+          builder.api.chats.confirmHeldCall(
+            chat.id,
+            held?.id ?? "",
+            held?.requestHash ?? ""
+          )
+        );
+      await eraseSource(env, {
+        source,
+        readers: { kind: "everyone" },
+        reason: "deleted",
+      });
+      // The Brain away: nothing confirmed or listed unchecked.
+      const restore = await setObjectEnv(chats.stub, {
+        BRAIN_STORE: refusingErasedOf(env.BRAIN_STORE),
+      });
+      let away: string[];
+      try {
+        away = [
+          await confirm(),
+          await outcome(builder.api.chats.heldCalls(chat.id)),
+        ];
+      } finally {
+        await restore();
+      }
+      // Confirmed as it was shown, before anything else read the chat.
+      const confirmed = await confirm();
+      const listed = await builder.api.chats.heldCalls(chat.id);
+      const exported = await chats.stub.exportHeldAppCalls(ref);
+      const events = await allEvents();
+      const ofChat = (action: string) =>
+        events.filter(
+          (event) => event.action === action && event.detail.chat === chat.id
+        ).length;
+      // Told in the chat's own object, which the next turn reads.
+      await vi.waitFor(
+        async () => {
+          await expect(
+            objectHolds(chatSession(env, ref), "was withdrawn")
+          ).resolves.toBeTruthy();
+        },
+        { timeout: 10_000 }
+      );
+      const sentBefore = chats.provider.requests.length;
+      await ask("Thanks.");
+      const sentNext = JSON.stringify(
+        chats.provider.requests.slice(sentBefore).map(({ body }) => body)
+      );
+
+      expect({
+        before: held?.request.includes(marker),
+        away,
+        confirmed,
+        listed,
+        exported: exported?.map(({ status, request }) => ({
+          status,
+          request,
+        })),
+        written: await noteTitles(builder.userId, app, release),
+        events: {
+          withdrawn: ofChat("chat.app_call.withdrawn"),
+          confirmed: ofChat("chat.app_call.confirmed"),
+        },
+        toldNext: sentNext.includes(`held ID ${held?.id}), was withdrawn`),
+        sentAgain: sentNext.includes(marker),
+        kept: await objectHolds(chats.stub, marker),
+      }).toStrictEqual({
+        before: true,
+        away: ["agent.erasure_unchecked", "agent.erasure_unchecked"],
+        confirmed: "agent.held_call_not_found",
+        listed: [],
+        exported: [{ status: "withdrawn", request: null }],
+        written: [],
+        events: { withdrawn: 1, confirmed: 0 },
+        toldNext: true,
+        sentAgain: false,
+        kept: false,
+      });
+    }
+  );
+
+  it(
+    "clears what a chat app's chat read that its writes are traced to once a source it read is erased: no longer handed over, kept or tracing a write",
+    slow,
+    async () => {
+      const depot = word();
+      // Digits, so a write naming it must be traced (stephen-rules.ts).
+      const marker = `zq${crypto.randomUUID().replaceAll(/\D/gu, "").slice(0, 10)}`;
+      const person = await signedInApi(idp, "user");
+      const admin = await signedInApi(idp, "admin");
+      // A mail the chat reads that quotes the source, as a mail the agent
+      // sent from it earlier does.
+      const read = { messages: [{ id: marker, subject: "Gate code" }] };
+      const mail = await mailConnection(
+        [],
+        [{ name: "MAIL_READ", read: true }],
+        { audience: "everyone" }
+      );
+      const providers = testBinding("CONNECT_PROVIDERS");
+      if (!isFetcher(providers)) {
+        throw new TypeError(
+          "Expected the providers Worker as CONNECT_PROVIDERS"
+        );
+      }
+      await providers.fetch(
+        mailControlUrl(mail.id.replace("connection-", "")),
+        {
+          method: "POST",
+          body: JSON.stringify({
+            list: [
+              {
+                name: "MAIL_READ",
+                inputSchema: {
+                  type: "object",
+                  properties: { query: { type: "string" } },
+                },
+              },
+            ],
+            answers: {
+              MAIL_READ: {
+                content: [{ type: "text", text: JSON.stringify(read) }],
+                structuredContent: read,
+              },
+            },
+          } satisfies ToolkitServer),
+        }
+      );
+      const agentId = crypto.randomUUID();
+      await requestGranted(idp, admin, {
+        subject: { type: "agent", agentId },
+        object: { type: "connection", connectionId: mail.id },
+        actions: ["MAIL_READ"],
+        binding: "MAIL",
+      });
+      const source = await added(`${depot} ${marker}`, { kind: "everyone" });
+      const asked = { question: depot, budget: { tokens: 800 } };
+      await fakeProvider(
+        codeStep(
+          `export default async (self, env) => { await env.brain.recall(${JSON.stringify(asked)}); await env.connections.call("MAIL", "MAIL_READ", { query: "gate" }); return "read"; };`
+        ),
+        says("Noted.")
+      );
+      const stub = workspace(env, personalWorkspaceId(person.userId));
+      const chat = await stub.createChat(
+        "Questions",
+        person.userId,
+        agentId,
+        undefined,
+        "teams"
+      );
+      await stub.ask(chat.id, { text: "Please look that up.", model });
+      const ref = {
+        workspaceId: personalWorkspaceId(person.userId),
+        chatId: chatIdSchema.parse(chat.id),
+      };
+      const traced = async () =>
+        await stub.heldWriteRefusal(chat.id, { messageId: marker }, [
+          "messageId",
+        ]);
+      const before = {
+        handedOver: JSON.stringify(await stub.exportTurnState(ref)).includes(
+          marker
+        ),
+        refusal: await traced(),
+      };
+      await eraseSource(env, {
+        source,
+        readers: { kind: "everyone" },
+        reason: "deleted",
+      });
+      const exported = await stub.exportTurnState(ref);
+
+      expect({
+        before,
+        handedOver: JSON.stringify(exported).includes(marker),
+        trace: exported?.trace,
+        refusal: await traced(),
+        kept: await objectHolds(stub, marker),
+      }).toStrictEqual({
+        before: { handedOver: true, refusal: undefined },
+        handedOver: false,
+        trace: [],
+        refusal: "agent.write_untraced",
+        kept: false,
       });
     }
   );

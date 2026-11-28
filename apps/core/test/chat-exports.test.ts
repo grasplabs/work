@@ -1,12 +1,14 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { workspace } from "../src/durable-objects.ts";
 import { personalWorkspaceId } from "../src/personal-workspace.ts";
 import { chatFilePartBytes } from "../src/workspace.ts";
-import { chatOf, says } from "./agent-chat.ts";
+import { chatOf, says, setObjectEnv } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { outcome, signedInWithRole } from "./sign-in.ts";
 
@@ -24,6 +26,25 @@ const chatFor = async () => {
     chatId: chatIdSchema.parse(made.chat.id),
   };
   return { ...made, userId, ref };
+};
+
+/** The chats' own objects, none of which can be reached. */
+const away = new Proxy(
+  {},
+  {
+    get: () => () => {
+      throw new Error("The chats' objects are away");
+    },
+  }
+);
+
+/** Restarts `stub`'s object, as an eviction or a deploy does. */
+const restart = async (stub: ReturnType<typeof workspace>): Promise<void> => {
+  await runInDurableObject(stub, (_instance, state) => {
+    state.abort("Restarted by the test");
+  }).catch(() => {
+    // Aborting fails the call that aborted: that is the restart.
+  });
 };
 
 /** The text of the first of `files`, as its one part hands it over. */
@@ -194,14 +215,12 @@ describe("a chat's export from its Workspace", () => {
       // Asked as the erasure begins: it has marked itself, and wiped nothing.
       const erased = instance.erasePerson(chat.userId);
       const messages = instance.exportMessages(chat.ref, 0, 10);
-      const rest = [
-        instance.exportFiles(chat.ref),
-        instance.exportFilePart(chat.ref, crypto.randomUUID(), 0),
-        instance.exportHeldAppCalls(chat.ref),
-        instance.exportTurnState(chat.ref),
-      ];
+      const files = instance.exportFiles(chat.ref);
+      const part = instance.exportFilePart(chat.ref, crypto.randomUUID(), 0);
+      const held = instance.exportHeldAppCalls(chat.ref);
+      const ran = instance.exportTurnState(chat.ref);
       await erased;
-      return [await messages, ...rest];
+      return [await messages, files, part, await held, await ran];
     });
 
     expect(during).toStrictEqual([
@@ -211,6 +230,82 @@ describe("a chat's export from its Workspace", () => {
       undefined,
       undefined,
     ]);
+  });
+
+  it("hands over, tells and hands the Brain nothing of a chat once its person's erasure began, also after a restart before the wipe, and the erasure asked again finishes", async () => {
+    const chat = await chatFor();
+    await chat.ask("A question.");
+    const answerId = await runInDurableObject(
+      chat.stub,
+      (_instance, state) =>
+        state.storage.sql
+          .exec<{ id: number }>(
+            "SELECT id FROM chat_messages WHERE json_extract(message, '$.role') = 'assistant' ORDER BY id DESC LIMIT 1"
+          )
+          .one().id
+    );
+    const reads = async (stub: typeof chat.stub) => {
+      const { kind: forBrain } = await stub.turnForBrain(
+        chat.chat.id,
+        chat.userId,
+        answerId
+      );
+      return {
+        exports: [
+          await stub.exportMessages(chat.ref, 0, 10),
+          await stub.exportFiles(chat.ref),
+          await stub.exportFilePart(chat.ref, crypto.randomUUID(), 0),
+          await stub.exportHeldAppCalls(chat.ref),
+          await stub.exportTurnState(chat.ref),
+        ].map((each) => each !== undefined),
+        told: await outcome(
+          stub.heldDecided(
+            chat.chat.id,
+            chat.userId,
+            { id: crypto.randomUUID(), action: "mail.send" },
+            "declined"
+          )
+        ),
+        forBrain,
+      };
+    };
+    const before = await reads(chat.stub);
+    // The erasure marks itself, then fails before it wiped anything: the
+    // chats' own objects can't be reached.
+    const restore = await setObjectEnv(chat.stub, { CHAT_SESSIONS: away });
+    let failed: string;
+    try {
+      failed = await outcome(chat.stub.erasePerson(chat.userId));
+    } finally {
+      await restore();
+    }
+    await restart(chat.stub);
+    // A stub of its own: one an object was restarted through is broken.
+    const woken = workspace(env, chat.ref.workspaceId);
+    const after = await reads(woken);
+    const erased = await woken.erasePerson(chat.userId);
+    const left = await runInDurableObject(woken, (_instance, state) => ({
+      chats: state.storage.sql
+        .exec<{ count: number }>("SELECT count(*) AS count FROM chats")
+        .one().count,
+      kept: [...state.storage.kv.list()].length,
+    }));
+
+    expect({ before, failed, after, erased, left }).toStrictEqual({
+      before: {
+        exports: [true, true, false, true, true],
+        told: "ok",
+        forBrain: "question",
+      },
+      failed: "Error: The chats' objects are away",
+      after: {
+        exports: [false, false, false, false, false],
+        told: "agent.chat_not_found",
+        forBrain: "deleting",
+      },
+      erased: { chats: 1 },
+      left: { chats: 0, kept: 0 },
+    });
   });
 
   it("refuses a page or part asked for past its bounds: a cursor, size or part that isn't a whole number in range", async () => {

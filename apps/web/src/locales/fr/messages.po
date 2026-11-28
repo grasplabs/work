@@ -20752,6 +20752,10 @@ msgid "Withdraw invitation"
 msgstr "Retirer l’invitation"
 
 #: src/activity/audit-words.ts
+msgid "Withdrew a held write to an App, as something its chat read was erased"
+msgstr "A retiré une modification retenue dans une application, car quelque chose que sa discussion avait lu a été effacé"
+
+#: src/activity/audit-words.ts
 msgid "Withdrew an invitation"
 msgstr "A retiré une invitation"
 

@@ -70,7 +70,7 @@ export interface ExportedHeldCall {
   request: string | null;
   requestHash: string;
   heldAt: number;
-  status: "waiting" | "confirmed" | "declined" | "lapsed";
+  status: "waiting" | "confirmed" | "declined" | "lapsed" | "withdrawn";
 }
 
 /**
