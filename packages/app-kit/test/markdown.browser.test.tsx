@@ -330,6 +330,120 @@ describe("the kit's Markdown, in an App page's frame", () => {
     });
   });
 
+  // Untrusted text that would freeze the page for many seconds, or
+  // overflow marked's stack and take the page to its error screen
+  // (measured before the kit's limits: 2,000 nested quotes threw; 100 KB
+  // of `*a` took 45 s, of `*_` 99 s; 20,000 unclosed links 75 s).
+  it.each([
+    ["nested quotes", `${"> ".repeat(10_000)}deep`],
+    ["nested lists", `${"- ".repeat(10_000)}deep`],
+    [
+      "lists nested by indentation",
+      Array.from(
+        { length: 2000 },
+        (_, level) => `${"  ".repeat(level)}- x`
+      ).join("\n"),
+    ],
+    ["nested emphasis", `${"*a ".repeat(1500)}b${" c*".repeat(1500)}`],
+    ["emphasis", "*a".repeat(50_000)],
+    ["mixed emphasis", "*_".repeat(50_000)],
+    ["unclosed links", "[x](https://a".repeat(20_000)],
+    [
+      "a megabyte",
+      "Some **bold** text with [a link](https://x.example).\n\n".repeat(20_000),
+    ],
+  ])("shows %s as plain text, at once and without an error", (_name, text) => {
+    const started = performance.now();
+    show(text, true);
+    const elapsed = performance.now() - started;
+    expect({
+      fast: elapsed < 1000,
+      drawn: markdown().querySelectorAll("[data-streamdown]").length,
+      text: markdown().textContent === text,
+      errors,
+    }).toStrictEqual({ fast: true, drawn: 0, text: true, errors: [] });
+  });
+
+  it("still draws an ordinary long answer, tens of kilobytes of prose, tables and code, as Markdown", () => {
+    const longAnswer = Array.from(
+      { length: 250 },
+      (_, index) => `## Part ${index}
+
+The *invoice_total* for **supplier_${index}** is due; see [the policy](https://example.com/p/${index}).
+
+| Supplier | Days |
+| --- | ---: |
+| Kantoorhuis_${index} | ${index} |
+
+\`\`\`ts
+const overdue_items = invoices.filter((inv) => inv.due_date < today);
+\`\`\`
+
+`
+    ).join("");
+    show(longAnswer);
+    expect({
+      long: longAnswer.length > 50_000,
+      tables: markdown().querySelectorAll("table").length,
+      code: markdown().querySelectorAll("[data-slot=code-block]").length,
+      errors,
+    }).toStrictEqual({ long: true, tables: 250, code: 250, errors: [] });
+  });
+
+  it("checks every streamed step: Markdown until the text passes a limit, plain text after", () => {
+    const seen: string[] = [];
+    // A quote nesting one level deeper on each step, past 20 levels.
+    for (let levels = 18; levels <= 22; levels += 1) {
+      show(`${"> ".repeat(levels)}deep`, true);
+      seen.push(
+        `${levels}: ${markdown().querySelectorAll("blockquote").length > 0 ? "markdown" : "text"}`
+      );
+    }
+    // A paragraph of emphasis growing past 500 delimiters, a step at a time.
+    const started = performance.now();
+    for (let end = 100; end <= 1200; end += 100) {
+      show("*a".repeat(end / 2), true);
+    }
+    expect({
+      seen,
+      fast: performance.now() - started < 1000,
+      last: markdown().querySelectorAll("[data-streamdown]").length,
+      errors,
+    }).toStrictEqual({
+      seen: [
+        "18: markdown",
+        "19: markdown",
+        "20: markdown",
+        "21: text",
+        "22: text",
+      ],
+      fast: true,
+      last: 0,
+      errors: [],
+    });
+  });
+
+  it("shows the text as plain text when drawing it throws, instead of the page's error screen", () => {
+    show("");
+    flushSync(() => {
+      mounted?.render(
+        <Markdown
+          components={{
+            h1: () => {
+              throw new Error("A component failed.");
+            },
+          }}
+        >
+          {"# Title\n\nBody."}
+        </Markdown>
+      );
+    });
+    expect({
+      text: markdown().textContent,
+      drawn: markdown().querySelectorAll("[data-streamdown]").length,
+    }).toStrictEqual({ text: "# Title\n\nBody.", drawn: 0 });
+  });
+
   it("shows raw HTML in the text as text, never as markup", () => {
     show(`Hello <b>there</b>.
 

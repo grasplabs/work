@@ -1080,6 +1080,9 @@ importers:
       '@grasp-os/runtime':
         specifier: workspace:*
         version: link:../runtime
+      '@grasp-os/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@shadcn/react':
         specifier: 'catalog:'
         version: 0.3.1(@types/react@19.3.0)(react@19.3.0)

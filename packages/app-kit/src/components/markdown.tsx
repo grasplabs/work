@@ -10,8 +10,10 @@ import {
   CodeBlockTitle,
 } from "@grasp-os/app-kit/components/code-block";
 import { useHighlightedCode } from "@grasp-os/app-kit/hooks/use-highlighted-code";
+import { withinMarkdownLimits } from "@grasp-os/shared/markdown-limits";
 import { cn } from "cn";
-import type { ComponentProps } from "react";
+import { Component } from "react";
+import type { ComponentProps, ReactElement } from "react";
 import {
   defaultRehypePlugins,
   Streamdown,
@@ -23,7 +25,7 @@ import type { ExtraProps, StreamdownProps } from "streamdown";
 // github.com/shadcn-ui/ui, MIT), as its chat examples render a model's
 // answer: Streamdown, which completes half-written Markdown while it
 // streams, with fenced code drawn by the kit's code block. Upstream's code
-// but for two changes, listed with their reason and test in
+// but for these changes, listed with their reason and test in
 // packages/app-kit/local-changes.json:
 // - Raw HTML in the text shows as the text it is: Streamdown's own rehype
 //   plugins less rehype-raw, which would parse it into elements.
@@ -33,7 +35,11 @@ import type { ExtraProps, StreamdownProps } from "streamdown";
 //   popups or navigation, it opens a URL only through a links permission
 //   of its App), so Streamdown's link, a button whose dialog opens or
 //   copies the address, would do nothing.
-// A page can't switch either off: the props that would replace or widen
+// - Text past @grasp-os/shared's `markdownLimits` (very large or
+//   pathological: deep nesting, hundreds of delimiters in a paragraph)
+//   shows as plain text, as does text Streamdown throws on: untrusted
+//   text must not freeze or crash the page for whoever opens it.
+// A page can't switch the first two off: the props that would replace or widen
 // the pipeline are the kit's (`PIPELINE`), and its link wins over a
 // page's `components`.
 // Upstream's `cn-markdown` class is left out: no style of the registry
@@ -171,22 +177,95 @@ const PIPELINE: { [Prop in Pipeline]: StreamdownProps[Prop] } = {
   linkSafety: undefined,
 };
 
+/** The text as it is, wrapped where it ends a line: no Markdown drawn. */
+function MarkdownText({
+  className,
+  children,
+}: {
+  className?: string;
+  children: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "w-full min-w-0 overflow-hidden wrap-anywhere whitespace-pre-wrap",
+        className
+      )}
+      data-slot="markdown"
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * The text as plain text when Streamdown throws on it, instead of the
+ * page's error screen; it tries again once the text changes.
+ */
+interface BoundaryProps {
+  className?: string;
+  text: string;
+  children: ReactElement;
+}
+
+class MarkdownBoundary extends Component<
+  BoundaryProps,
+  { failed: boolean; text: string }
+> {
+  constructor(props: BoundaryProps) {
+    super(props);
+    this.state = { failed: false, text: props.text };
+  }
+
+  static getDerivedStateFromProps(
+    props: BoundaryProps,
+    state: { text: string }
+  ) {
+    return props.text === state.text
+      ? null
+      : { failed: false, text: props.text };
+  }
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  override render(): ReactElement {
+    const { className, text, children } = this.props;
+    return this.state.failed ? (
+      <MarkdownText className={className}>{text}</MarkdownText>
+    ) : (
+      children
+    );
+  }
+}
+
 function Markdown({
   className,
   components = DEFAULT_COMPONENTS,
   controls = false,
+  children = "",
   ...props
 }: Omit<StreamdownProps, Pipeline>) {
+  // Text a renderer can't take in about a second, or would overflow the
+  // stack on, is shown as it is (@grasp-os/shared/markdown-limits).
+  if (!withinMarkdownLimits(children)) {
+    return <MarkdownText className={className}>{children}</MarkdownText>;
+  }
   return (
-    <Streamdown
-      className={cn("w-full min-w-0 overflow-hidden", className)}
-      controls={controls}
-      data-slot="markdown"
-      {...props}
-      {...PIPELINE}
-      // A page's components restyle the elements; the kit's link wins.
-      components={{ ...components, a: MarkdownLink }}
-    />
+    <MarkdownBoundary className={className} text={children}>
+      <Streamdown
+        className={cn("w-full min-w-0 overflow-hidden", className)}
+        controls={controls}
+        data-slot="markdown"
+        {...props}
+        {...PIPELINE}
+        // A page's components restyle the elements; the kit's link wins.
+        components={{ ...components, a: MarkdownLink }}
+      >
+        {children}
+      </Streamdown>
+    </MarkdownBoundary>
   );
 }
 

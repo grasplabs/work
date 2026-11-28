@@ -126,6 +126,7 @@
     "./log": "./src/log.ts",
     "./lowered-limit": "./src/lowered-limit.ts",
     "./mail-ingress": "./src/mail-ingress.ts",
+    "./markdown-limits": "./src/markdown-limits.ts",
     "./members": "./src/members.ts",
     "./models": "./src/models.ts",
     "./notifications": "./src/notifications.ts",
