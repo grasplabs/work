@@ -30,12 +30,8 @@ import {
 // without awaiting it (drafts.ts, `draftRevised`), and sending to a socket
 // never waits.
 //
-// Expand, then contract: core's Worker of the release before this one
-// follows the old way (`watch`, a callback kept in memory) for as long as
-// a deploy runs both, so that way stays for this release, and core's
-// Worker of this one falls back to it on an object still on the code
-// before (no socket). The release after removes both. Nobody fills it for the others: past `watchersPerPerson`
-// of one person's pages, their oldest stops following.
+// Nobody fills it for the others: past `watchersPerPerson` of one person's
+// pages, their oldest stops following.
 
 /**
  * Most pages of one person's that follow one draft at once: a page past
@@ -57,23 +53,7 @@ type DraftTold = z.infer<typeof draftToldSchema>;
 /** Where the latest telling is kept. */
 const toldKey = "told";
 
-/** How long a page followed the old way has to take a push before it is dropped. */
-const pushWaitMs = 5000;
-
-/** Where a page followed the old way hears of its writes: its revision. */
-type DraftListener = Rpc.Stub<(revision: number) => Promise<void>>;
-
 export class DraftWatch extends DurableObject<Env> {
-  /**
-   * Pages followed the old way, a callback each in memory (`watch`):
-   * only while core's Worker of the release before this one may still
-   * call it during a deploy. Removed in the release after.
-   */
-  readonly #listeners = new Map<
-    string,
-    { personId: string; listener: DraftListener }
-  >();
-
   /** The latest telling, if there was one. */
   #told(): DraftTold | undefined {
     const told = draftToldSchema.safeParse(this.ctx.storage.kv.get(toldKey));
@@ -91,57 +71,6 @@ export class DraftWatch extends DurableObject<Env> {
     for (const { socket } of watchersOf(this.ctx, followerSchema)) {
       sendFrame(socket, told);
     }
-    for (const [id, { listener }] of this.#listeners) {
-      void this.#tellOldWay(id, listener, revision);
-    }
-  }
-
-  /** Tells a page followed the old way, dropping it if it doesn't answer in time. */
-  async #tellOldWay(
-    id: string,
-    listener: DraftListener,
-    revision: number
-  ): Promise<void> {
-    const late = Promise.withResolvers<"late">();
-    const timer = setTimeout(() => {
-      late.resolve("late");
-    }, pushWaitMs);
-    try {
-      if ((await Promise.race([listener(revision), late.promise])) === "late") {
-        this.unwatch(id);
-      }
-    } catch {
-      this.unwatch(id);
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  /**
-   * Follows the draft for one page of `personId`'s the old way, its
-   * callback kept in memory: for core's Worker of the release before this
-   * one, during a deploy. Past `watchersPerPerson` of theirs, their oldest
-   * stops following. Removed in the release after.
-   */
-  watch(personId: string, listener: DraftListener): string {
-    const theirs = [...this.#listeners].filter(
-      ([, follower]) => follower.personId === personId
-    );
-    for (const [id] of theirs.slice(
-      0,
-      Math.max(0, theirs.length - watchersPerPerson + 1)
-    )) {
-      this.unwatch(id);
-    }
-    const id = crypto.randomUUID();
-    this.#listeners.set(id, { personId, listener: listener.dup() });
-    return id;
-  }
-
-  /** Stops telling the page `watch` answered `id` for. Removed in the release after. */
-  unwatch(id: string): void {
-    this.#listeners.get(id)?.listener[Symbol.dispose]();
-    this.#listeners.delete(id);
   }
 
   /**

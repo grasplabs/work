@@ -50,11 +50,6 @@ const newApp = async (
   return appIdSchema.parse(id);
 };
 
-/** Undoes nothing. */
-const nothingToUndo = (): void => {
-  // Nothing done yet.
-};
-
 /** `person` on a connection of its own: another page of theirs. */
 const reconnected = async (person: Person): Promise<Person> => {
   const { core, closed } = await openRpc(person.session);
@@ -393,65 +388,6 @@ describe("previewing an App's draft", { timeout: 120_000 }, () => {
     });
     // Only the telling it heard as it followed.
     expect(left.length <= 1).toBeTruthy();
-  });
-
-  it("tells a page core's Worker of the release before follows the old way, its callback kept in the object, while a deploy runs both", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await notesApp(builder);
-    const heard: number[] = [];
-    await draftWatch(env, { kind: "app", id: app }).watch(
-      builder.userId,
-      async (revision: number) => {
-        heard.push(revision);
-        await Promise.resolve();
-      }
-    );
-
-    const written = await writeDraft(builder, app, {
-      "src/routes/index.tsx": deskSaying("Drafted"),
-    });
-
-    await vi.waitFor(() => {
-      expect(heard).toStrictEqual([written]);
-    });
-  });
-
-  it("follows a draft the old way while its object still runs the code of the release before, which takes no socket", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await notesApp(builder);
-    const subject = { kind: "app" as const, id: app };
-    const object = draftWatch(env, subject);
-    // As the code before had it: no `fetch`, so opening a socket throws.
-    const restore = { undo: nothingToUndo };
-    await runInDurableObject(object, (instance) => {
-      // SAFETY: an object's prototype holds its methods.
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      const methods = Object.getPrototypeOf(instance) as {
-        fetch: (request: Request) => Response;
-      };
-      const original = methods.fetch;
-      methods.fetch = () => {
-        throw new TypeError("Handler does not export a fetch() function.");
-      };
-      restore.undo = () => {
-        methods.fetch = original;
-      };
-    });
-    onTestFinished(() => {
-      restore.undo();
-    });
-    const heard: number[] = [];
-
-    await builder.api.drafts.watch(subject, (revision: number) => {
-      heard.push(revision);
-    });
-    const written = await writeDraft(builder, app, {
-      "src/routes/index.tsx": deskSaying("Drafted"),
-    });
-
-    await vi.waitFor(() => {
-      expect(heard).toStrictEqual([written]);
-    });
   });
 
   it("pushes out a person's oldest follow past the most of one draft, saying it was displaced, and nobody else's", async () => {
