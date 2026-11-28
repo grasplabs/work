@@ -397,10 +397,14 @@ describe("a client's changes, counted", () => {
       again: true,
       what: "settings",
     });
-    // Staff change the sign-in once the run read the client, as its first
-    // call reaches the client's account; nothing refuses a claimed client.
+    // Staff change the sign-in once the run read the client for what goes
+    // live, as core's upload reaches the client's account; nothing refuses
+    // a claimed client.
     cloudflare.beforeAnswering(
-      (call) => call.path.startsWith(`/accounts/${internal.account.id}/`),
+      (call) =>
+        call.method === "PUT" &&
+        call.path.startsWith(`/accounts/${internal.account.id}/`) &&
+        call.path.endsWith("-core"),
       async () => {
         await setSignIn(env, staff, {
           clientId: internal.clientId,

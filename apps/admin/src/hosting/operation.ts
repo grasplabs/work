@@ -1665,6 +1665,26 @@ const load = async (
 };
 
 /**
+ * Throws unless the destination can run each of the release's Workers,
+ * and its vars and secrets, as `loaded` read them, can be bound: what
+ * step 1 checks, and the upload phase again, as it reads the settings
+ * afresh.
+ */
+const checkWorkers = async (
+  context: ProvisionContext,
+  loaded: Loaded
+): Promise<void> => {
+  const vars = coreVarsOf(context, loaded);
+  for (const app of appsOf(loaded.manifest)) {
+    const worker = workerOf(loaded.manifest, app);
+    assertRunnable(loaded, worker);
+    // oxlint-disable-next-line no-await-in-loop -- two Workers
+    const secrets = await secretsOf(context, loaded, app);
+    checkBindingNames(worker, varsOf(context, loaded, app, vars), secrets);
+  }
+};
+
+/**
  * Step 1: everything checked before the client's destination is changed,
  * then its resources allocated in its inventory.
  */
@@ -1675,14 +1695,7 @@ const validate = async (
   const { db } = context;
   const { manifest, held } = loaded;
   const order = appsOf(manifest);
-  const vars = coreVarsOf(context, loaded);
-  for (const app of order) {
-    const worker = workerOf(manifest, app);
-    assertRunnable(loaded, worker);
-    // oxlint-disable-next-line no-await-in-loop -- two Workers
-    const secrets = await secretsOf(context, loaded, app);
-    checkBindingNames(worker, varsOf(context, loaded, app, vars), secrets);
-  }
+  await checkWorkers(context, loaded);
   await assertHolds(db, held);
   await allocateClientResources(db, "system", {
     clientId: held.clientId,
@@ -1746,8 +1759,9 @@ const observedDatabases = async (
  * Travel bookmark now (src/cloudflare/d1-bookmark.ts), kept in `progress`
  * by database (`bookmarks`) with the change and release it was taken
  * before. One kept for this change already stands: a retry after a
- * migration partly ran keeps the one from before it. A database with no
- * migration recorded yet is new, with nothing to keep. Cloudflare giving
+ * migration partly ran keeps the one from before it. A client still
+ * being provisioned, and a database with no migration recorded yet, have
+ * nothing to keep: neither has served anyone. Cloudflare giving
  * none stops the step (`snapshot_unavailable`), and so the migrations
  * after it. It is for a person to restore data with, never the admin:
  * migrations are expand only, and stay.
@@ -1759,12 +1773,16 @@ const snapshot = async (
 ): Promise<void> => {
   const { api, db } = context;
   const { operation } = loaded;
-  const databases = await observedDatabases(context, loaded, inventory);
-  const progress = await progressNow(db, operation.id);
   const taken: Record<string, string> = {};
+  // Still being provisioned, it has served nobody: nothing to keep.
+  const databases = loaded.client.unpublished
+    ? new Map<string, string>()
+    : await observedDatabases(context, loaded, inventory);
+  const progress = await progressNow(db, operation.id);
   for (const [name, files] of databaseMigrations(loaded.manifest)) {
     const id = databases.get(name);
-    // One the inventory lacks is refused by the migration step.
+    // None looked up, or one the inventory lacks, which the migration
+    // step refuses.
     if (
       id === undefined ||
       progress.bookmarks[name]?.change === operation.change
@@ -3100,6 +3118,9 @@ const phaseWork: Readonly<
     await migrate(context, loaded, await inventoryOf(context, loaded));
   },
   install: async (context, loaded, at) => {
+    // The settings are read again here, for what goes live: checked as
+    // the first step checked them.
+    await checkWorkers(context, loaded);
     const inventory = await inventoryOf(context, loaded);
     // Rendered before either uploads, so a binding that can't be mapped
     // onto the client's own resources stops it before anything is live.

@@ -199,7 +199,7 @@ describe("a release's model files in each deployment", () => {
     // Read once: the mismatch stops the upload before any retry.
     expect(reads).toBe(1);
     expect(operations).toStrictEqual([
-      { error: "release_blob_mismatch", step: "resources" },
+      { error: "release_blob_mismatch", step: "snapshot" },
     ]);
     const copiedHashes = [...graspAccount(cloudflare).objects.values()].flatMap(
       (objects) => [...objects.keys()]
