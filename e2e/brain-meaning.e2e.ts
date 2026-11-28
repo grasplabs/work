@@ -5,7 +5,13 @@ import { apiOf, peopleIn } from "./people.ts";
 
 // The Brain finds by meaning on the stack, as on a deployment: the stack
 // runs the model core ships, its files put in the stack's model files
-// bucket as it starts (scripts/local-model-files.ts). A person's upload
+// bucket as it starts (scripts/local-model-files.ts). Only its own part's
+// stack holds them, locally as in CI (playwright.config.ts), so it runs
+// as that part alone:
+//
+//   GRASP_E2E_PART=brain-meaning vp run e2e
+//
+// A person's upload
 // is found by a search that shares no word with it. Without the model the
 // search goes by words alone and finds nothing. How recall by meaning
 // works, and what it may never show, is core's test
