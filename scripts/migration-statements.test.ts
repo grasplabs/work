@@ -40,7 +40,7 @@ CREATE TABLE \`__new_p\` (\`id\` text PRIMARY KEY, \`kind\` text);
 INSERT INTO \`__new_p\` SELECT * FROM \`p\`;
 DROP TABLE \`p\`;
 ALTER TABLE \`__new_p\` RENAME TO \`p\`;`)
-    ).toStrictEqual(["delete p", "drop p"]);
+    ).toStrictEqual(["delete p", "drop p", "rename __new_p"]);
   });
 });
 
@@ -57,12 +57,12 @@ describe(statementChanges, () => {
         },
       ],
     ]),
-    before: new Set(["p"]),
+    moved: new Set<string>(),
     after: new Set(["p"]),
     skipped: new Set<string>(),
   };
 
-  it("names a delete or an update of what main has, once per subject with each statement", () => {
+  it("names every delete and update, on any table, but a backfill of a column the branch added", () => {
     expect(
       statementChanges(
         [
@@ -83,19 +83,33 @@ describe(statementChanges, () => {
           { kind: "delete", table: "fresh", statement: "DELETE FROM fresh;" },
         ],
         context
-      )
+      ).map(({ subject, statements }) => [subject, statements])
     ).toStrictEqual([
-      {
-        subject: "delete rows p",
-        detail: "a DELETE, whatever rows it matches",
-        statements: ["DELETE FROM p WHERE 0;", "DELETE FROM p;"],
-      },
-      {
-        subject: "change values p.kind",
-        detail: "an UPDATE, whatever rows it matches",
-        statements: ["UPDATE p SET kind = 1;"],
-      },
+      ["delete rows p", ["DELETE FROM p WHERE 0;", "DELETE FROM p;"]],
+      ["change values p.kind", ["UPDATE p SET kind = 1;"]],
+      ["delete rows fresh", ["DELETE FROM fresh;"]],
     ]);
+  });
+
+  it("names a copy that is more than plain, but one into a derived table", () => {
+    const copy = (intoNew: boolean, moved: string[]) =>
+      statementChanges(
+        [
+          {
+            kind: "copy",
+            table: "d",
+            statement: "INSERT INTO d SELECT id FROM p WHERE kind = 1;",
+            detail: "Eq",
+            sources: ["p"],
+            intoNew,
+          },
+        ],
+        { ...context, moved: new Set(moved) }
+      ).map(({ subject }) => subject);
+    expect(copy(true, [])).toStrictEqual([]);
+    expect(copy(false, [])).toStrictEqual(["change values d"]);
+    expect(copy(true, ["d"])).toStrictEqual(["change values d"]);
+    expect(copy(true, ["p"])).toStrictEqual(["change values d"]);
   });
 
   it("names a rebuild of a table no generated row got into, and passes one of a covered table", () => {
@@ -104,15 +118,10 @@ describe(statementChanges, () => {
     ];
     expect(statementChanges(drop, context)).toStrictEqual([]);
     expect(
-      statementChanges(drop, { ...context, skipped: new Set(["p"]) })
-    ).toStrictEqual([
-      {
-        subject: "delete rows p",
-        detail:
-          "rebuilt, and no generated row could be written to it, so what the rebuild keeps is not checked",
-        statements: ["DROP TABLE p;"],
-      },
-    ]);
+      statementChanges(drop, { ...context, skipped: new Set(["p"]) }).map(
+        ({ subject }) => subject
+      )
+    ).toStrictEqual(["delete rows p"]);
   });
 });
 

@@ -186,17 +186,24 @@ ALTER TABLE \`__new_locked\` RENAME TO \`locked\`;`,
     ).toStrictEqual(["delete rows locked"]);
   });
 
-  it("passes an insert, one that does nothing on conflict, a backfill of a new column, and writes to a table the migration creates", () => {
+  it("passes inserts, one that does nothing on conflict, a backfill of a new column, and a copy into a derived table", () => {
     expect(
-      flagged(`INSERT INTO \`people\` (\`id\`, \`name\`) VALUES ('p-new', 'New');--> statement-breakpoint
+      flagged(`INSERT INTO \`people\` (\`id\`, \`name\`) VALUES ('p-new', 'New'), ('p-2', 'Two');--> statement-breakpoint
 INSERT INTO \`people\` (\`id\`, \`name\`) VALUES ('p-1', 'New') ON CONFLICT DO NOTHING;--> statement-breakpoint
 ALTER TABLE \`chats\` ADD \`summary\` text;--> statement-breakpoint
 UPDATE \`chats\` SET \`summary\` = \`title\` || ' by ' || \`owner_id\`;--> statement-breakpoint
 CREATE TABLE \`drafts\` (\`id\` text PRIMARY KEY NOT NULL, \`body\` text);--> statement-breakpoint
+INSERT INTO \`drafts\` SELECT \`id\`, \`title\` FROM \`chats\`;`)
+    ).toStrictEqual([]);
+  });
+
+  it("refuses an update or a delete on a table the migration creates too", () => {
+    expect(
+      flagged(`CREATE TABLE \`drafts\` (\`id\` text PRIMARY KEY NOT NULL, \`body\` text);--> statement-breakpoint
 INSERT INTO \`drafts\` SELECT \`id\`, \`title\` FROM \`chats\`;--> statement-breakpoint
 UPDATE \`drafts\` SET \`body\` = NULL;--> statement-breakpoint
 DELETE FROM \`drafts\`;`)
-    ).toStrictEqual([]);
+    ).toStrictEqual(["change values drafts.body", "delete rows drafts"]);
   });
 
   it("passes what a trigger writes", () => {
@@ -264,12 +271,12 @@ describe("a rebuild's copy", () => {
     ],
     ["a LIMIT", copy(columns, " LIMIT 1000")],
   ])("refuses a copy with %s", (_, migration) => {
-    expect(flagged(migration)).toContain("change values chats");
+    expect(flagged(migration)).toContain("change values __new_chats");
   });
 
   it("names the opcodes that make a copy more than plain", () => {
     expect(listed(copy(columns, " WHERE `kind` != 'archived'"))).toStrictEqual([
-      "  - change values chats (rebuilt with a copy that is more than a plain copy, so it may leave rows out or rewrite them: Eq)",
+      "  - change values __new_chats (filled by a copy that is more than a plain copy, so it may leave rows out or rewrite them (a new column filled from an expression counts too): Eq)",
       "      by: INSERT INTO `__new_chats`(id, title, kind, owner_id, created_at) SELECT id, title, kind, owner_id, created_at FROM `chats` WHERE `kind` != 'archived';",
     ]);
   });
@@ -293,6 +300,103 @@ INSERT INTO \`task_chats\` SELECT \`id\` FROM \`chats\` WHERE \`kind\` = 'task';
 /** A trigger on `people` that runs `body` after each insert. */
 const touch = (body: string) =>
   `CREATE TRIGGER \`people_touch\` AFTER INSERT ON \`people\` BEGIN ${body} END;`;
+
+/** A table named `name` with the columns of `chats`. */
+const sameTable = (name: string) =>
+  `CREATE TABLE \`${name}\` (\`id\` text PRIMARY KEY NOT NULL, \`title\` text, \`kind\` text DEFAULT 'chat' NOT NULL, \`owner_id\` text NOT NULL, \`created_at\` integer NOT NULL);`;
+
+describe("rewrites through a table the migration creates, a view, a CTE or a rename", () => {
+  const plainCopy =
+    "INSERT INTO `__new_chats`(id, title, kind, owner_id, created_at) SELECT id, title, kind, owner_id, created_at FROM `chats`;--> statement-breakpoint";
+
+  it.each([
+    [
+      "a delete from the copy before its rename",
+      rebuildChats(
+        `${plainCopy}\nDELETE FROM \`__new_chats\` WHERE \`kind\` = 'archived';--> statement-breakpoint`
+      ),
+      "delete rows __new_chats",
+    ],
+    [
+      "an update of the copy before its rename",
+      rebuildChats(
+        `${plainCopy}\nUPDATE \`__new_chats\` SET \`kind\` = 'deleted' WHERE \`kind\` = 'archived';--> statement-breakpoint`
+      ),
+      "change values __new_chats.kind",
+    ],
+    [
+      "a JSON rewrite of the copy",
+      rebuildChats(
+        `${plainCopy}\nUPDATE \`__new_chats\` SET \`title\` = json_remove(\`title\`, '$.x');--> statement-breakpoint`
+      ),
+      "change values __new_chats.title",
+    ],
+    [
+      "a filter through an intermediate table",
+      rebuildChats(
+        `${sameTable("tmp")}--> statement-breakpoint
+INSERT INTO \`tmp\` SELECT * FROM \`chats\`;--> statement-breakpoint
+INSERT INTO \`__new_chats\`(id, title, kind, owner_id, created_at) SELECT id, title, kind, owner_id, created_at FROM \`tmp\` WHERE \`kind\` != 'archived';--> statement-breakpoint`
+      ),
+      "change values __new_chats",
+    ],
+    [
+      "a filter through a view",
+      rebuildChats(
+        `CREATE VIEW \`pv\` AS SELECT * FROM \`chats\` WHERE \`kind\` != 'archived';--> statement-breakpoint
+INSERT INTO \`__new_chats\`(id, title, kind, owner_id, created_at) SELECT id, title, kind, owner_id, created_at FROM \`pv\`;--> statement-breakpoint
+DROP VIEW \`pv\`;--> statement-breakpoint`
+      ),
+      "change values __new_chats",
+    ],
+    [
+      "a filter through a CTE",
+      rebuildChats(
+        "WITH `k` AS (SELECT * FROM `chats` WHERE `kind` != 'archived') INSERT INTO `__new_chats`(id, title, kind, owner_id, created_at) SELECT id, title, kind, owner_id, created_at FROM `k`;--> statement-breakpoint"
+      ),
+      "change values __new_chats",
+    ],
+  ])("refuses %s", (_, migration, subject) => {
+    expect(flagged(migration)).toContain(subject);
+  });
+
+  it("refuses a delete from an intermediate table renamed in place", () => {
+    expect(
+      flagged(`${sameTable("tmp")}--> statement-breakpoint
+INSERT INTO \`tmp\` SELECT * FROM \`chats\`;--> statement-breakpoint
+DELETE FROM \`tmp\` WHERE \`kind\` = 'archived';--> statement-breakpoint
+DROP TABLE \`chats\`;--> statement-breakpoint
+ALTER TABLE \`tmp\` RENAME TO \`chats\`;`)
+    ).toContain("delete rows tmp");
+  });
+
+  it("refuses renaming the table away and copying it back filtered", () => {
+    expect(
+      flagged(`ALTER TABLE \`chats\` RENAME TO \`chats_old\`;--> statement-breakpoint
+${sameTable("chats")}--> statement-breakpoint
+INSERT INTO \`chats\` SELECT * FROM \`chats_old\` WHERE \`kind\` != 'archived';--> statement-breakpoint
+DROP TABLE \`chats_old\`;`)
+    ).toContain("change values chats");
+  });
+
+  it("refuses a filtered copy into a new table the branch renames", () => {
+    expect(
+      flagged(`CREATE TABLE \`task_chats\` (\`id\` text PRIMARY KEY NOT NULL);--> statement-breakpoint
+INSERT INTO \`task_chats\` SELECT \`id\` FROM \`chats\` WHERE \`kind\` = 'task';--> statement-breakpoint
+ALTER TABLE \`task_chats\` RENAME TO \`tasks\`;`)
+    ).toStrictEqual(["change values task_chats"]);
+  });
+
+  it("passes a plain copy in order", () => {
+    expect(
+      flagged(
+        rebuildChats(
+          "INSERT INTO `__new_chats`(id, title, kind, owner_id, created_at) SELECT id, title, kind, owner_id, created_at FROM `chats` ORDER BY `created_at`;--> statement-breakpoint"
+        )
+      )
+    ).toStrictEqual([]);
+  });
+});
 
 describe("triggers the branch adds", () => {
   it("refuses a delete through a trigger created in the migration", () => {
@@ -340,7 +444,7 @@ INSERT INTO \`g\` (\`ref\`) VALUES ('c-1');`)
       flagged(`CREATE TABLE \`seen\` (\`n\` integer);--> statement-breakpoint
 CREATE TRIGGER \`chats_seen\` AFTER INSERT ON \`chats\` BEGIN UPDATE \`seen\` SET \`n\` = 1; END;--> statement-breakpoint
 REPLACE INTO \`chats\` (\`id\`, \`kind\`, \`owner_id\`, \`created_at\`) VALUES ('c-1', 'chat', 'p', 1);`)
-    ).toStrictEqual(["delete rows chats"]);
+    ).toStrictEqual(["change values seen.n", "delete rows chats"]);
   });
 
   it("passes a plain copy of a REAL column", () => {
@@ -509,7 +613,7 @@ describe("rows before and after", () => {
           "INSERT INTO `__new_chats`(id, title, kind, owner_id, created_at) SELECT id, json_set(title, '$.moved', 1), kind, owner_id, created_at FROM `chats`;--> statement-breakpoint"
         )
       )
-    ).toStrictEqual(["change values chats.title", "change values chats"]);
+    ).toStrictEqual(["change values chats.title", "change values __new_chats"]);
   });
 
   it("refuses renaming a column and adding one under its name", () => {

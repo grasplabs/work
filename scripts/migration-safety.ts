@@ -844,6 +844,26 @@ export const checkDatabase = (
   try {
     let base: Schema["tables"] | undefined;
     let mainTriggers: Map<string, string> | undefined;
+    // The branch's migrations are judged after all of them ran: whether a
+    // copy fills a table the branch renames, or reads one it drops, can
+    // be told only then.
+    const pending: {
+      file: string;
+      sql: string;
+      found: Change[];
+      writes: Write[];
+      after: Set<string>;
+    }[] = [];
+    const judgeNow = (
+      file: string,
+      sql: string,
+      found: Change[],
+      dataJudged: boolean
+    ) => {
+      const judged = judge(file, sql, found, { now, dataJudged });
+      errors.push(...judged.errors);
+      notes.push(...judged.notes);
+    };
     for (const { idx, tag, sql } of migrations) {
       const file = `${dir}/${tag}.sql`;
       // A cut-off never covers what the branch adds: `from` <= `added`.
@@ -871,28 +891,48 @@ export const checkDatabase = (
           `${file} does not apply to the rows the release before it wrote: ${onRows}`
         );
       }
-      if (before !== undefined) {
-        const after = schemaOf(db);
-        const judged = judge(
+      if (before === undefined) {
+        continue;
+      }
+      const after = schemaOf(db);
+      const found = [
+        ...unsafeChanges(before, after, indexedBy),
+        ...(Array.isArray(onRows) ? onRows : []),
+      ];
+      if (idx >= added) {
+        pending.push({
           file,
           sql,
-          [
-            ...unsafeChanges(before, after, indexedBy),
-            ...(Array.isArray(onRows) ? onRows : []),
-            ...(base === undefined
-              ? []
-              : statementChanges(writes, {
-                  base,
-                  before: new Set(before.tables.keys()),
-                  after: new Set(after.tables.keys()),
-                  skipped: new Set(unseeded.map(({ table }) => table)),
-                })),
-          ],
-          { now, dataJudged: idx >= added }
-        );
-        errors.push(...judged.errors);
-        notes.push(...judged.notes);
+          found,
+          writes,
+          after: new Set(after.tables.keys()),
+        });
+      } else {
+        judgeNow(file, sql, found, false);
       }
+    }
+    const moved = new Set(
+      pending.flatMap(({ writes }) =>
+        writes
+          .filter(({ kind }) => kind === "drop" || kind === "rename")
+          .map(({ table }) => table)
+      )
+    );
+    for (const { file, sql, found, writes, after } of pending) {
+      judgeNow(
+        file,
+        sql,
+        [
+          ...found,
+          ...statementChanges(writes, {
+            base: base ?? new Map(),
+            moved,
+            after,
+            skipped: new Set(unseeded.map(({ table }) => table)),
+          }),
+        ],
+        true
+      );
     }
     return { errors, notes, skipped: skippedOf(db) };
   } finally {

@@ -1,31 +1,32 @@
 /**
- * What each statement of a migration a branch adds writes to, as SQLite
- * itself reports it while it prepares the statement (its authorizer), and
- * so whatever rows its WHERE would match: the exact half of the data check
- * (scripts/migration-data.ts writes rows and compares, which sees only
- * what its rows meet).
+ * What each statement of a migration a branch adds writes, as SQLite
+ * itself reports it while it prepares the statement (its authorizer) and
+ * as its program shows (EXPLAIN), whatever rows its WHERE would match: the
+ * exact half of the data check (scripts/migration-data.ts writes rows and
+ * compares, which sees only what its rows meet).
  *
- * In a migration a branch adds, a DELETE from a table main has, or an
- * UPDATE of a column main has, needs a contract marker
- * (`delete rows <table>`, `change values <table>.<column>`). Free: an
- * INSERT, an UPDATE of a column the branch adds (its backfill), any write
- * to a table the migration creates (drizzle-kit's rebuild tables), and
- * what main's triggers write. An INSERT that replaces the rows it conflicts with
- * (`INSERT OR REPLACE`, `REPLACE INTO`, a constraint's `ON CONFLICT
- * REPLACE`) needs `delete rows`: SQLite reports it as an INSERT, so its
- * program is read (EXPLAIN) for the delete it does. `ON CONFLICT DO
- * UPDATE` is reported as the UPDATE it is. A table rebuilt whose rows the
- * generator could not write needs `delete rows` too: what the rebuild
- * keeps of it is not seen.
+ * Two flat rules, on any table the statement names, main's or one the
+ * branch made, a temp table or not, so no table's history needs knowing:
  *
- * A rebuild's copy (an INSERT into a table the migration creates, from a
- * table main has that it drops) must be a plain copy, by the opcodes of
- * its prepared program (EXPLAIN, against PLAIN_COPY), or carry
- * `change values <table>`: a copy that filters, rewrites, dedupes or
- * limits passes the generated rows when no generated value meets it.
+ * - Every DELETE and every UPDATE needs a contract marker
+ *   (`delete rows <table>`, `change values <table>.<column>`), and so does
+ *   an INSERT that replaces the rows it conflicts with (`INSERT OR
+ *   REPLACE`, `REPLACE INTO`, a constraint's `ON CONFLICT REPLACE`), which
+ *   SQLite reports as an INSERT and EXPLAIN shows deleting. Free: an
+ *   UPDATE of a column the branch added to a table main has (a backfill).
+ * - Every INSERT ... SELECT must be a plain copy by the opcodes of its
+ *   program (PLAIN_COPY: one table read row by row, its columns and
+ *   literals handed on; a view, CTE, WHERE, CASE, function, join or LIMIT
+ *   shows up there, inlined) or carry `change values <table>`, naming the
+ *   table it fills. Free: filling a table the migration creates that the
+ *   branch never renames, from tables the branch never drops or renames
+ *   (a derived table). A new column filled from an expression needs the
+ *   marker too. `INSERT ... VALUES` is free.
  *
  * Writes through a trigger main has are free; a trigger the branch adds or
- * changes writes as the statement that fires it.
+ * changes writes as the statement that fires it. A table rebuilt whose
+ * rows the generator could not write needs `delete rows` too: what the
+ * rebuild keeps of it is not seen.
  *
  * SQLite splits the migration into statements itself (each prepared
  * statement's own text), so each change is told with its statement.
@@ -35,12 +36,15 @@ import type { DatabaseSync } from "node:sqlite";
 
 /** A write a statement makes, itself or through a trigger the branch made. */
 export interface Write {
-  kind: "delete" | "update" | "drop" | "replace" | "copy";
+  kind: "delete" | "update" | "drop" | "rename" | "replace" | "copy";
   table: string;
   column?: string;
   statement: string;
   /** For a copy: why it is more than a plain copy. */
   detail?: string;
+  /** For a copy: the tables it reads, and whether it fills a new table. */
+  sources?: readonly string[];
+  intoNew?: boolean;
 }
 
 /** A change a marker must name, and the statements that make it. */
@@ -107,7 +111,32 @@ const PLAIN_COPY = new Set([
   "Blob",
   "Copy",
   "SCopy",
+  // ORDER BY: rows sorted, none left out or changed.
+  "SorterOpen",
+  "SorterInsert",
+  "SorterSort",
+  "SorterData",
+  "SorterNext",
+  "OpenPseudo",
+  "MakeRecord",
+  "Move",
 ]);
+
+/** The SELECT of an INSERT ... SELECT: the coroutine SQLite compiles it to. */
+const selectOf = (program: readonly string[]): string[] => {
+  const start = program.indexOf("InitCoroutine");
+  const end = program.indexOf("EndCoroutine");
+  return start === -1 || end === -1 ? [] : program.slice(start + 1, end);
+};
+
+/**
+ * Whether an INSERT reads rows from a table: a SELECT that opens one (the
+ * VALUES of several rows compile to a coroutine too, opening none), or the
+ * direct copy SQLite makes of a bare `SELECT *` (RowData). An INSERT's own
+ * foreign key lookups open tables outside the coroutine.
+ */
+const insertsSelected = (program: readonly string[]): boolean =>
+  program.includes("RowData") || selectOf(program).includes("OpenRead");
 
 /**
  * Why an INSERT ... SELECT is more than a plain copy, by the opcodes of
@@ -118,12 +147,7 @@ const notPlain = (program: readonly string[], functions: boolean): string[] => {
   if (program.includes("RowData")) {
     return [];
   }
-  const start = program.indexOf("InitCoroutine");
-  const end = program.indexOf("EndCoroutine");
-  if (start === -1 || end === -1) {
-    return ["no plain INSERT ... SELECT"];
-  }
-  const select = program.slice(start + 1, end);
+  const select = selectOf(program);
   const why = [...new Set(select.filter((opcode) => !PLAIN_COPY.has(opcode)))];
   if (select.filter((opcode) => opcode === "OpenRead").length > 1) {
     why.push("OpenRead of a second table");
@@ -171,6 +195,7 @@ export const runRecordingWrites = (
     const inserted = new Set<string>();
     const insertedByTriggers = new Set<string>();
     const updated = new Set<string>();
+    const altered = new Set<string>();
     const read = new Set<string>();
     let functions = false;
     db.setAuthorizer((action, first, second, _database, trigger) => {
@@ -194,6 +219,8 @@ export const runRecordingWrites = (
             column: second,
             statement: through,
           });
+        } else if (action === constants.SQLITE_ALTER_TABLE && second !== null) {
+          altered.add(second);
         } else if (action === constants.SQLITE_INSERT) {
           (trigger === null ? inserted : insertedByTriggers).add(first);
         } else if (action === constants.SQLITE_READ && trigger === null) {
@@ -256,37 +283,45 @@ export const runRecordingWrites = (
           statement,
         }))
       );
-      // A rebuild's copy: into a table this migration creates, from one
-      // that was there. Whether the old one is dropped is judged after.
-      const sources = [...read].filter((table) => atStart.has(table));
-      if (
-        [...inserted].some((table) => !atStart.has(table)) &&
-        sources.length > 0
-      ) {
+      // An INSERT ... SELECT: plain, or a change to the rows it copies.
+      const sources = [...read].filter((table) => !inserted.has(table));
+      if (inserted.size > 0 && insertsSelected(program)) {
         const why = notPlain(program, functions);
         if (why.length > 0) {
           writes.push(
-            ...sources.map((table) => ({
+            ...[...inserted].map((table) => ({
               kind: "copy" as const,
               table,
               statement,
               detail: why.join(", "),
+              sources,
+              intoNew: !atStart.has(table),
             }))
           );
         }
       }
     }
     db.exec(statement);
+    // An ALTER TABLE whose table is gone after it renamed it.
+    if (altered.size > 0) {
+      const now = tableNames(db);
+      writes.push(
+        ...[...altered]
+          .filter((table) => !now.has(table))
+          .map((table) => ({ kind: "rename" as const, table, statement }))
+      );
+    }
   }
   return writes;
 };
 
-/** The tables a migration's writes are judged against, by name. */
+/** What a migration's writes are judged against. */
 export interface WriteContext {
   /** Each table main has, with its columns, lower-cased. */
   base: ReadonlyMap<string, { columns: ReadonlyMap<string, unknown> }>;
-  /** The tables there were before this migration, and after it. */
-  before: ReadonlySet<string>;
+  /** The tables the branch's migrations drop or rename, all of them. */
+  moved: ReadonlySet<string>;
+  /** The tables there are after this migration. */
   after: ReadonlySet<string>;
   /** The tables the generator wrote no rows to. */
   skipped: ReadonlySet<string>;
@@ -295,7 +330,7 @@ export interface WriteContext {
 /** What of `writes` a contract marker must name, one per subject. */
 export const statementChanges = (
   writes: readonly Write[],
-  { base, before, after, skipped }: WriteContext
+  { base, moved, after, skipped }: WriteContext
 ): StatementChange[] => {
   const changes = new Map<string, StatementChange>();
   const add = (subject: string, detail: string, statement: string): void => {
@@ -306,17 +341,8 @@ export const statementChanges = (
     }
     changes.set(subject, change);
   };
-  // A table the migration drops, kept or rebuilt under its name.
-  const droppedHere = new Set(
-    writes.filter(({ kind }) => kind === "drop").map(({ table }) => table)
-  );
-  for (const { kind, table, column, statement, detail } of writes) {
-    // A table this migration creates, or the branch did, holds no rows
-    // the release before wrote.
-    const mains = before.has(table) ? base.get(table) : undefined;
-    if (mains === undefined) {
-      continue;
-    }
+  for (const write of writes) {
+    const { kind, table, column, statement, detail } = write;
     if (kind === "delete") {
       add(
         `delete rows ${table}`,
@@ -332,20 +358,36 @@ export const statementChanges = (
     } else if (
       kind === "update" &&
       column !== undefined &&
-      mains.columns.has(column.toLowerCase())
+      // A backfill: a column the branch added, to a table main has.
+      !(
+        base.has(table) &&
+        base.get(table)?.columns.has(column.toLowerCase()) === false
+      )
     ) {
       add(
         `change values ${table}.${column}`,
         "an UPDATE, whatever rows it matches",
         statement
       );
-    } else if (kind === "copy" && droppedHere.has(table)) {
+    } else if (
+      kind === "copy" &&
+      !(
+        write.intoNew === true &&
+        !moved.has(table) &&
+        (write.sources ?? []).every((source) => !moved.has(source))
+      )
+    ) {
       add(
         `change values ${table}`,
-        `rebuilt with a copy that is more than a plain copy, so it may leave rows out or rewrite them: ${detail ?? ""}`,
+        `filled by a copy that is more than a plain copy, so it may leave rows out or rewrite them (a new column filled from an expression counts too): ${detail ?? ""}`,
         statement
       );
-    } else if (kind === "drop" && after.has(table) && skipped.has(table)) {
+    } else if (
+      kind === "drop" &&
+      base.has(table) &&
+      after.has(table) &&
+      skipped.has(table)
+    ) {
       add(
         `delete rows ${table}`,
         "rebuilt, and no generated row could be written to it, so what the rebuild keeps is not checked",
