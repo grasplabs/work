@@ -19,7 +19,10 @@
  * (CI's publish, Promote release's download, an on-premises install's
  * copy) as `RELEASE_SIGNATURE_FILE` beside `manifest.json`. Keyed by the
  * manifest's hash, not its id: a publish that loses its id leaves only a
- * signature no manifest has, never one under that id.
+ * signature no manifest has, never one under that id. Such a signature,
+ * or one in a CI run's artifacts, stays valid: whoever can write the
+ * bucket could publish that manifest, a real build of main, under its
+ * id while the id is free. It sorts before every later release.
  *
  * Every release must be signed: one without, or whose signature doesn't
  * verify, is refused. Releases imported before signing began are never

@@ -9,7 +9,7 @@
  * pinned, and this one file, which imports nothing but Node's built-ins;
  * no other job may name the key's environment or the key; and the signer
  * must sign nothing but a manifest of its own run's commit, for a push to
- * main, under an id of this month.
+ * main, under a published id.
  */
 import { spawn } from "node:child_process";
 import { once } from "node:events";
@@ -25,7 +25,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { text } from "node:stream/consumers";
 
-import { releaseMonthPrefix } from "@grasp-os/shared/release-id";
 import {
   RELEASE_SIGNATURE_FILE,
   releaseSignatureProblem,
@@ -71,7 +70,6 @@ const sign = async (
 
 describe("signing a release's manifest in CI", () => {
   let dir = "";
-  const thisMonths = `${releaseMonthPrefix(new Date())}7`;
 
   /** Writes a manifest of `commit` under `releaseId` to the directory: its bytes. */
   const writeManifest = (releaseId: string, commit = COMMIT): Buffer => {
@@ -90,8 +88,8 @@ describe("signing a release's manifest in CI", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("signs a manifest of its run's commit, under an id of this month, so that every verifier takes it", async () => {
-    const bytes = writeManifest(thisMonths);
+  it("signs a manifest of its run's commit so that every verifier takes it", async () => {
+    const bytes = writeManifest("26.11.7");
     const { code } = await sign(dir);
     const signature = readFileSync(path.join(dir, RELEASE_SIGNATURE_FILE));
     const changed = Buffer.from(bytes.toString().replace("signed", "s1gned"));
@@ -115,91 +113,93 @@ describe("signing a release's manifest in CI", () => {
     });
   });
 
-  it("signs nothing for a pull request, another branch, another commit, an id of another month or a local build, nor with a key it can't use", async () => {
-    const lastYears = `${String((new Date().getUTCFullYear() - 1) % 100).padStart(2, "0")}.01.1`;
-    const cases: [string, () => Record<string, string | undefined>][] = [
+  it("signs nothing for a pull request, the merge queue, another branch, another commit or a local build, nor with a key it can't use, and says why", async () => {
+    const id = "26.11.7";
+    const cases: [string, string, () => Record<string, string | undefined>][] =
       [
-        "pullRequest",
-        () => {
-          writeManifest(thisMonths);
-          return { ...pushToMain, GITHUB_EVENT_NAME: "pull_request" };
-        },
-      ],
-      [
-        "otherBranch",
-        () => {
-          writeManifest(thisMonths);
-          return { ...pushToMain, GITHUB_REF: "refs/heads/feat/x" };
-        },
-      ],
-      [
-        "mergeQueue",
-        () => {
-          writeManifest(thisMonths);
-          return { ...pushToMain, GITHUB_EVENT_NAME: "merge_group" };
-        },
-      ],
-      [
-        "otherCommit",
-        () => {
-          writeManifest(thisMonths, "d".repeat(40));
-          return pushToMain;
-        },
-      ],
-      [
-        "otherMonth",
-        () => {
-          writeManifest(lastYears);
-          return pushToMain;
-        },
-      ],
-      [
-        "localBuild",
-        () => {
-          writeManifest("dev-abc");
-          return pushToMain;
-        },
-      ],
-      [
-        "notJson",
-        () => {
-          writeFileSync(path.join(dir, "manifest.json"), "{ not json");
-          return pushToMain;
-        },
-      ],
-      [
-        "noKey",
-        () => {
-          writeManifest(thisMonths);
-          return { ...pushToMain, [SECRET]: "" };
-        },
-      ],
-      [
-        "notEd25519",
-        () => {
-          writeManifest(thisMonths);
-          return {
-            ...pushToMain,
-            [SECRET]: JSON.stringify({ kty: "oct", k: "c2VjcmV0" }),
-          };
-        },
-      ],
-    ];
+        [
+          "pullRequest",
+          "Only a push signs",
+          () => {
+            writeManifest(id);
+            return { ...pushToMain, GITHUB_EVENT_NAME: "pull_request" };
+          },
+        ],
+        [
+          "mergeQueue",
+          "Only a push signs",
+          () => {
+            writeManifest(id);
+            return { ...pushToMain, GITHUB_EVENT_NAME: "merge_group" };
+          },
+        ],
+        [
+          "otherBranch",
+          "Only main signs",
+          () => {
+            writeManifest(id);
+            return { ...pushToMain, GITHUB_REF: "refs/heads/feat/x" };
+          },
+        ],
+        [
+          "otherCommit",
+          "this run is",
+          () => {
+            writeManifest(id, "d".repeat(40));
+            return pushToMain;
+          },
+        ],
+        [
+          "localBuild",
+          "isn't a published release's id",
+          () => {
+            writeManifest("dev-abc");
+            return pushToMain;
+          },
+        ],
+        [
+          "notJson",
+          "isn't JSON",
+          () => {
+            writeFileSync(path.join(dir, "manifest.json"), "{ not json");
+            return pushToMain;
+          },
+        ],
+        [
+          "noKey",
+          "RELEASE_SIGNING_KEY isn't a JWK",
+          () => {
+            writeManifest(id);
+            return { ...pushToMain, [SECRET]: "" };
+          },
+        ],
+        [
+          "notEd25519",
+          "isn't an Ed25519 private key",
+          () => {
+            writeManifest(id);
+            return {
+              ...pushToMain,
+              [SECRET]: JSON.stringify({ kty: "oct", k: "c2VjcmV0" }),
+            };
+          },
+        ],
+      ];
 
-    const outcomes: Record<string, { code: number | null; signed: boolean }> =
-      {};
-    for (const [name, arrange] of cases) {
+    const outcomes: Record<string, unknown> = {};
+    for (const [name, reason, arrange] of cases) {
       // oxlint-disable-next-line no-await-in-loop -- one directory, in turn
-      const { code } = await sign(dir, arrange());
+      const { code, output } = await sign(dir, arrange());
       outcomes[name] = {
         code,
+        said: output.includes(reason),
         signed: existsSync(path.join(dir, RELEASE_SIGNATURE_FILE)),
       };
     }
 
     expect(outcomes).toStrictEqual(
       Object.fromEntries(
-        cases.map(([name]) => [name, { code: 1, signed: false }])
+        cases.map(([name]) => [name, { code: 1, said: true, signed: false }])
       )
     );
   });
@@ -218,6 +218,8 @@ const jobSchema = z.looseObject({
     .optional(),
 });
 const workflowSchema = z.looseObject({
+  env: z.unknown().optional(),
+  defaults: z.unknown().optional(),
   jobs: z.record(z.string(), jobSchema).optional(),
 });
 
@@ -233,8 +235,6 @@ const githubFiles = (): string[] =>
 const readYaml = (file: string): unknown =>
   parse(readFileSync(path.join(ROOT, file), "utf-8"));
 
-/** A pinned action of GitHub's own: `actions/<name>@<commit>`. */
-const GITHUB_ACTION = /^actions\/[a-z-]+@[0-9a-f]{40}$/u;
 /** Each import's module: `from "…"`, `import "…"`. */
 const IMPORTED = /\b(?:from|import)\s*["'](?<module>[^"']+)["']/gu;
 
@@ -261,21 +261,57 @@ describe("the job that holds the signing key", () => {
     });
   });
 
-  it("runs only GitHub's own actions, pinned, and the signer, with no more than read access to the code", () => {
-    const steps = job?.steps ?? [];
-    const strays = steps.filter(
-      (step) =>
-        !(step.uses !== undefined && GITHUB_ACTION.test(step.uses)) &&
-        step.run !== "node scripts/release/sign-manifest.ts release-manifest"
+  it("runs only GitHub's own actions, pinned, and the signer, on the runner's own Node, with no more than read access to the code", () => {
+    // The job exactly, but each action's pin, which Renovate bumps: any
+    // other step, input, environment variable, shell, container or
+    // permission changes what runs beside the key, and fails here.
+    const pinned: unknown = JSON.parse(
+      JSON.stringify(job).replaceAll(
+        /"uses":"(?<action>actions\/[a-z-]+)@[0-9a-f]{40}"/gu,
+        '"uses":"$<action>@pinned"'
+      )
     );
     expect({
-      steps: steps.length,
-      strays,
-      permissions: job?.permissions,
+      job: pinned,
+      workflow: { env: ci.env, defaults: ci.defaults },
     }).toStrictEqual({
-      steps: 4,
-      strays: [],
-      permissions: { contents: "read" },
+      job: {
+        name: "sign-release",
+        needs: ["stage-release"],
+        if: "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.stage-release.outputs.staged == 'true'",
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 5,
+        environment: ENVIRONMENT,
+        permissions: { contents: "read" },
+        steps: [
+          {
+            uses: "actions/checkout@pinned",
+            with: {
+              "persist-credentials": false,
+              "sparse-checkout": "scripts/release/sign-manifest.ts",
+              "sparse-checkout-cone-mode": false,
+            },
+          },
+          {
+            uses: "actions/download-artifact@pinned",
+            with: { name: "release-manifest", path: "release-manifest" },
+          },
+          {
+            run: "node scripts/release/sign-manifest.ts release-manifest",
+            env: { [SECRET]: `\${{ secrets.${SECRET} }}` },
+          },
+          {
+            uses: "actions/upload-artifact@pinned",
+            with: {
+              name: "release-signature",
+              path: "release-manifest/manifest.signature.json",
+              "if-no-files-found": "error",
+              "retention-days": 14,
+            },
+          },
+        ],
+      },
+      workflow: { env: undefined, defaults: undefined },
     });
   });
 

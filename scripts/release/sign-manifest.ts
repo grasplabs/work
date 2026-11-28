@@ -10,8 +10,8 @@
  *
  * What it signs, it checks first: the run is a push to main, and the
  * manifest is a release manifest of this very commit (`GITHUB_SHA`),
- * under a published id of this month (`YY.MM.N`, UTC), as the publish's
- * stage job stamped it. Its contents it can't check: what the run's
+ * under a published id (`YY.MM.N`), as the publish's stage job stamped
+ * it. Its contents it can't check: what the run's
  * build and stage jobs made is what's signed. The signature proves "CI
  * built this from that commit on main", not that its dependencies were
  * clean.
@@ -74,16 +74,14 @@ if (commit !== env("GITHUB_SHA")) {
     `The manifest is commit ${String(commit)}'s; this run is ${env("GITHUB_SHA")}'s`
   );
 }
-const now = new Date();
-const month = `${String(now.getUTCFullYear() % 100).padStart(2, "0")}.${String(now.getUTCMonth() + 1).padStart(2, "0")}.`;
+// A published id (`YY.MM.N`, @grasp-os/shared/release-id), never a local
+// build's: the stage job stamped it.
 const releaseId = fieldOf(manifest, "releaseId");
-const n = typeof releaseId === "string" ? releaseId.slice(month.length) : "";
 if (
   typeof releaseId !== "string" ||
-  !releaseId.startsWith(month) ||
-  !/^[1-9]\d{0,8}$/u.test(n)
+  !/^\d{2}\.(?:0[1-9]|1[0-2])\.[1-9]\d{0,8}$/u.test(releaseId)
 ) {
-  fail(`Release ${String(releaseId)} isn't an id of this month's`);
+  fail(`Release ${String(releaseId)} isn't a published release's id`);
 }
 
 // An Ed25519 key, whatever else the JWK says; its public half as the
