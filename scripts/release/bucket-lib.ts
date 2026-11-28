@@ -12,8 +12,10 @@
  * aws4fetch's own retries are off (they cover only 5xx and 429, and never
  * a thrown error), so no request is retried by two policies at once.
  *
- * Only idempotent requests are ever sent: GET, HEAD, and a PUT
- * of fixed bytes at a key, plain or only if absent (`If-None-Match: *`).
+ * The bucket's requests are all idempotent: GET, HEAD, and a PUT of
+ * fixed bytes at a key, plain or only if absent (`If-None-Match: *`). CI's
+ * POSTs to the admin are too: asking start or finish again gives the
+ * same id and links, or says the commit is published.
  * Sent again, a plain PUT stores the same bytes; one only if absent whose
  * first try took but whose answer was lost finds them there (412). Its
  * caller tells that from another writer's bytes by the stored SHA-256

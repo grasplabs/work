@@ -58,10 +58,10 @@
   ],
   // The releases CI publishes (scripts/release/publish-release.ts), in the
   // EU. The import only reads them (src/releases/import.ts takes the
-  // binding as a store with nothing but `get`, `head` and `list`); CI's
-  // publish writes only each commit's marker and each manifest's signature
-  // through it, the blobs and manifests by upload links
-  // (src/releases/publish.ts).
+  // binding as a store with nothing but `get`, `head` and `list`). CI's
+  // publish (src/releases/publish.ts) writes each commit's marker and each
+  // manifest's verified signature through it, and deletes a blob it finds
+  // stored wrong; the blobs and manifests go up by upload links.
   "r2_buckets": [
     {
       "binding": "RELEASES",

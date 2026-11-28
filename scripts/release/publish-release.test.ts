@@ -127,7 +127,7 @@ interface Bucket {
 const manifestIdSchema = z.object({ releaseId: z.string() });
 
 describe("publishing a release as CI does, through the staging admin", () => {
-  // Ids of this month, as CI's signer signs only those.
+  // Ids of this month, as the admin gives only those.
   const first = `${releaseMonthPrefix(new Date())}1`;
   const second = `${releaseMonthPrefix(new Date())}2`;
   let dir = "";
@@ -189,11 +189,12 @@ describe("publishing a release as CI does, through the staging admin", () => {
       return;
     }
     const { releaseId } = manifestIdSchema.parse(JSON.parse(body.toString()));
-    // As the admin does: an id published already is the commit's or
-    // another's, and a manifest's link only for a signature that verifies.
+    // As the admin does: an id published already is the commit's (any
+    // manifest of it there) or another's, and a manifest's link only for a
+    // signature that verifies.
     const published = bucket.objects.get(manifestKey(releaseId));
     if (published !== undefined) {
-      if (published.equals(body)) {
+      if (published.toString().includes(COMMIT)) {
         response
           .writeHead(HTTP_OK)
           .end(JSON.stringify({ publishedAs: releaseId }));

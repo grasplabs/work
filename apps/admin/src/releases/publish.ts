@@ -433,7 +433,8 @@ const start = async (env: Env, ask: Ask): Promise<Response> => {
     ({ blob }) => blob
   );
   // Its marked id while that's open and this month's; across a month's
-  // end, the new month's next, so an id of a month gone is never signed.
+  // end, the new month's next, so an id of a month gone is never given a
+  // manifest's link.
   let id = marked?.id;
   if (id === undefined || !isThisMonths(id, now)) {
     id = nextReleaseId(await monthIds(env.RELEASES, now), now);
