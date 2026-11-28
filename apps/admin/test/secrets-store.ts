@@ -4,6 +4,7 @@
  */
 import { afterEach, beforeEach } from "vite-plus/test";
 
+import { settleRuns, settleTimeoutMs } from "./runs.ts";
 import { adminOf, adminSecrets } from "./secrets-store-admin.ts";
 import type { SecretsStoreAdmin } from "./secrets-store-admin.ts";
 
@@ -50,9 +51,14 @@ export const useStoreSecrets = (tokens: { deployer: string }): void => {
     }
   });
   afterEach(async () => {
-    for (const { admin, id } of stored.splice(0)) {
-      // oxlint-disable-next-line no-await-in-loop -- a few, in order
-      await admin.delete(id);
+    // A run the test started reads these: settled first.
+    try {
+      await settleRuns();
+    } finally {
+      for (const { admin, id } of stored.splice(0)) {
+        // oxlint-disable-next-line no-await-in-loop -- a few, in order
+        await admin.delete(id);
+      }
     }
-  });
+  }, settleTimeoutMs + 10_000);
 };

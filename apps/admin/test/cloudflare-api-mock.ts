@@ -2,7 +2,10 @@
  * The fake Cloudflare API (test/cloudflare-api.ts) in place of `fetch` for
  * each test in a file, emptied after each, and its dispatch namespace in
  * place of the admin's `DISPATCHER`: Grasp's account's namespace for the
- * tests' stage, where every client's scripts run.
+ * tests' stage, where every client's scripts run. Every run a test starts
+ * (a deploy the reconciler starts after a staff change, say) is settled
+ * before they go (`settleRuns`): one still going would meet the real
+ * bindings, which workerd can't serve.
  */
 import { clientsNamespace, platformAccountId } from "@grasp-os/shared/names";
 import { env } from "cloudflare:workers";
@@ -10,6 +13,7 @@ import { afterEach, beforeEach, vi } from "vite-plus/test";
 
 import { fakeCloudflareApi } from "./cloudflare-api.ts";
 import { testStage } from "./grasp-account.ts";
+import { settleRuns, settleTimeoutMs, trackRuns } from "./runs.ts";
 
 /**
  * A fake Cloudflare API that lets `token` (the deployer's) in, for each
@@ -26,6 +30,7 @@ export const mockCloudflareApi = (
     clientsNamespace(testStage)
   );
   beforeEach(() => {
+    trackRuns();
     vi.spyOn(globalThis, "fetch").mockImplementation(fake.fetch);
     vi.spyOn(env.DISPATCHER, "get").mockImplementation(
       (name) =>
@@ -34,9 +39,13 @@ export const mockCloudflareApi = (
         namespace.get(name) as Fetcher
     );
   });
-  afterEach(() => {
-    vi.restoreAllMocks();
-    fake.reset();
-  });
+  afterEach(async () => {
+    try {
+      await settleRuns();
+    } finally {
+      vi.restoreAllMocks();
+      fake.reset();
+    }
+  }, settleTimeoutMs + 10_000);
   return fake;
 };
