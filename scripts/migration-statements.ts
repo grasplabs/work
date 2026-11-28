@@ -10,17 +10,23 @@
  * (`delete rows <table>`, `change values <table>.<column>`). Free: an
  * INSERT, an UPDATE of a column the branch adds (its backfill), any write
  * to a table the migration creates (drizzle-kit's rebuild tables), and
- * what triggers write. A table rebuilt whose rows the generator could not
- * write needs `delete rows` too: what the rebuild keeps of it is not seen.
- * Not seen: an `INSERT OR REPLACE` replacing rows (SQLite reports an
- * INSERT).
+ * what triggers write. An INSERT that replaces the rows it conflicts with
+ * (`INSERT OR REPLACE`, `REPLACE INTO`, a constraint's `ON CONFLICT
+ * REPLACE`) needs `delete rows`: SQLite reports it as an INSERT, so its
+ * program is read (EXPLAIN) for the delete it does. `ON CONFLICT DO
+ * UPDATE` is reported as the UPDATE it is. A table rebuilt whose rows the
+ * generator could not write needs `delete rows` too: what the rebuild
+ * keeps of it is not seen.
+ *
+ * SQLite splits the migration into statements itself (each prepared
+ * statement's own text), so each change is told with its statement.
  */
 import { constants } from "node:sqlite";
 import type { DatabaseSync } from "node:sqlite";
 
 /** A write a statement makes, outside triggers. */
 export interface Write {
-  kind: "delete" | "update" | "drop";
+  kind: "delete" | "update" | "drop" | "replace";
   table: string;
   column?: string;
   statement: string;
@@ -45,40 +51,85 @@ export const shownStatement = (statement: string): string => {
 };
 
 /**
- * Runs `sql` on `db` statement by statement (drizzle-kit's breakpoints,
- * which its migrator runs one by one too), with what each writes.
+ * Whether a prepared INSERT replaces rows it conflicts with (REPLACE, or
+ * a constraint's ON CONFLICT REPLACE): its own program deletes them. A
+ * trigger's program comes after it in EXPLAIN, its addresses from 0 again.
+ */
+const replaces = (db: DatabaseSync, statement: string): boolean => {
+  const program = db.prepare(`EXPLAIN ${statement}`).all();
+  const triggers = program.findIndex(({ addr }, at) => at > 0 && addr === 0);
+  return program
+    .slice(0, triggers === -1 ? program.length : triggers)
+    .some(({ opcode }) => opcode === "Delete");
+};
+
+/**
+ * Runs `sql` on `db` statement by statement, as SQLite splits it (each
+ * prepared statement's own text), with what each writes.
  */
 export const runRecordingWrites = (db: DatabaseSync, sql: string): Write[] => {
   const writes: Write[] = [];
-  for (const statement of sql.split("--> statement-breakpoint")) {
-    if (statement.trim() === "") {
-      continue;
-    }
+  let rest = sql;
+  for (;;) {
     const own: Write[] = [];
+    const inserted = new Set<string>();
     db.setAuthorizer((action, first, second, _database, trigger) => {
       if (trigger === null && first !== null && !first.startsWith("sqlite_")) {
-        const last = own.at(-1);
         if (action === constants.SQLITE_DROP_TABLE) {
-          own.push({ kind: "drop", table: first, statement });
-        } else if (
-          action === constants.SQLITE_DELETE &&
-          // SQLite reports a DROP TABLE's own delete right after it: the
-          // drop is judged as a drop, not as this delete.
-          !(last?.kind === "drop" && last.table === first)
-        ) {
-          own.push({ kind: "delete", table: first, statement });
+          own.push({ kind: "drop", table: first, statement: "" });
+        } else if (action === constants.SQLITE_DELETE) {
+          own.push({ kind: "delete", table: first, statement: "" });
         } else if (action === constants.SQLITE_UPDATE && second !== null) {
-          own.push({ kind: "update", table: first, column: second, statement });
+          own.push({
+            kind: "update",
+            table: first,
+            column: second,
+            statement: "",
+          });
+        } else if (action === constants.SQLITE_INSERT) {
+          inserted.add(first);
         }
       }
       return constants.SQLITE_OK;
     });
+    let statement: string;
     try {
-      db.exec(statement);
+      statement = db.prepare(rest).sourceSQL;
+    } catch (error) {
+      // What is left holds no statement: only comments or space.
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "ERR_INVALID_ARG_VALUE"
+      ) {
+        break;
+      }
+      throw error;
     } finally {
       db.setAuthorizer(null);
     }
-    writes.push(...own);
+    rest = rest.slice(rest.indexOf(statement) + statement.length);
+    // A DROP TABLE deletes its rows too: it is judged as a drop.
+    const dropped = new Set(
+      own.filter(({ kind }) => kind === "drop").map(({ table }) => table)
+    );
+    writes.push(
+      ...own
+        .filter(({ kind, table }) => !(kind === "delete" && dropped.has(table)))
+        .map((write) => ({ ...write, statement })),
+      ...(inserted.size > 0 &&
+      // An upsert's DO UPDATE is reported as the UPDATE it is, and an
+      // UPDATE's program deletes and writes rows again too.
+      !own.some(({ kind }) => kind === "update") &&
+      replaces(db, statement)
+        ? [...inserted].map((table) => ({
+            kind: "replace" as const,
+            table,
+            statement,
+          }))
+        : [])
+    );
+    db.exec(statement);
   }
   return writes;
 };
@@ -119,6 +170,12 @@ export const statementChanges = (
       add(
         `delete rows ${table}`,
         "a DELETE, whatever rows it matches",
+        statement
+      );
+    } else if (kind === "replace") {
+      add(
+        `delete rows ${table}`,
+        "an INSERT that replaces the rows it conflicts with, whatever they are",
         statement
       );
     } else if (

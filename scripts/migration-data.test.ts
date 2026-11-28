@@ -121,6 +121,18 @@ describe("deletes and updates, whatever their WHERE", () => {
       "UPDATE `chats` SET `title` = json_remove(`title`, '$.seed');",
       "change values chats.title",
     ],
+    [
+      "INSERT OR REPLACE INTO `chats` (`id`, `kind`, `owner_id`, `created_at`) VALUES ('c-1', 'chat', 'p-1', 1);",
+      "delete rows chats",
+    ],
+    [
+      "REPLACE INTO `chats` (`id`, `kind`, `owner_id`, `created_at`) VALUES ('c-1', 'chat', 'p-1', 1);",
+      "delete rows chats",
+    ],
+    [
+      "INSERT INTO `people` (`id`, `name`) VALUES ('p-1', 'New') ON CONFLICT (`id`) DO UPDATE SET `name` = excluded.`name`;",
+      "change values people.name",
+    ],
   ])("refuses %s", (statement, subject) => {
     expect(flagged(statement)).toStrictEqual([subject]);
   });
@@ -130,6 +142,30 @@ describe("deletes and updates, whatever their WHERE", () => {
       "  - delete rows chats (a DELETE, whatever rows it matches)",
       "      by: DELETE FROM `chats` WHERE `kind` = 'chat';",
     ]);
+  });
+
+  it("refuses a replace whose deletes reach children through ON DELETE", () => {
+    expect(
+      flagged("REPLACE INTO `people` (`id`, `name`) VALUES ('p-1', 'New');")
+    ).toStrictEqual(["delete rows notes", "delete rows people"]);
+  });
+
+  it("refuses an insert into a table whose constraint replaces on conflict", () => {
+    expect(
+      flagged(
+        "INSERT INTO `tags` (`name`) VALUES ('urgent');",
+        `${base}
+--> statement-breakpoint
+CREATE TABLE \`tags\` (\`name\` text NOT NULL UNIQUE ON CONFLICT REPLACE);`
+      )
+    ).toStrictEqual(["delete rows tags"]);
+  });
+
+  it("refuses a delete written before a rebuild of the same table, with no breakpoint between", () => {
+    expect(
+      flagged(`DELETE FROM \`chats\` WHERE \`title\` LIKE 'tmp%';
+${rebuildChats(copyAll).replaceAll("--> statement-breakpoint", "")}`)
+    ).toStrictEqual(["delete rows chats"]);
   });
 
   it("refuses a delete from a table no generated row gets into", () => {
@@ -150,9 +186,10 @@ ALTER TABLE \`__new_locked\` RENAME TO \`locked\`;`,
     ).toStrictEqual(["delete rows locked"]);
   });
 
-  it("passes an insert, a backfill of a new column, and writes to a table the migration creates", () => {
+  it("passes an insert, one that does nothing on conflict, a backfill of a new column, and writes to a table the migration creates", () => {
     expect(
       flagged(`INSERT INTO \`people\` (\`id\`, \`name\`) VALUES ('p-new', 'New');--> statement-breakpoint
+INSERT INTO \`people\` (\`id\`, \`name\`) VALUES ('p-1', 'New') ON CONFLICT DO NOTHING;--> statement-breakpoint
 ALTER TABLE \`chats\` ADD \`summary\` text;--> statement-breakpoint
 UPDATE \`chats\` SET \`summary\` = \`title\` || ' by ' || \`owner_id\`;--> statement-breakpoint
 CREATE TABLE \`drafts\` (\`id\` text PRIMARY KEY NOT NULL, \`body\` text);--> statement-breakpoint
@@ -202,44 +239,54 @@ CREATE TRIGGER \`people_touch\` AFTER INSERT ON \`people\` BEGIN UPDATE \`chats\
 });
 
 describe("history replayed as if added", () => {
-  it("refuses core 0050, 0113 and 0192's deletes and rewrites", () => {
-    const core = "apps/core/src/db/core/migrations";
-    expect(flaggedInHistory(core, 50)).toStrictEqual([
-      "change values dependency_locks.lock",
-      "delete rows dependency_requests",
-    ]);
-    expect(flaggedInHistory(core, 113)).toStrictEqual([
-      "delete rows workflow_binding_approvals",
-      "delete rows sdk_release_pins",
-    ]);
-    expect(flaggedInHistory(core, 192)).toContain("delete rows permissions");
-  });
+  // Replays a real database whole: slower than the rest.
+  it(
+    "refuses core 0050, 0113 and 0192's deletes and rewrites",
+    { timeout: 60_000 },
+    () => {
+      const core = "apps/core/src/db/core/migrations";
+      expect(flaggedInHistory(core, 50)).toStrictEqual([
+        "change values dependency_locks.lock",
+        "delete rows dependency_requests",
+      ]);
+      expect(flaggedInHistory(core, 113)).toStrictEqual([
+        "delete rows workflow_binding_approvals",
+        "delete rows sdk_release_pins",
+      ]);
+      expect(flaggedInHistory(core, 192)).toContain("delete rows permissions");
+    }
+  );
 
-  it("refuses deletes from today's permissions, accounts and stored records", () => {
-    const added = (dir: string, sql: string) => {
-      const migrations = repo(dir);
-      return errorsOf([
-        ...migrations,
-        { idx: migrations.length, tag: "9999_next", sql },
-      ])
-        .errors.flatMap((found) => found.split("\n"))
-        .filter((line) => line.startsWith("  - "))
-        .map((line) => line.replace(/^ {2}- /u, "").replace(/ \(.*\)$/u, ""));
-    };
-    const core = "apps/core/src/db/core/migrations";
-    expect(
-      added(core, "DELETE FROM `permissions` WHERE `subject_type` = 'agent';")
-    ).toStrictEqual(["delete rows permissions"]);
-    expect(added(core, "DELETE FROM `accounts`;")).toStrictEqual([
-      "delete rows accounts",
-    ]);
-    expect(
-      added(
-        "apps/core/src/db/data-store/migrations",
-        "DELETE FROM `sdk_records`;"
-      )
-    ).toStrictEqual(["delete rows sdk_records"]);
-  });
+  // Replays a real database whole: slower than the rest.
+  it(
+    "refuses deletes from today's permissions, accounts and stored records",
+    { timeout: 60_000 },
+    () => {
+      const added = (dir: string, sql: string) => {
+        const migrations = repo(dir);
+        return errorsOf([
+          ...migrations,
+          { idx: migrations.length, tag: "9999_next", sql },
+        ])
+          .errors.flatMap((found) => found.split("\n"))
+          .filter((line) => line.startsWith("  - "))
+          .map((line) => line.replace(/^ {2}- /u, "").replace(/ \(.*\)$/u, ""));
+      };
+      const core = "apps/core/src/db/core/migrations";
+      expect(
+        added(core, "DELETE FROM `permissions` WHERE `subject_type` = 'agent';")
+      ).toStrictEqual(["delete rows permissions"]);
+      expect(added(core, "DELETE FROM `accounts`;")).toStrictEqual([
+        "delete rows accounts",
+      ]);
+      expect(
+        added(
+          "apps/core/src/db/data-store/migrations",
+          "DELETE FROM `sdk_records`;"
+        )
+      ).toStrictEqual(["delete rows sdk_records"]);
+    }
+  );
 });
 
 describe("rows before and after", () => {

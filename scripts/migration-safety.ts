@@ -779,15 +779,19 @@ const dataOfAdded = (
   }
   // A migration the rows refuse gets rows of the next shape, so it is not
   // refused for their shape alone (ROW_SHAPES).
-  const [first, ...others] = ROW_SHAPES.map((shape) =>
-    replayOnRows(migrations, added, shape)
-  );
-  if (first === undefined) {
-    return { results: new Map(), leftOut: [], skipped: [] };
+  const [firstShape = {}, ...otherShapes] = ROW_SHAPES;
+  const first = replayOnRows(migrations, added, firstShape);
+  let chosen = first;
+  // Each next shape is replayed only while the rows refuse a migration.
+  for (const shape of otherShapes) {
+    if (appliesToRows(chosen)) {
+      break;
+    }
+    chosen = replayOnRows(migrations, added, shape);
   }
-  const chosen = appliesToRows(first)
-    ? first
-    : (others.find(appliesToRows) ?? first);
+  if (!appliesToRows(chosen)) {
+    chosen = first;
+  }
   const skippedFirst = new Set(first.skipped.map(({ table }) => table));
   return {
     results: chosen.results,
