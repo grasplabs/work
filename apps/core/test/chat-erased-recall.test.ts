@@ -883,7 +883,7 @@ describe("what a chat shows of what it read from the Brain", () => {
         confirmed: "agent.held_call_not_found",
         listed: [],
         exported: [{ status: "withdrawn", request: null }],
-        heldAgain: "agent.history_revoked",
+        heldAgain: "agent.erasure_unchecked",
         written: [],
         events: { withdrawn: 1, confirmed: 0 },
         toldNext: true,

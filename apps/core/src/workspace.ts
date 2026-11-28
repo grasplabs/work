@@ -2551,8 +2551,16 @@ export class Workspace extends DurableObject<Env> {
   ): Promise<HeldAppCallRow> {
     const chat = this.#ownChat(chatId, personId);
     await this.#lapseHeldAppCalls(chat.id, now);
+    const erasedKey = `${erasedKeyPrefix}${chat.id}`;
+    const counted = JSON.stringify(this.ctx.storage.kv.get(erasedKey) ?? []);
     await this.#erasedUnseen(chat);
     const kept = this.ctx.storage.transactionSync(() => {
+      // An erasure found meanwhile withdrew what waited: this too.
+      if (
+        JSON.stringify(this.ctx.storage.kv.get(erasedKey) ?? []) !== counted
+      ) {
+        throw agentErrors.create("agent.erasure_unchecked");
+      }
       const waiting = this.#db
         .select()
         .from(heldAppCalls)
@@ -5245,13 +5253,14 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Refuses holding a write in chat `chat` while its model may still have
-   * what an erasure took before it: a run of the chat resting on an erased
-   * source that no check before a model request withheld yet
-   * (`#withheldRuns` marks it), whose result the request may quote
-   * (`agent.history_revoked`); or while that can't be asked
-   * (`agent.erasure_unchecked`). A write held before the erasure is
-   * withdrawn once it is found (`#dropErasedCopies`).
+   * Refuses (`agent.erasure_unchecked`) holding a write in chat `chat`
+   * while its model may still have what an erasure took, or while that
+   * can't be asked: a run of the chat resting on an erased source that no
+   * check before a model request withheld yet (`#withheldRuns` marks it,
+   * as an erased source is never readable again), whose result the request
+   * may quote. Held after the next request, as the model no longer has it.
+   * A write held before the erasure is withdrawn once it is found
+   * (`#dropErasedCopies`).
    */
   async #erasedUnseen(chat: Chat): Promise<void> {
     const unmarked = this.#db
@@ -5276,7 +5285,7 @@ export class Workspace extends DurableObject<Env> {
       throw agentErrors.create("agent.erasure_unchecked");
     }
     if (erased.size > 0) {
-      throw agentErrors.create("agent.history_revoked");
+      throw agentErrors.create("agent.erasure_unchecked");
     }
   }
 
