@@ -606,6 +606,44 @@ describe("an organization's rollout", () => {
     }
   });
 
+  it("restores onto the release before a database its migration left ahead, at a name that release lists for another Worker", async () => {
+    // Core's new migration shares its name with connect's own.
+    const { client, from, to } = await clientAndRelease({
+      migrations: {
+        "0000_init.sql": "CREATE TABLE a (id TEXT);",
+        "0000_connect.sql": "CREATE TABLE d (id TEXT);",
+      },
+    });
+    const { core } = await scriptsOf(client.clientId);
+    cloudflare.failNext(uploading(core), 400);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    await using _runs = followAdminRuns();
+    try {
+      const runId = await rollOut(client.clientId, to);
+      await ended(rollouts, runId);
+
+      expect({
+        ...(await deployOf(client.clientId)),
+        releases: await releasesOf(client.clientId),
+        failed: await auditedOf(client.clientId, "deploy.fail", [
+          "error",
+          "restored",
+        ]),
+      }).toStrictEqual({
+        deploy: {
+          releaseId: to,
+          status: "failed",
+          error: "cloudflare_400_10000",
+        },
+        runner: null,
+        releases: on(from),
+        failed: [{ error: "cloudflare_400_10000", restored: true }],
+      });
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
   it("restores at once when the probe gets a definite wrong answer, every Worker uploaded whole again", async () => {
     const { client, from, to } = await clientAndRelease(connectChanged);
     const { connect } = await scriptsOf(client.clientId);

@@ -2615,25 +2615,24 @@ const freshConnectVersion = async (
 
 /**
  * The releases imported after `manifest`, when core's probe `answer`
- * names a migration `manifest` doesn't list: what may show a database
- * ahead of it (`installMismatch`). None, unread, when it names none.
+ * names, for one of core's databases, a migration other than the last
+ * `manifest` lists for that binding: what may show that database ahead
+ * of it (`installMismatch`, which checks each binding alone). None,
+ * unread, while every database is at its last.
  */
 const laterOf = async (
   db: AdminDatabase,
   manifest: ReleaseManifest,
   answer: ProvisionProbe
 ): Promise<ReleaseManifest[]> => {
-  const listed = new Set(
-    Object.values(manifest.workers).flatMap((worker) =>
-      worker.d1Databases.flatMap(({ migrations }) =>
-        migrations.map(({ name }) => name)
-      )
-    )
+  const schema = answer.schema ?? {};
+  const elsewhere = workerOf(manifest, "core").d1Databases.some(
+    ({ binding, migrations }) => {
+      const at = schema[binding] ?? null;
+      return at !== null && at !== migrations.at(-1)?.name;
+    }
   );
-  const unlisted = Object.values(answer.schema ?? {}).some(
-    (name) => name !== null && !listed.has(name)
-  );
-  return unlisted ? await importedAfter(db, manifest.releaseId) : [];
+  return elsewhere ? await importedAfter(db, manifest.releaseId) : [];
 };
 
 /** How long core's signed probe may take, its body included. */
