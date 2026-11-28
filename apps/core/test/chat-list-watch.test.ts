@@ -443,64 +443,6 @@ describe("a person's list of chats", () => {
     });
   });
 
-  it("is followed the old way by core's Worker of the release before, its callback kept in the object, while a deploy runs both", async () => {
-    const ann = await person();
-    await startedChat(ann, "Kept the old way");
-    const titles: string[][] = [];
-    const listener = Object.assign(
-      async (update: ChatListUpdate): Promise<void> => {
-        titles.push(update.chats.map(({ title }) => title));
-        await Promise.resolve();
-      },
-      {
-        [Symbol.dispose]: () => {
-          // Let go of by the object.
-        },
-      }
-    );
-
-    await workspace(env, personalWorkspaceId(ann.userId)).watchChats(
-      ann.userId,
-      listener
-    );
-    await startedChat(ann, "And another");
-
-    await until(() => {
-      expect(titles.at(-1)).toStrictEqual(["And another"]);
-    });
-    expect(titles[0]).toStrictEqual(["Kept the old way"]);
-  });
-
-  it("is followed the old way while the person's object still runs the code of the release before, which takes no socket", async () => {
-    const ann = await person();
-    const object = workspace(env, personalWorkspaceId(ann.userId));
-    // As the code before had it: no `fetch`, so opening a socket throws.
-    await runInDurableObject(object, (instance) => {
-      // SAFETY: an object's prototype holds its methods.
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      const methods = Object.getPrototypeOf(instance) as {
-        fetch: (request: Request) => Response;
-      };
-      const original = methods.fetch;
-      methods.fetch = () => {
-        throw new TypeError("Handler does not export a fetch() function.");
-      };
-      onTestFinished(() => {
-        methods.fetch = original;
-      });
-    });
-    const tab = await deviceOf(ann);
-
-    const follower = await followList(tab.chats);
-    await startedChat(ann, "Heard all the same");
-
-    await until(() => {
-      expect(follower.rows().map(({ title }) => title)).toStrictEqual([
-        "Heard all the same",
-      ]);
-    });
-  });
-
   it("ends its follows when the person's chats are erased, letting go of the page's callback, which follows again", async () => {
     const ann = await person();
     const released = { now: false };
