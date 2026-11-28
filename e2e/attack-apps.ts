@@ -352,6 +352,19 @@ const routes = (): Record<string, string> => {
     }
     return link.getAttribute(unread("hr", "ef")) ?? "no address";
   })();
+  // A link of the document's own, one with an address already (as core's
+  // preloads are), pointed elsewhere through its attribute's value and
+  // made a preconnect: none is left for the page to find.
+  results.documentLink = (() => {
+    const found = document.querySelector(unread("li", "nk") + "[href]");
+    if (found === null) {
+      return "none";
+    }
+    return attempt(() => {
+      (found.getAttributeNode(unread("hr", "ef")) as Attr).value = "${attacker}/existing";
+      Reflect.set(found, "rel", "preconnect");
+    });
+  })();
   // A link the parser would make from a string: refused as any markup.
   results.linkMarkup = attempt(() => {
     holder.insertAdjacentHTML("beforeend", '<li' + 'nk rel="preconnect" href="${attacker}/markup">');

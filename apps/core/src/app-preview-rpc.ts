@@ -13,12 +13,14 @@ import type {
 import { draftSealFailures } from "@grasp-os/shared/functions";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
+import { log } from "@grasp-os/shared/log";
 import {
   pageErrors,
   pageHrefSchema,
   pageProblemSchema,
+  previewStartSchema,
 } from "@grasp-os/shared/pages";
-import type { PageProblem } from "@grasp-os/shared/pages";
+import type { PageProblem, PreviewStart } from "@grasp-os/shared/pages";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -127,6 +129,36 @@ const buildFailed = (error: unknown): boolean =>
   "code" in error &&
   typeof error.code === "string" &&
   (error.code === "page.build_failed" || draftSealFailures.has(error.code));
+
+/**
+ * Times the stages of one open of a preview, for its log line
+ * (`preview.open`): each stage's milliseconds, by name, added up where a
+ * stage runs twice (a fallback builds again).
+ */
+const stageClock = () => {
+  const took: Record<string, number> = {};
+  const timed = async <T>(
+    stage: string,
+    work: () => Promise<T>
+  ): Promise<T> => {
+    const from = Date.now();
+    try {
+      return await work();
+    } finally {
+      took[stage] = (took[stage] ?? 0) + Date.now() - from;
+    }
+  };
+  return { took, timed };
+};
+
+/** The code a refusal carries, for a log line: never its message. */
+const codeOf = (error: unknown): string =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  typeof error.code === "string"
+    ? error.code
+    : "error";
 
 export class AppPreviewRpc extends CoreRpcTarget implements AppPreviewApi {
   readonly #env: Env;
@@ -361,7 +393,7 @@ export class AppPreviewRpc extends CoreRpcTarget implements AppPreviewApi {
       previewed.references,
       id
     );
-    const { scope } = await previewFrame(by.userId, id, built.artifact, {
+    const { scope } = await previewFrame(id, built.artifact, {
       updates: true,
     });
     await stageModules(this.#env, appModules(built.code, scope));
@@ -468,11 +500,70 @@ export class AppPreviewRpc extends CoreRpcTarget implements AppPreviewApi {
     name: string,
     opened: { checkpoint?: number; version?: number | undefined }
   ): Promise<PreviewBundle> {
-    const now = await this.#previewed(id, opened);
+    // One line per open, whatever its outcome: how long each stage took,
+    // so a slow open can be told from the logs. Nothing of the person's.
+    const { took, timed } = stageClock();
+    const started = Date.now();
+    const line: Record<string, string | number> = { appId: id };
+    try {
+      const bundle = await this.#loadTimed(by, id, name, opened, timed);
+      Object.assign(line, {
+        revision: bundle.revision,
+        outcome: "opened",
+        // Whether this open staged the build's frame, as none before had.
+        staging: bundle.cold === true ? "staged" : "kept",
+        shows: bundle.fallback === true ? "fallback" : "draft",
+      });
+      return bundle;
+    } catch (error) {
+      Object.assign(line, { outcome: "failed", code: codeOf(error) });
+      throw error;
+    } finally {
+      const { draftMs = 0, sealMs = 0, buildMs = 0, ...rest } = took;
+      log.info("preview.open", {
+        ...line,
+        draftMs,
+        sealMs,
+        // The build waits on the seal for the references it imports.
+        pageBuildMs: buildMs - sealMs,
+        ...rest,
+        ms: Date.now() - started,
+      });
+    }
+  }
+
+  /** `#loadPreview`, each stage timed by `timed`. */
+  async #loadTimed(
+    by: Identity,
+    id: AppId,
+    name: string,
+    opened: { checkpoint?: number; version?: number | undefined },
+    timed: ReturnType<typeof stageClock>["timed"]
+  ): Promise<PreviewBundle> {
+    const previewed = async (asked: {
+      checkpoint?: number;
+      version?: number | undefined;
+      fallback?: boolean;
+    }): Promise<Previewed> => {
+      const read = await timed(
+        "draftMs",
+        async () => await this.#previewed(id, asked)
+      );
+      return {
+        ...read,
+        references: async () => await timed("sealMs", read.references),
+      };
+    };
+    const build = async (from: Previewed): Promise<PreviewPage> =>
+      await timed(
+        "buildMs",
+        async () => await this.#previewBuild(from.files, from.references, id)
+      );
+    const now = await previewed(opened);
     let shown = now;
     let built: PreviewPage;
     try {
-      built = await this.#previewBuild(now.files, now.references, id);
+      built = await build(now);
     } catch (error) {
       // Only the draft as it is now, with changes of its own, falls back.
       const fallsBack =
@@ -483,8 +574,8 @@ export class AppPreviewRpc extends CoreRpcTarget implements AppPreviewApi {
         throw error;
       }
       try {
-        shown = await this.#previewed(id, { fallback: true });
-        built = await this.#previewBuild(shown.files, shown.references, id);
+        shown = await previewed({ fallback: true });
+        built = await build(shown);
       } catch {
         // No version of the App that builds: the draft's own failure.
         throw error;
@@ -496,16 +587,17 @@ export class AppPreviewRpc extends CoreRpcTarget implements AppPreviewApi {
     const updates = now.revision !== readOnlyRevision;
     // A preview reads no real data; its frame still runs exactly this
     // build and nothing else, until the page hands it an update.
-    const { scope, artifact } = await previewFrame(
-      by.userId,
-      id,
-      built.artifact,
-      { updates }
-    );
-    await stageFrame(this.#env, artifact, built.code, {
-      preview: true,
-      scope,
+    const { scope, artifact } = await previewFrame(id, built.artifact, {
+      updates,
     });
+    const cold = await timed(
+      "stageMs",
+      async () =>
+        await stageFrame(this.#env, artifact, built.code, {
+          preview: true,
+          scope,
+        })
+    );
     return {
       app: id,
       name,
@@ -528,6 +620,7 @@ export class AppPreviewRpc extends CoreRpcTarget implements AppPreviewApi {
           }
         : {}),
       ...(shown === now ? {} : { fallback: true }),
+      ...(cold ? { cold: true } : {}),
     };
   }
 
@@ -584,6 +677,24 @@ export class AppPreviewRpc extends CoreRpcTarget implements AppPreviewApi {
       { checks: false }
     );
     return { ...built, serverUnbuilt };
+  }
+
+  /**
+   * Logs how a frame of the preview started, as its page measured it
+   * (`preview.started`): only from one who builds the App, held to the
+   * report's shape, nothing of theirs in it.
+   */
+  async started(app: string, start: PreviewStart): Promise<void> {
+    await withPerson(this.#check, async (by) => {
+      const { id } = await appFor(this.#env, by, app, "builder");
+      const told = pageErrors.parse("page.invalid", previewStartSchema, start);
+      const { cold, ...measured } = told;
+      log.info("preview.started", {
+        appId: id,
+        ...measured,
+        staging: cold === true ? "staged" : "kept",
+      });
+    });
   }
 
   /**

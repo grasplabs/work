@@ -14,6 +14,7 @@ import type {
   LiveVersion,
 } from "@grasp-os/shared/drafts";
 import { appIdSchema } from "@grasp-os/shared/ids";
+import { pageFrameMounted, pageFrameReady } from "@grasp-os/shared/pages";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { Subject } from "@grasp-os/shared/subject";
 import type {
@@ -40,6 +41,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { activeChat, setActiveChat } from "../chat/active-chat.ts";
 import { ChatPanel } from "../chat/chat-panel.tsx";
@@ -702,11 +704,18 @@ class PreviewingCore extends RpcTarget {
   readonly reached = this.#reached.promise;
   readonly #refusal: string | undefined;
   readonly #bundle: PreviewBundle | undefined;
+  readonly #held: Promise<unknown> | undefined;
 
-  constructor(refusal?: string, bundle?: PreviewBundle) {
+  /** With `held`, the first open answers only once it settles. */
+  constructor(
+    refusal?: string,
+    bundle?: PreviewBundle,
+    held?: Promise<unknown>
+  ) {
     super();
     this.#refusal = refusal;
     this.#bundle = bundle;
+    this.#held = held;
   }
 
   authenticate(): this {
@@ -730,6 +739,10 @@ class PreviewingCore extends RpcTarget {
   async open(...args: unknown[]): Promise<PreviewBundle> {
     this.asked.push(args);
     this.#reached.resolve(true);
+    if (this.asked.length === 1) {
+      await this.#held;
+    }
+
     if (this.#refusal !== undefined) {
       throw Object.assign(new Error("Refused."), { code: this.#refusal });
     }
@@ -739,6 +752,68 @@ class PreviewingCore extends RpcTarget {
     return await Promise.withResolvers<never>().promise;
   }
 }
+
+/**
+ * What the preview's place shows now: whether it says the preview is
+ * being prepared, and its frame: none yet, there but covered (inert,
+ * under the cover), or shown.
+ */
+const previewShown = () => {
+  const frame = document.querySelector("iframe");
+  const preparing = [...document.querySelectorAll('[role="status"]')].some(
+    (said) => said.textContent === "Preparing the preview"
+  );
+  if (frame === null) {
+    return { preparing, frame: "none" };
+  }
+  return {
+    preparing,
+    frame: frame.closest("[inert]") === null ? "shown" : "covered",
+  };
+};
+
+/**
+ * The preview's frame starting as a browser's would: its document says
+ * it listens, then its page says it has mounted, for the start the page
+ * handed it.
+ */
+const startFrame = async (): Promise<void> => {
+  const frame = document.querySelector("iframe");
+  if (frame === null) {
+    throw new Error("The preview has a frame");
+  }
+  // The frame's window, as a browser's would answer: happy-dom loads no
+  // frame's document.
+  const handed = vi.fn<(message: unknown) => void>();
+  const window_ = { postMessage: handed };
+  Object.defineProperty(frame, "contentWindow", { value: window_ });
+  const load =
+    new URL(frame.src, document.baseURI).searchParams.get("load") ?? "";
+  const tell = async (data: Record<string, unknown>): Promise<void> => {
+    await act(async () => {
+      // As the browser sends it: from the frame's window, its origin
+      // opaque.
+      window.dispatchEvent(
+        Object.assign(new Event("message"), {
+          data,
+          source: window_,
+          origin: "null",
+        })
+      );
+      await Promise.resolve();
+    });
+  };
+  await tell({ type: pageFrameReady, load, supported: true });
+  await vi.waitFor(() => {
+    expect(handed).not.toHaveBeenCalledTimes(0);
+  });
+  const [start] = handed.mock.calls[0] ?? [];
+  const { artifact, generation } = z
+    .object({ artifact: z.string(), generation: z.string() })
+    .parse(start);
+  await tell({ type: pageFrameMounted, load, artifact, generation });
+  await settled();
+};
 
 /**
  * Core's preview of the App's `desk` page, of its version 1, as it
@@ -858,7 +933,7 @@ describe(AppWorkspace, () => {
     );
     const reading = {
       loading: [...document.querySelectorAll('[role="status"]')].some(
-        (live) => live.textContent === "Loading…"
+        (live) => live.textContent === "Preparing the preview"
       ),
       frame: document.querySelector("iframe"),
     };
@@ -1031,6 +1106,99 @@ describe(AppWorkspace, () => {
     });
   });
 
+  it("covers the preview from the first moment until its frame runs: never a blank frame while its draft is read, its frame opens, or it starts", async () => {
+    const core = new PreviewingCore(undefined, deskOfVersion1);
+    socketsTo(core);
+    const read = Promise.withResolvers<Draft>();
+    await opened(
+      fakeApps().apps,
+      identityOf(false),
+      "chat-previewing",
+      async () => await Promise.resolve(watching()),
+      undefined,
+      async () => await read.promise
+    );
+    const steps = [previewShown()];
+    await act(async () => {
+      read.resolve(draftOf("invoice-desk"));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await core.reached;
+    });
+    await settled();
+    steps.push(previewShown());
+    // What the page reads of the person's acts, which happy-dom lacks.
+    Object.defineProperty(navigator, "userActivation", {
+      configurable: true,
+      value: { isActive: false },
+    });
+    try {
+      await startFrame();
+    } finally {
+      Reflect.deleteProperty(navigator, "userActivation");
+    }
+    steps.push(previewShown());
+
+    expect(steps).toStrictEqual([
+      { preparing: true, frame: "none" },
+      { preparing: true, frame: "covered" },
+      { preparing: false, frame: "shown" },
+    ]);
+  });
+
+  it("starts a preview that failed afresh at once when a write came while it started, never waiting for the write after", async () => {
+    const held = Promise.withResolvers<boolean>();
+    const core = new PreviewingCore("page.not_found", undefined, held.promise);
+    socketsTo(core);
+    let send: ((update: ChatUpdate) => void) | undefined;
+    let draft = draftOf("invoice-desk");
+    await opened(
+      fakeApps().apps,
+      identityOf(false),
+      "chat-writing",
+      async (_chat, _after, received) => {
+        send = received;
+        return await Promise.resolve(watching());
+      },
+      undefined,
+      async () => await Promise.resolve(draft)
+    );
+    await act(async () => {
+      await core.reached;
+    });
+    // The agent writes while the start is on its way, and goes on: the
+    // draft's next revision, which may be the one with the page.
+    draft = { ...draftOf("invoice-desk"), revision: 2 };
+    await act(async () => {
+      send?.({
+        messages: [],
+        partial: null,
+        running: true,
+        stopped: null,
+        held: 0,
+        worked: 1,
+      });
+      await Promise.resolve();
+    });
+    await settled();
+    // The start began at the revision before: it fails now.
+    await act(async () => {
+      held.resolve(true);
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(core.asked).toHaveLength(2);
+    });
+    await settled();
+
+    expect({
+      opens: core.asked.length,
+      // Failed again at the revision it started at, while Grasp works on.
+      updating: says("Updating Invoices…"),
+    }).toStrictEqual({ opens: 2, updating: true });
+  });
+
   it("says in the preview's place why it didn't start, with Try again, and Fix with Grasp, which asks the App's chat", async () => {
     const core = new PreviewingCore("page.build_failed");
     socketsTo(core);
@@ -1054,6 +1222,7 @@ describe(AppWorkspace, () => {
     const said = {
       why: says("The draft's code doesn't build."),
       details: button("Technical details") instanceof HTMLButtonElement,
+      cover: previewShown().preparing,
     };
     await press(button("Fix with Grasp"));
     await press(button("Try again"));
@@ -1067,7 +1236,7 @@ describe(AppWorkspace, () => {
       })),
       opens: core.asked.length,
     }).toStrictEqual({
-      said: { why: true, details: true },
+      said: { why: true, details: true, cover: false },
       sent: [{ chatId: "chat-broken", asks: true, at: true }],
       opens: 2,
     });

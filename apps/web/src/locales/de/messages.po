@@ -10262,6 +10262,7 @@ msgid "Loading more {many}"
 msgstr "Weitere {many} werden geladen"
 
 #: src/connections/integrations-skeleton.tsx
+#: src/pages/page-frame.tsx
 msgid "Loading the app"
 msgstr "Die App wird geladen"
 
@@ -10290,7 +10291,6 @@ msgid "Loading the value"
 msgstr "Der Wert wird geladen"
 
 #: src/activity/audit-log.tsx
-#: src/apps/app-workspace.tsx
 #: src/frame/page-states.tsx
 #: src/frame/ui-words.tsx
 #: src/settings/erasures.tsx
@@ -13698,6 +13698,11 @@ msgstr "Vorliebe"
 #: src/agents/agent-templates.ts
 msgid "Prepare meetings"
 msgstr "Meetings vorbereiten"
+
+#: src/apps/draft-preview.tsx
+#: src/pages/page-frame.tsx
+msgid "Preparing the preview"
+msgstr "Die Vorschau wird vorbereitet"
 
 #: src/frame/ui-words.tsx
 msgctxt "ranges of dates to pick"

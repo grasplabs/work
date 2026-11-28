@@ -246,6 +246,28 @@ export const pageProblemSchema = z.strictObject({
 });
 export type PageProblem = z.output<typeof pageProblemSchema>;
 
+/** The longest a start's stage is said to have taken: past any limit of one. */
+const startMsMax = 10 * 60 * 1000;
+const startMs = z.int().min(0).max(startMsMax).optional();
+
+/**
+ * How a preview's frame started, as the page measured it, for core's log
+ * line (`apps.preview.started`): how long it took to be opened, to say it
+ * listens, and to have rendered, from the start; how many modules it
+ * loads; whether core staged its build for this open (`cold`); and how
+ * it ended, `running` or why it failed. Numbers and a word, nothing of
+ * the person's or the App's.
+ */
+export const previewStartSchema = z.strictObject({
+  outcome: z.string().regex(/^[a-z-]{1,32}$/u),
+  openMs: startMs,
+  readyMs: startMs,
+  mountedMs: startMs,
+  modules: z.int().min(0).max(100_000).optional(),
+  cold: z.boolean().optional(),
+});
+export type PreviewStart = z.infer<typeof previewStartSchema>;
+
 /** What an App's server code wrote with `console`, one line of one call. */
 export interface ServerLog {
   /** When, ISO 8601. */

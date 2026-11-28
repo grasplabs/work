@@ -398,6 +398,11 @@ export interface PreviewBundle extends Omit<PageBundle, "version" | "lease"> {
    * builds.
    */
   fallback?: true;
+  /**
+   * Core staged the build's frame for this open, as none before had: the
+   * first open of a new build (`PreviewStart.cold`).
+   */
+  cold?: true;
 }
 
 /**

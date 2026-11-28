@@ -3,6 +3,7 @@ import { colors } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 
+import { FrameLoading } from "../pages/frame-cover.tsx";
 import { PreviewFrame } from "../pages/page-frame.tsx";
 import type { FrameFix, PageEnded } from "../pages/page-frame.tsx";
 import type { ReadOnlyShown } from "./app-workspace.tsx";
@@ -28,6 +29,27 @@ const styles = stylex.create({
 // share.
 
 /**
+ * The preview's place while its draft is read, before its frame starts:
+ * the frame's own cover, where the frame will be, so nothing moves as it
+ * starts under it.
+ */
+export const DraftPreviewLoading = ({
+  width,
+}: {
+  width?: PreviewWidth | undefined;
+}) => {
+  const { t } = useLingui();
+  return (
+    <section
+      aria-busy
+      {...stylex.props(styles.preview, previewWidths[width ?? "desktop"])}
+    >
+      <FrameLoading label={t`Preparing the preview`} />
+    </section>
+  );
+};
+
+/**
  * The preview of App `app` as its `draft` has it: its pages, as one single
  * page app the person moves through as they would the App; of the draft's
  * checkpoint or the App's version `shown` when History opened one,
@@ -47,6 +69,7 @@ export const DraftPreview = ({
   shown,
   onEnded,
   onRunning,
+  onReload,
   onTestDataStale,
   onFix,
 }: {
@@ -63,6 +86,8 @@ export const DraftPreview = ({
   onEnded?: PageEnded;
   /** Told each time its pages started and run (`PreviewFrame`). */
   onRunning?: () => void;
+  /** Told each time its frame starts again (`PreviewFrame`). */
+  onReload?: () => void;
   /** Told its test data doesn't fit the draft's data model (`PreviewFrame`). */
   onTestDataStale?: () => void;
   /** Fix with Grasp, where the draft broke the preview (`PreviewFrame`). */
@@ -87,6 +112,7 @@ export const DraftPreview = ({
         {...(draft === undefined ? {} : { revision: draft.revision })}
         {...(onEnded === undefined ? {} : { onEnded })}
         {...(onRunning === undefined ? {} : { onRunning })}
+        {...(onReload === undefined ? {} : { onReload })}
         {...(onTestDataStale === undefined ? {} : { onTestDataStale })}
         {...(onFix === undefined ? {} : { onFix })}
       />

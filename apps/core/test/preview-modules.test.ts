@@ -156,6 +156,11 @@ const staffSurfaces = (events: readonly AuditEvent[]): unknown[] =>
     .filter(({ action }) => action === "staff.accessed")
     .map(({ detail }) => detail.surface);
 
+/** Whether R2's `key` is where a frame's build is staged. */
+const isStagedKey = (key: unknown): boolean =>
+  typeof key === "string" &&
+  (key.startsWith("page-modules/") || key.startsWith("page-frames/"));
+
 /** A problem a page reports as engines write it: each frame names its module's whole address. */
 const problemOf = (address: string) => ({
   kind: "error" as const,
@@ -290,7 +295,7 @@ describe(
       });
     });
 
-    it("reads only modules of its own preview's scope: not another App's, nor another builder's preview's, by their hashes", async () => {
+    it("reads only modules of its own App's preview's scope, which every builder of the App shares: not another App's, by its hash", async () => {
       const builder = await signedInApi(idp, "builder");
       const { app } = await deskDraft(builder);
       const own = await framed(await builder.api.apps.preview.open(app));
@@ -307,22 +312,25 @@ describe(
       );
       expect({
         own: await asked(mine),
+        // Another builder's preview of the same draft is the App's, staged
+        // once in the scope every builder's frame reads.
+        shared: theirs.map(({ scope }) => scope === mine.scope),
         // Its hash, under the frame's own scope and token: another App's
-        // kept nowhere there; another builder's preview of the same draft
-        // is the same code, staged under this scope too.
+        // kept nowhere there.
         underOwnScope: await Promise.all(
           theirs.map(async ({ hash }) => await asked({ ...mine, hash }))
         ),
         // Its hash and scope, under the frame's token: not that scope's.
-        underOwnToken: await Promise.all(
-          theirs.map(
-            async ({ scope, hash }) => await asked({ ...mine, scope, hash })
-          )
-        ),
+        otherAppUnderOwnToken: await asked({
+          ...mine,
+          scope: theirs[0]?.scope ?? "",
+          hash: theirs[0]?.hash ?? "",
+        }),
       }).toStrictEqual({
         own: 200,
+        shared: [false, true],
         underOwnScope: [404, 200],
-        underOwnToken: [403, 403],
+        otherAppUnderOwnToken: 403,
       });
     });
 
@@ -362,9 +370,14 @@ describe(
       const { app, revision } = await deskDraft(builder);
       const opened = await builder.api.apps.preview.open(app);
       const frame = await framed(opened);
-      // Another builder's preview of the same draft, in a scope of its own.
-      const otherBuilder = await anotherBuilder(builder, app);
-      const other = await framed(await otherBuilder.api.apps.preview.open(app));
+      // Another App's preview, in a scope of its own.
+      const { id: otherId } = await builder.api.apps.create({ name: "Other" });
+      await release(builder, otherId, deskFiles("Other"));
+      await chatWithDraft(builder, appIdSchema.parse(otherId), {
+        "src/routes/index.tsx":
+          deskFiles("Drafted elsewhere").files["src/routes/index.tsx"] ?? "",
+      });
+      const other = await framed(await builder.api.apps.preview.open(otherId));
       const address = pageModuleOf(frame);
       const key = moduleKeyOf(address);
       const staged = await env.FILES.get(key);
@@ -429,6 +442,138 @@ describe(
         moved: 404,
         sameModule: true,
         healed: { status: 200, code: original },
+      });
+    });
+
+    it("stages a draft's build once for every builder who opens it: each object written once, and an open after writes nothing", async () => {
+      const builder = await signedInApi(idp, "builder");
+      const { app } = await deskDraft(builder);
+      const other = await anotherBuilder(builder, app);
+      const puts = vi.spyOn(env.FILES, "put");
+      try {
+        const [mine, theirs] = await Promise.all([
+          builder.api.apps.preview.open(app),
+          other.api.apps.preview.open(app),
+        ]);
+        const written = puts.mock.calls
+          .map(([key]) => key)
+          .filter((key) => isStagedKey(key));
+        puts.mockClear();
+        const again = await builder.api.apps.preview.open(app);
+        const writtenAgain = puts.mock.calls.filter(([key]) =>
+          isStagedKey(key)
+        );
+        const frames = await Promise.all([mine, theirs, again].map(framed));
+        expect({
+          oneFrame: new Set(
+            [mine, theirs, again].map(({ artifact }) => artifact)
+          ).size,
+          eachOnce: written.length === new Set(written).size,
+          manifests: written.filter((key) => key === frameKey(mine.artifact))
+            .length,
+          // The first of them staged it, whichever came first; the open
+          // after staged nothing.
+          staged: [mine.cold, theirs.cold].includes(true),
+          stagedAgain: again.cold === true,
+          writtenAgain: writtenAgain.length,
+          loaded: frames.map((frame) => pageModuleOf(frame) !== ""),
+        }).toStrictEqual({
+          oneFrame: 1,
+          eachOnce: true,
+          manifests: 1,
+          staged: true,
+          stagedAgain: false,
+          writtenAgain: 0,
+          loaded: [true, true, true],
+        });
+      } finally {
+        puts.mockRestore();
+      }
+    });
+
+    it("stages a build once for two stagings of it at once in an isolate, and not again while it is kept", async () => {
+      const artifact = `${"a".repeat(63)}b`;
+      const code = {
+        entry: "app~desk",
+        runtime: "kit~runtime",
+        modules: { "app~desk": "export default 1;\n" },
+        addresses: { "app~desk": "b".repeat(64) },
+        kit: { "kit~runtime": "export const run = 1;\n" },
+        css: "",
+      };
+      const puts = vi.spyOn(env.FILES, "put");
+      try {
+        const staged = await Promise.all([
+          stageFrame(env, artifact, code),
+          stageFrame(env, artifact, code),
+        ]);
+        const first = puts.mock.calls.length;
+        puts.mockClear();
+        const again = await stageFrame(env, artifact, code);
+        expect({
+          staged,
+          // The kit's module, the App's and the manifest, once each.
+          first,
+          again,
+          writtenAgain: puts.mock.calls.length,
+        }).toStrictEqual({
+          staged: [true, true],
+          first: 3,
+          again: false,
+          writtenAgain: 0,
+        });
+      } finally {
+        puts.mockRestore();
+      }
+    });
+
+    it("deletes the code staged for an App's preview once the App is removed", async () => {
+      const builder = await signedInApi(idp, "builder");
+      const { app } = await deskDraft(builder);
+      const frame = await framed(await builder.api.apps.preview.open(app));
+      const { scope } = modulePartsOf(pageModuleOf(frame));
+      const stagedIn = async (): Promise<number> => {
+        const listed = await env.FILES.list({
+          prefix: `page-modules/${scope}/`,
+        });
+        return listed.objects.length;
+      };
+      const kept = await stagedIn();
+      await builder.api.apps.archive(app);
+      await builder.api.apps.remove(app);
+      expect({
+        before: kept > 0,
+        after: await stagedIn(),
+        module: await asked(modulePartsOf(pageModuleOf(frame))),
+      }).toStrictEqual({ before: true, after: 0, module: 404 });
+    });
+
+    it("asks for every module of the frame's build as its document is read, by the address and integrity it imports it with", async () => {
+      const builder = await signedInApi(idp, "builder");
+      const { app } = await deskDraft(builder);
+      const opened = await builder.api.apps.preview.open(app);
+      const frame = await framed(opened);
+      const document = await frameDocument(opened);
+      const html = await document.text();
+      const preloads = Object.fromEntries(
+        Array.from(
+          html.matchAll(
+            /<link rel="modulepreload" href="(?<href>[^"]+)" integrity="(?<integrity>[^"]+)" \/>/gu
+          ),
+          ({ groups }) => [groups?.href ?? "", groups?.integrity ?? ""]
+        )
+      );
+      // Every module the frame loads, the kit's its import map names and
+      // the App's as the page's module imports them, by that address and
+      // the integrity it is imported with; nothing else.
+      expect({
+        addresses: Object.keys(preloads).toSorted(),
+        integrity: Object.entries(preloads).every(
+          ([address, integrity]) => frame.integrity[address] === integrity
+        ),
+      }).toStrictEqual({
+        addresses: Object.values(frame.addresses).toSorted(),
+        integrity: true,
       });
     });
 

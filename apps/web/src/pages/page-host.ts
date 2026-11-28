@@ -16,7 +16,7 @@ import {
   pageLimits,
   pagePersonHeader,
 } from "@grasp-os/shared/pages";
-import type { PageBundle } from "@grasp-os/shared/pages";
+import type { PageBundle, PreviewStart } from "@grasp-os/shared/pages";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { roleErrors } from "@grasp-os/shared/roles";
 import { RpcStub } from "capnweb";
@@ -1144,7 +1144,15 @@ interface FrameSource<Bundle extends FrameCode> {
      */
     acted?: () => boolean
   ) => Connected;
+  /**
+   * Told once how the start went (`FrameStart`), with the bundle core
+   * opened, if it did: running, or why it failed.
+   */
+  started?: (start: FrameStart, bundle: Bundle | undefined) => void;
 }
+
+/** How a frame's start went, as the page measured it (`PreviewStart`). */
+export type FrameStart = Omit<PreviewStart, "modules" | "cold">;
 
 /**
  * Runs what `source` opens in `frame`: loads the frame's document for the
@@ -1160,6 +1168,20 @@ const runFrame = <Bundle extends FrameCode>(
   const stopped = new AbortController();
   const cleanups: (() => void)[] = [];
   const frameWindow = (): unknown => frame.contentWindow;
+
+  // How long each stage of the start took, from its start, told once
+  // with how it ended (`FrameSource.started`).
+  const begun = performance.now();
+  const since = (): number => Math.round(performance.now() - begun);
+  const took: Omit<FrameStart, "outcome"> = {};
+  let opened: Bundle | undefined;
+  let told = false;
+  const tell = (outcome: FrameStart["outcome"]): void => {
+    if (!told) {
+      told = true;
+      source.started?.({ outcome, ...took }, opened);
+    }
+  };
 
   /**
    * Stops it all, once: what waits for the frame stops waiting, the
@@ -1187,6 +1209,7 @@ const runFrame = <Bundle extends FrameCode>(
     if (stopped.signal.aborted) {
       return;
     }
+    tell(state.status === "failed" ? state.reason : state.status);
     stop();
     frame.removeAttribute("src");
     onState(state);
@@ -1252,6 +1275,8 @@ const runFrame = <Bundle extends FrameCode>(
       link.retrying(source.open),
       source.openMs
     );
+    took.openMs = since();
+    opened = bundle;
     // Stopped meanwhile: nothing more is started, as nothing would stop it.
     if (stopped.signal.aborted) {
       return;
@@ -1279,6 +1304,7 @@ const runFrame = <Bundle extends FrameCode>(
       lang: document.documentElement.lang,
     })}`;
     await ready;
+    took.readyMs = since();
     if (stopped.signal.aborted) {
       return;
     }
@@ -1351,6 +1377,8 @@ const runFrame = <Bundle extends FrameCode>(
     if (stopped.signal.aborted) {
       return;
     }
+    took.mountedMs = since();
+    tell("running");
     onState({ status: "running" });
     // A check that ends the page stops its frame too, as any failure
     // does: no code of the page runs on behind the message.
@@ -1664,6 +1692,34 @@ export const previewPage = (
 };
 
 /**
+ * Tells core how a preview's start went (`apps.preview.started`), for its
+ * log: with how many modules its frame loads, and whether core staged
+ * its build for it.
+ */
+const reportStart = async (
+  core: CoreConnection,
+  app: string,
+  start: FrameStart,
+  bundle: PreviewBundle | undefined
+): Promise<void> => {
+  const { refresh, cold } = bundle ?? {};
+  try {
+    const { apps } = await core.session();
+    await apps.preview.started(app, {
+      ...start,
+      ...(refresh === undefined
+        ? {}
+        : {
+            modules: Object.keys(refresh.modules).length + refresh.kit.length,
+          }),
+      ...(cold === true ? { cold } : {}),
+    });
+  } catch {
+    // A report lost is a log line lost: nothing the person needs to hear.
+  }
+};
+
+/**
  * Runs the pages of the draft of `app` in `frame`, as a preview
  * (`runFrame`), at `location`: of the draft's checkpoint `point`, or of
  * the App's version `version`, read-only. The draft as it is now takes each newer revision `revisions` names in the frame it has
@@ -1672,6 +1728,7 @@ export const previewPage = (
  */
 export const runPreview = (
   frame: HTMLIFrameElement,
+  core: CoreConnection,
   opening: PreviewOpening,
   location: FrameLocation,
   onState: (state: PageState) => void,
@@ -1688,6 +1745,11 @@ export const runPreview = (
     frame,
     {
       ...source,
+      // Over the tab's connection, which outlives the frame's own: a
+      // start that failed is told once its own has closed.
+      started: (start, bundle) => {
+        void reportStart(core, opening.app, start, bundle);
+      },
       // A connection of its own: core keeps a preview's callbacks (its
       // server calls') per connection, with no way of the frame's own to
       // let go of them, so only closing the connection when the preview
