@@ -7,8 +7,6 @@
  * the stack's local state, read-only, and makes the secret the same way,
  * from the stack's auth secret.
  */
-import { readdir } from "node:fs/promises";
-import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
@@ -16,26 +14,10 @@ import { toBase64Url } from "@grasp-os/shared/encoding";
 import { interviewPagePath } from "@grasp-os/shared/interview-links";
 
 import { testAuthSecret } from "./people.ts";
-import { stateDir } from "./stack.ts";
+import { objectDatabases } from "./stack.ts";
 
 /** What link-secret.ts derives a link's secret for. */
 const linkPurpose = "grasp-os onboarding link";
-
-/** The onboarding store's databases in the stack's local state. */
-export const storeFiles = async (): Promise<string[]> => {
-  const root = path.join(stateDir, "v3", "do");
-  const all = await readdir(root);
-  const folders = all.filter((name) => name.endsWith("-Onboarding"));
-  const files = await Promise.all(
-    folders.map(async (folder) => {
-      const names = await readdir(path.join(root, folder));
-      return names
-        .filter((name) => name.endsWith(".sqlite"))
-        .map((name) => path.join(root, folder, name));
-    })
-  );
-  return files.flat();
-};
 
 /**
  * The random id behind `person`'s link, if they have one. A file without
@@ -77,7 +59,7 @@ const secretOf = async (linkId: string): Promise<string> => {
 
 /** The path of `person`'s own link, its secret after the `#`. */
 export const interviewLinkOf = async (person: string): Promise<string> => {
-  const files = await storeFiles();
+  const files = await objectDatabases("Onboarding");
   const linkId = files
     .map((file) => linkIdOf(file, person))
     .find((id) => id !== undefined);

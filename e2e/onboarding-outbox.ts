@@ -7,7 +7,7 @@
  */
 import { DatabaseSync } from "node:sqlite";
 
-import { storeFiles } from "./interview-link.ts";
+import { objectDatabases } from "./stack.ts";
 
 /** A mail as the outbox holds it, as far as the tests read it. */
 export interface QueuedMail {
@@ -67,6 +67,6 @@ const queuedIn = (file: string): QueuedMail[] => {
 
 /** Every mail the onboarding store queued, oldest first, whatever became of it. */
 export const queuedMail = async (): Promise<QueuedMail[]> => {
-  const files = await storeFiles();
+  const files = await objectDatabases("Onboarding");
   return files.flatMap(queuedIn);
 };

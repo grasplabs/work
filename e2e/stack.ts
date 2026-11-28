@@ -4,6 +4,7 @@
  * server another worktree started.
  */
 import { createHash } from "node:crypto";
+import { readdir } from "node:fs/promises";
 import path from "node:path";
 
 const root = path.join(import.meta.dirname, "..");
@@ -81,6 +82,28 @@ export const modelFakeOrigin = `http://localhost:${modelFakePort}`;
  * its own in `.wrangler/state`.
  */
 export const stateDir = path.join(root, "apps/core/.wrangler/e2e-state");
+
+/**
+ * The SQLite files of the Durable Objects of `className` in the stack's
+ * local state, core's and connect's alike: wrangler keeps each Worker's
+ * class in a folder of its own, `<worker>-<class>`. Miniflare's
+ * `metadata.sqlite` is among them, so a reader passes over a file without
+ * the tables it reads.
+ */
+export const objectDatabases = async (className: string): Promise<string[]> => {
+  const objects = path.join(stateDir, "v3", "do");
+  const all = await readdir(objects);
+  const folders = all.filter((name) => name.endsWith(`-${className}`));
+  const files = await Promise.all(
+    folders.map(async (folder) => {
+      const names = await readdir(path.join(objects, folder));
+      return names
+        .filter((name) => name.endsWith(".sqlite"))
+        .map((name) => path.join(objects, folder, name));
+    })
+  );
+  return files.flat();
+};
 
 /**
  * The stack's empty state with every migration applied, as e2e/build.ts
