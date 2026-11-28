@@ -499,9 +499,9 @@ const shown = (value: unknown): string =>
     : JSON.stringify(value);
 
 /**
- * What `db` lost or changed of the rows in `before` that main wrote
- * (`main`, as written before the branch's migrations): a row or a column
- * the branch added is its own to change.
+ * What `db` lost or changed of the rows in `before`, in the tables and
+ * columns main has (`main`, as written before the branch's migrations): a
+ * table or a column the branch added is its own to change.
  */
 /** What `now` lost or changed of `oldRows`, one table's rows. */
 const rowChanges = (
@@ -566,16 +566,14 @@ export const dataChanges = (
 ): DataChange[] => {
   const after = snapshotOf(db);
   const found: DataChange[] = [];
-  for (const [table, { key, rows: rowsBefore }] of before) {
+  for (const [table, { key, rows: oldRows }] of before) {
     const now = after.get(table);
-    const mainRows = main.get(table)?.rows ?? [];
-    const mainColumns = Object.keys(mainRows[0] ?? {});
-    const ofMain = key.length > 0 ? key : mainColumns;
-    const oldRows = rowsBefore.filter((old) =>
-      mainRows.some((row) =>
-        ofMain.every((column) => same(row[column], old[column]))
-      )
-    );
+    // A table the branch created holds none of main's rows; the rows are
+    // followed from migration to migration, whatever earlier ones changed.
+    if (!main.has(table)) {
+      continue;
+    }
+    const mainColumns = Object.keys(main.get(table)?.rows[0] ?? {});
     // A table or key column dropped is the schema check's to judge.
     if (now === undefined || oldRows.length === 0) {
       continue;

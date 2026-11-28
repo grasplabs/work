@@ -62,23 +62,26 @@ export const shownStatement = (statement: string): string => {
 };
 
 /**
- * The opcodes of a statement's own program: a trigger's program comes
- * after it in EXPLAIN, its addresses from 0 again.
+ * The opcodes of a statement's own program, and of the trigger programs
+ * that come after it in EXPLAIN, each from address 0 again. An INSERT
+ * that replaces the rows it conflicts with (REPLACE, a constraint's ON
+ * CONFLICT REPLACE) deletes them in its program.
  */
-const ownProgram = (db: DatabaseSync, statement: string): string[] => {
-  const program = db.prepare(`EXPLAIN ${statement}`).all();
-  const triggers = program.findIndex(({ addr }, at) => at > 0 && addr === 0);
-  return program
-    .slice(0, triggers === -1 ? program.length : triggers)
-    .map(({ opcode }) => String(opcode));
+const programOf = (
+  db: DatabaseSync,
+  statement: string
+): { own: string[]; triggers: string[] } => {
+  const program = db
+    .prepare(`EXPLAIN ${statement}`)
+    .all()
+    .map(({ addr, opcode }) => ({ addr, opcode: String(opcode) }));
+  const start = program.findIndex(({ addr }, at) => at > 0 && addr === 0);
+  const end = start === -1 ? program.length : start;
+  return {
+    own: program.slice(0, end).map(({ opcode }) => opcode),
+    triggers: program.slice(end).map(({ opcode }) => opcode),
+  };
 };
-
-/**
- * Whether a prepared INSERT replaces rows it conflicts with (REPLACE, or
- * a constraint's ON CONFLICT REPLACE): its own program deletes them.
- */
-const replaces = (program: readonly string[]): boolean =>
-  program.includes("Delete");
 
 /**
  * What a plain copy's SELECT (the coroutine SQLite compiles for an
@@ -99,6 +102,8 @@ const PLAIN_COPY = new Set([
   "String8",
   "Integer",
   "Real",
+  // Reading a REAL column, which may hold an integer.
+  "RealAffinity",
   "Blob",
   "Copy",
   "SCopy",
@@ -164,6 +169,8 @@ export const runRecordingWrites = (
     const triggers = triggerSql(db);
     const own: Write[] = [];
     const inserted = new Set<string>();
+    const insertedByTriggers = new Set<string>();
+    const updated = new Set<string>();
     const read = new Set<string>();
     let functions = false;
     db.setAuthorizer((action, first, second, _database, trigger) => {
@@ -178,14 +185,17 @@ export const runRecordingWrites = (
         } else if (action === constants.SQLITE_DELETE) {
           own.push({ kind: "delete", table: first, statement: through });
         } else if (action === constants.SQLITE_UPDATE && second !== null) {
+          if (trigger === null) {
+            updated.add(first);
+          }
           own.push({
             kind: "update",
             table: first,
             column: second,
             statement: through,
           });
-        } else if (action === constants.SQLITE_INSERT && trigger === null) {
-          inserted.add(first);
+        } else if (action === constants.SQLITE_INSERT) {
+          (trigger === null ? inserted : insertedByTriggers).add(first);
         } else if (action === constants.SQLITE_READ && trigger === null) {
           read.add(first);
         }
@@ -224,19 +234,28 @@ export const runRecordingWrites = (
           statement: `${statement}${write.statement}`,
         }))
     );
-    if (inserted.size > 0) {
-      const program = ownProgram(db, statement);
-      // An upsert's DO UPDATE is reported as the UPDATE it is, and an
-      // UPDATE's program deletes and writes rows again too.
-      if (!own.some(({ kind }) => kind === "update") && replaces(program)) {
-        writes.push(
-          ...[...inserted].map((table) => ({
-            kind: "replace" as const,
-            table,
-            statement,
-          }))
-        );
-      }
+    if (inserted.size > 0 || insertedByTriggers.size > 0) {
+      const { own: program, triggers: triggerPrograms } = programOf(
+        db,
+        statement
+      );
+      // An upsert's DO UPDATE is the UPDATE the authorizer reports, and its
+      // program deletes and writes the row again: not a replace.
+      const replaced = [
+        ...(program.includes("Delete")
+          ? [...inserted].filter((table) => !updated.has(table))
+          : []),
+        // What the branch's triggers insert, where their programs delete:
+        // judged as replaces, which may overflag.
+        ...(triggerPrograms.includes("Delete") ? [...insertedByTriggers] : []),
+      ];
+      writes.push(
+        ...[...new Set(replaced)].map((table) => ({
+          kind: "replace" as const,
+          table,
+          statement,
+        }))
+      );
       // A rebuild's copy: into a table this migration creates, from one
       // that was there. Whether the old one is dropped is judged after.
       const sources = [...read].filter((table) => atStart.has(table));

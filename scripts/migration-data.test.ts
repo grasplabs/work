@@ -326,6 +326,62 @@ ${touch("UPDATE `chats` SET `title` = `title` WHERE 0;")}`
   });
 });
 
+describe("replaces Greptile found", () => {
+  it("refuses a replace made by a trigger the migration creates", () => {
+    expect(
+      flagged(`CREATE TABLE \`g\` (\`ref\` text);--> statement-breakpoint
+CREATE TRIGGER \`g_put\` AFTER INSERT ON \`g\` BEGIN INSERT OR REPLACE INTO \`chats\` (\`id\`, \`kind\`, \`owner_id\`, \`created_at\`) VALUES (NEW.\`ref\`, 'chat', 'p', 1); END;--> statement-breakpoint
+INSERT INTO \`g\` (\`ref\`) VALUES ('c-1');`)
+    ).toStrictEqual(["delete rows chats"]);
+  });
+
+  it("refuses a replace whose trigger updates another table", () => {
+    expect(
+      flagged(`CREATE TABLE \`seen\` (\`n\` integer);--> statement-breakpoint
+CREATE TRIGGER \`chats_seen\` AFTER INSERT ON \`chats\` BEGIN UPDATE \`seen\` SET \`n\` = 1; END;--> statement-breakpoint
+REPLACE INTO \`chats\` (\`id\`, \`kind\`, \`owner_id\`, \`created_at\`) VALUES ('c-1', 'chat', 'p', 1);`)
+    ).toStrictEqual(["delete rows chats"]);
+  });
+
+  it("passes a plain copy of a REAL column", () => {
+    expect(
+      flagged(
+        `CREATE TABLE \`__new_costs\` (\`id\` text PRIMARY KEY NOT NULL, \`cost\` real);--> statement-breakpoint
+INSERT INTO \`__new_costs\`(id, cost) SELECT id, cost FROM \`costs\`;--> statement-breakpoint
+DROP TABLE \`costs\`;--> statement-breakpoint
+ALTER TABLE \`__new_costs\` RENAME TO \`costs\`;`,
+        "CREATE TABLE `costs` (`id` text PRIMARY KEY NOT NULL, `cost` real);"
+      )
+    ).toStrictEqual([]);
+  });
+
+  it("follows main's rows after a marked key change, so a later loss still counts", () => {
+    const { errors } = checkDatabase(
+      "db",
+      [
+        {
+          idx: 0,
+          tag: "0000_base",
+          sql: "CREATE TABLE `tags` (`id` text PRIMARY KEY NOT NULL, `name` text);",
+        },
+        {
+          idx: 1,
+          tag: "0001_rekey",
+          sql: "-- contract: change values tags.id: release 26.11.40 removed the last use\nUPDATE `tags` SET `id` = `id` || '-new';",
+        },
+        {
+          idx: 2,
+          tag: "0002_empty",
+          sql: "DROP TABLE `tags`;--> statement-breakpoint\nCREATE TABLE `tags` (`id` text PRIMARY KEY NOT NULL, `name` text);",
+        },
+      ],
+      { ...judging, from: 1, added: 1 }
+    );
+    expect(errors.join("\n")).toContain("db/0002_empty.sql breaks");
+    expect(errors.join("\n")).toContain("delete rows tags (5 of 5 rows gone)");
+  });
+});
+
 describe("a branch of several migrations", () => {
   it("passes a backfill of a column an earlier migration of the branch added", () => {
     const { errors } = checkDatabase(
