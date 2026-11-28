@@ -2,7 +2,11 @@ import { randomToken, toBase64 } from "@grasp-os/shared/encoding";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { transcriptionPath } from "@grasp-os/shared/voice";
 import type { TranscriptionStart } from "@grasp-os/shared/voice";
-import { runInDurableObject } from "cloudflare:test";
+import {
+  createExecutionContext,
+  runInDurableObject,
+  waitOnExecutionContext,
+} from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -209,10 +213,14 @@ type Message = z.infer<typeof messageSchema>;
 
 /** A socket the page opened to the relay, read a message at a time. */
 const listen = async (headers: Record<string, string> = {}, coreEnv = env) => {
+  // What core does once the socket ends (counting, charging and auditing
+  // it) it hands this request's `waitUntil`.
+  const ctx = createExecutionContext();
   const response = await routed(
     transcriptionPath,
     { headers: { Upgrade: "websocket", Origin: clientOrigin, ...headers } },
-    coreEnv
+    coreEnv,
+    ctx
   );
   const socket = response.webSocket;
   if (!socket) {
@@ -264,9 +272,15 @@ const listen = async (headers: Record<string, string> = {}, coreEnv = env) => {
       read += 1;
       return message;
     },
-    /** Every message not read yet, once the socket closed, and how it closed. */
+    /**
+     * Every message not read yet, once the socket closed and core is done
+     * with its end, and how it closed. Core ends its side before the page
+     * hears the close, then counts, charges and audits it in the
+     * background: waited for here, so what it wrote is there to read.
+     */
     ended: async () => {
       const code = await closed.promise;
+      await waitOnExecutionContext(ctx);
       return { messages: received.slice(read), code };
     },
   };
@@ -435,6 +449,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       page.socket.send(JSON.stringify({ type: "commit" }));
       const final = await page.next();
       page.socket.close(1000, "Done");
+      await page.ended();
       return { ready: ready?.type, partial, final };
     });
 
@@ -496,11 +511,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       samples: Array.from({ length: 8 }, () => 0x07_07),
     });
     // A tenth of a second heard, counted once the socket closed.
-    await vi.waitFor(async () => {
-      await expect(heardCounted("interviews")).resolves.toBeCloseTo(
-        before + 0.1
-      );
-    });
+    await expect(heardCounted("interviews")).resolves.toBeCloseTo(before + 0.1);
   });
 
   it("answers a commit the session already settled at a pause with an empty final, in its place", async () => {
@@ -766,21 +777,15 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       await first?.next();
       first?.socket.close(1000, "Done");
       await first?.ended();
-      const again = await vi.waitFor(async () => {
-        const page = await listen({ cookie: ada.cookie });
-        page.start(start);
-        const message = await page.next();
-        if (message?.type !== "ready") {
-          throw new Error(`Expected ready, got ${message?.type}`);
-        }
-        return message.maxSeconds;
-      });
+      const page = await listen({ cookie: ada.cookie });
+      page.start(start);
+      const again = await page.next();
       return {
         ready: ready.map((message) =>
           message?.type === "ready" ? message.maxSeconds : message?.type
         ),
         spent,
-        again,
+        again: again?.type === "ready" ? again.maxSeconds : again?.type,
       };
     });
 
@@ -876,19 +881,17 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
         return [ready?.type, partial?.type];
       });
 
-      await vi.waitFor(async () => {
-        await expect(transcriptionAudited(head)).resolves.toStrictEqual([
-          {
-            actor: { type: "person", userId },
-            action: "model.call",
-            purpose: "chat.dictation",
-            platform: "dictation",
-            // Whole seconds, rounded up, as the gateway charges.
-            seconds: 1,
-            keys: undefined,
-          },
-        ]);
-      });
+      await expect(transcriptionAudited(head)).resolves.toStrictEqual([
+        {
+          actor: { type: "person", userId },
+          action: "model.call",
+          purpose: "chat.dictation",
+          platform: "dictation",
+          // Whole seconds, rounded up, as the gateway charges.
+          seconds: 1,
+          keys: undefined,
+        },
+      ]);
       expect({
         result,
         upstreams: upstream.opened.length,
@@ -934,22 +937,16 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
         await first?.next();
         first?.socket.close(1000, "Done");
         await first?.ended();
-        const again = await vi.waitFor(async () => {
-          const page = await listen({ cookie: member.session });
-          page.start(memberStart);
-          const message = await page.next();
-          if (message?.type !== "ready") {
-            throw new Error(`Expected ready, got ${message?.type}`);
-          }
-          return message.maxSeconds;
-        });
+        const page = await listen({ cookie: member.session });
+        page.start(memberStart);
+        const again = await page.next();
         return {
           ready: ready.map((message) =>
             message?.type === "ready" ? message.maxSeconds : message?.type
           ),
           spent,
           others: others?.type === "ready" ? others.maxSeconds : others?.type,
-          again,
+          again: again?.type === "ready" ? again.maxSeconds : again?.type,
         };
       });
 
@@ -973,30 +970,23 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     const head = await logHead();
 
     const { result } = await relaying(async () => {
-      const left: number[] = [];
+      const left: (number | string | undefined)[] = [];
       for (let opened = 0; opened < 3; opened += 1) {
         // Opened and closed with nothing said, once the last one's close is counted.
         // oxlint-disable-next-line no-await-in-loop -- one socket after another
-        const { page, maxSeconds } = await vi.waitFor(async () => {
-          const next = await listen({ cookie: session });
-          next.start(memberStart);
-          const message = await next.next();
-          if (message?.type !== "ready") {
-            throw new Error(`Expected ready, got ${message?.type}`);
-          }
-          return { page: next, maxSeconds: message.maxSeconds };
-        });
-        left.push(maxSeconds);
+        const page = await listen({ cookie: session });
+        page.start(memberStart);
+        // oxlint-disable-next-line no-await-in-loop -- one socket after another
+        const message = await page.next();
+        left.push(
+          message?.type === "ready" ? message.maxSeconds : message?.type
+        );
         page.socket.close(1000, "Done");
         // oxlint-disable-next-line no-await-in-loop -- one socket after another
         await page.ended();
       }
       // Each is a model call of theirs, however little it heard.
-      const calls = await vi.waitFor(async () => {
-        const audited = await transcriptionAudited(head);
-        expect(audited).toHaveLength(3);
-        return audited.length;
-      });
+      const { length: calls } = await transcriptionAudited(head);
       const fourth = await listen({ cookie: session });
       fourth.start(memberStart);
       return { left, calls, spent: await refusalOf(fourth) };
@@ -1129,38 +1119,36 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       return await page.ended();
     });
 
-    await vi.waitFor(async () => {
-      const audited = await transcriptionAudited(head);
-      // The session's close and the gateway's charge land in either order.
-      expect(
-        audited.toSorted((one, other) => one.action.localeCompare(other.action))
-      ).toStrictEqual([
-        {
-          actor: { type: "staff", userId },
-          action: "model.call",
-          purpose: "onboarding.transcription",
-          platform: undefined,
-          seconds: 1,
-          keys: undefined,
-        },
-        {
-          actor: { type: "staff", userId },
-          action: "onboarding.transcription.closed",
-          purpose: undefined,
-          platform: undefined,
-          seconds: 0,
-          keys: ["ended", "seconds", "session"],
-        },
-        {
-          actor: { type: "staff", userId },
-          action: "onboarding.transcription.opened",
-          purpose: undefined,
-          platform: undefined,
-          seconds: undefined,
-          keys: ["session"],
-        },
-      ]);
-    });
+    const audited = await transcriptionAudited(head);
+    // The session's close and the gateway's charge land in either order.
+    expect(
+      audited.toSorted((one, other) => one.action.localeCompare(other.action))
+    ).toStrictEqual([
+      {
+        actor: { type: "staff", userId },
+        action: "model.call",
+        purpose: "onboarding.transcription",
+        platform: undefined,
+        seconds: 1,
+        keys: undefined,
+      },
+      {
+        actor: { type: "staff", userId },
+        action: "onboarding.transcription.closed",
+        purpose: undefined,
+        platform: undefined,
+        seconds: 0,
+        keys: ["ended", "seconds", "session"],
+      },
+      {
+        actor: { type: "staff", userId },
+        action: "onboarding.transcription.opened",
+        purpose: undefined,
+        platform: undefined,
+        seconds: undefined,
+        keys: ["session"],
+      },
+    ]);
   });
 
   it("keeps nothing of the audio: not in the store, the database or the audit log", async () => {
@@ -1201,9 +1189,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
         await page.ended();
       }
     });
-    await vi.waitFor(async () => {
-      await expect(heardCounted("interviews")).resolves.toBeGreaterThan(before);
-    });
+    await expect(heardCounted("interviews")).resolves.toBeGreaterThan(before);
 
     const stored = await everythingStored();
     const marker = sentinel.trim().slice(0, 40);
@@ -1246,18 +1232,10 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
         await first.ended();
         second.socket.close(1000, "Done");
         await second.ended();
-        const charged = await vi.waitFor(
-          async () => {
-            const grasp = await graspSpend(month);
-            expect(grasp).toBe(minute);
-            return grasp;
-          },
-          { timeout: 10_000 }
-        );
         return {
           ready: ready?.type,
           alsoReady: alsoReady?.type,
-          charged,
+          charged: await graspSpend(month),
           deployment: await deploymentSpend(month),
         };
       },
@@ -1270,17 +1248,8 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
         action === "model.refused" &&
         detail?.purpose === "onboarding.transcription"
     );
-    // What the onboarding counts heard for interviews, once Ada's socket is counted.
-    const heard = await vi.waitFor(
-      async () => {
-        const seconds = (await heardCounted("interviews")) - before;
-        if (seconds < 60) {
-          throw new Error(`Expected a minute heard, got ${seconds}`);
-        }
-        return seconds;
-      },
-      { timeout: 10_000 }
-    );
+    // What the onboarding counts heard for interviews, Ada's socket counted.
+    const heard = (await heardCounted("interviews")) - before;
     expect({
       ...result,
       upstreams: upstream.opened.length,
