@@ -553,7 +553,12 @@ export const chatFileParts = sqliteTable(
 );
 
 /** Where a held App call stands (held-app-calls.ts). */
-export type HeldAppCallStatus = "waiting" | "confirmed" | "declined" | "lapsed";
+export type HeldAppCallStatus =
+  | "waiting"
+  | "confirmed"
+  | "declined"
+  | "lapsed"
+  | "withdrawn";
 
 /**
  * Writes to an App that a chat's agent asked for after the chat used

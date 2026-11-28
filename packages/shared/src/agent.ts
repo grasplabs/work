@@ -94,6 +94,8 @@ export const agentErrors = defineErrorFamily({
     "A permission of this chat's agent was revoked while this code run was under way, so its APIs don't answer any more.",
   "agent.history_revoked":
     "This turn read something its chat can no longer read, so it stopped. Ask again to go on without it.",
+  "agent.erasure_unchecked":
+    "What this chat read can't be checked against what was erased right now. Try again in a moment.",
   "agent.turn_overdue":
     "This answer ran for too long without ending, so it was stopped. Ask again.",
   "agent.turn_lost":

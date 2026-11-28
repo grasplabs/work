@@ -230,7 +230,10 @@ describe("a client's deploy", () => {
     const before = await placedRelease("feat(core): before");
     await releaseToEdge(env, [before]);
     const client = await live(before);
-    const release = await placedRelease("feat(core): broken once live");
+    // Its connect changed too, so the release and its rollback upload it.
+    const release = await placedRelease("feat(core): broken once live", {
+      connect: "export default { broken: true };",
+    });
     const isConnectUpload = (call: { method: string; path: string }) =>
       call.method === "PUT" &&
       call.path.startsWith(`/accounts/${client.account.id}/`) &&
@@ -468,7 +471,10 @@ describe("a client's deploy", () => {
     const before = await placedRelease("feat(core): before");
     await releaseToEdge(env, [before]);
     const client = await live(before);
-    const release = await placedRelease("feat(core): lost, then broken");
+    // Its connect changed too, so the release and its rollback upload it.
+    const release = await placedRelease("feat(core): lost, then broken", {
+      connect: "export default { broken: true };",
+    });
     const { core } = await scriptsOf(client.clientId);
     // The first attempt dies in core's step; its retry goes live and fails
     // its probe, and its rollback finds core answering as it should again.

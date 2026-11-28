@@ -113,6 +113,7 @@ import { noProducers } from "./no-producers.ts";
 import { person as orgMember } from "./sealed-apps.ts";
 import { holding, holdsNothing } from "./stored-skills.ts";
 import { newTeam } from "./teams.ts";
+import { stopIfEnded } from "./test-attempts.ts";
 
 /** The reader a probe calls as, and what they may not see. */
 export interface Probing {
@@ -346,6 +347,9 @@ const answer = async (
   like?: string
 ): Promise<Answer> => {
   const compared = like === undefined ? {} : { like };
+  // Never once the test that asked has ended: a pass its timeout cut off
+  // stops here, before it reaches the next test's stores.
+  stopIfEnded();
   try {
     return { call: callName, got: { value: await call() }, about, ...compared };
   } catch (error) {
@@ -415,7 +419,7 @@ const oversizedText = (markers: readonly string[]): string =>
  * question as it would be asked of a store where the marked sources don't
  * exist: its pack must be the same, but for the words themselves.
  */
-const twinOf = (marker: string): string =>
+export const twinOf = (marker: string): string =>
   `u${Array.from(marker.slice(1), (character: string) =>
     /\d/u.test(character)
       ? String((Number(character) + 5) % 10)
@@ -3010,8 +3014,10 @@ export const coreProbes = {
   recallAs: recallProbe(coreBrain.recallAs),
   // Its pack, with `fromOwn` beside what the pack holds: the echo of the
   // question in `notFound` is read where it is for `recallAs`, and
-  // `fromOwn` is held as the rest is: to the answer before anything hidden
-  // was added, or to the twin's apart from what meaning found.
+  // `fromOwn` is held as what meaning found is: to the answer before
+  // anything hidden was added, and left out beside the twin's, as the
+  // reader's own passages rank by the question's meaning
+  // (brain-next-leaks-harness.ts `apartFromMeaning`).
   recallOwnedAs: recallProbe(async (...args) => {
     const { pack, fromOwn } = await coreBrain.recallOwnedAs(...args);
     return { ...pack, fromOwn };

@@ -7,6 +7,7 @@ import type {
 import { failureText } from "@grasp-os/shared/errors";
 import {
   Alert,
+  AlertAction,
   AlertDescription,
   AlertTitle,
 } from "@grasp-os/ui/components/alert";
@@ -112,12 +113,19 @@ const Quiet = ({ children, id }: { children: ReactNode; id?: string }) => (
 /**
  * What the page read of the chat's held writes: connect's (`actions`), and
  * the writes to Apps core holds once the chat used something only the
- * person can read (`calls`).
+ * person can read (`calls`), or why those couldn't be read (`callsRefused`:
+ * core lists none while what the chat read can't be checked against what
+ * was erased), connect's shown all the same.
  */
 type Held =
   | { state: "loading" }
   | { state: "refused"; message: string }
-  | { state: "ready"; actions: PendingAction[]; calls: HeldAppCall[] };
+  | {
+      state: "ready";
+      actions: PendingAction[];
+      calls: HeldAppCall[];
+      callsRefused?: string;
+    };
 
 /**
  * Every App write held in chat `chatId`, oldest first: page after page
@@ -151,7 +159,10 @@ const readHeld = async (
       async (session) =>
         await Promise.all([
           session.pendingActions.list(),
-          heldCallsOf(session, chatId),
+          heldCallsOf(session, chatId).then(
+            (found) => ({ found }),
+            (error: unknown) => ({ refused: failureText(error) })
+          ),
         ])
     );
     return {
@@ -159,11 +170,39 @@ const readHeld = async (
       actions: waiting.filter(
         ({ context }) => context.type === "chat" && context.chatId === chatId
       ),
-      calls,
+      ...("found" in calls
+        ? { calls: calls.found }
+        : { calls: [], callsRefused: calls.refused }),
     };
   } catch (error) {
     return { state: "refused", message: failureText(error) };
   }
+};
+
+/**
+ * Why the writes to Apps held in the chat can't be shown now, with a way
+ * to read them again. Not even declined: core lists none of them, as what
+ * one names, its function too, may quote something erased since.
+ */
+const CallsRefused = ({
+  reason,
+  onRetry,
+}: {
+  reason: string;
+  onRetry: () => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <Alert variant="warning">
+      <AlertTitle>{t`The writes to Apps waiting here can't be shown right now.`}</AlertTitle>
+      <AlertDescription>{reason}</AlertDescription>
+      <AlertAction>
+        <Button onClick={onRetry} size="sm" variant="outline">
+          <Trans>Try again</Trans>
+        </Button>
+      </AlertAction>
+    </Alert>
+  );
 };
 
 /**
@@ -928,12 +967,23 @@ const ChatHeldWrites = ({
   }
   const count =
     held.state === "loading" ? 0 : held.actions.length + held.calls.length;
-  if (held.state === "loading" || (count === 0 && failed === undefined)) {
+  if (
+    held.state === "loading" ||
+    (count === 0 && failed === undefined && held.callsRefused === undefined)
+  ) {
     return null;
   }
   return (
     <section aria-label={t`Waiting for you`} {...stylex.props(styles.list2)}>
       {failed === undefined ? null : <DecisionFailedAlert failed={failed} />}
+      {held.callsRefused === undefined ? null : (
+        <CallsRefused
+          onRetry={() => {
+            setReads((read) => read + 1);
+          }}
+          reason={held.callsRefused}
+        />
+      )}
       {count > 1 ? (
         <RejectAll
           actions={held.actions}

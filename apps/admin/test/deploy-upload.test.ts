@@ -1,7 +1,12 @@
 import type { WorkerEntry } from "@grasp-os/shared/release";
 import { describe, expect, it } from "vite-plus/test";
 
-import { renderBindings } from "../src/deploy/upload.ts";
+import type { WorkerUpload } from "../src/cloudflare/workers.ts";
+import {
+  liveDigest,
+  renderBindings,
+  uploadFingerprint,
+} from "../src/deploy/upload.ts";
 import { deployOrder, pendingMigrations } from "../src/deploy/versions.ts";
 
 const history = [
@@ -162,5 +167,147 @@ describe("the order Workers deploy in", () => {
         connect: worker("grasp-os-connect", []),
       })
     ).toStrictEqual(["connect", "core"]);
+  });
+});
+
+/** A Worker's upload of `releaseId` with `bindings` and a secret. */
+const connectUpload = (
+  releaseId: string,
+  bindings: unknown[] = [{ type: "json", name: "HOSTS", json: "openai" }]
+): WorkerUpload => ({
+  releaseId,
+  metadata: {
+    main_module: "index.js",
+    compatibility_date: "2026-09-15",
+    bindings: [
+      ...bindings,
+      { type: "secret_text", name: "KEY", text: "value" },
+    ],
+    limits: { subrequests: 1_000_000 },
+  },
+  modules: [],
+});
+
+/** A module of a Worker, `digit` its digest's every digit. */
+const moduleOf = (digit: string) => ({
+  name: "index.js",
+  type: "esm" as const,
+  sha256: digit.repeat(64),
+  size: 1,
+  r2Key: `blobs/modules/${digit.repeat(64)}`,
+});
+
+describe("an upload's fingerprint", () => {
+  const target = { accountId: "a", namespace: "n", scriptName: "s-connect" };
+  const entry: WorkerEntry = {
+    ...worker("connect", []),
+    modules: [moduleOf("1")],
+  };
+  const of = async (
+    changes: Partial<{
+      upload: WorkerUpload;
+      worker: WorkerEntry;
+      secrets: { name: string; value: string }[];
+    }> = {}
+  ) =>
+    await uploadFingerprint("test-client-key", {
+      target,
+      worker: entry,
+      upload: connectUpload("26.11.1"),
+      secrets: [{ name: "KEY", value: "value" }],
+      ...changes,
+    });
+
+  it("is the same for another release that sends the same, and differs for a change to its code, settings, bindings or a secret's value", async () => {
+    const base = await of();
+    const same = async (changed: Promise<string>) => (await changed) === base;
+    const settings = connectUpload("26.11.1");
+    expect({
+      otherRelease: await same(of({ upload: connectUpload("26.11.2") })),
+      code: await same(of({ worker: { ...entry, modules: [moduleOf("2")] } })),
+      binding: await same(
+        of({
+          upload: connectUpload("26.11.1", [
+            { type: "json", name: "HOSTS", json: "mistral" },
+          ]),
+        })
+      ),
+      settings: await same(
+        of({
+          upload: {
+            ...settings,
+            metadata: { ...settings.metadata, limits: {} },
+          },
+        })
+      ),
+      secret: await same(of({ secrets: [{ name: "KEY", value: "rotated" }] })),
+    }).toStrictEqual({
+      otherRelease: true,
+      code: false,
+      binding: false,
+      settings: false,
+      secret: false,
+    });
+  });
+});
+
+describe("a script as read back", () => {
+  const settings = {
+    compatibility_date: "2026-09-15",
+    compatibility_flags: ["nodejs_compat", "global_fetch_strictly_public"],
+    bindings: [
+      { name: "DB", type: "d1", id: "uuid" },
+      { name: "KEY", type: "secret_text" },
+    ],
+  };
+  const state = {
+    exists: true,
+    migrationTag: "v1",
+    modifiedOn: "2026-11-27T19:03:15.700904Z",
+    etag: "e",
+  };
+
+  it("reads the same listed in another order, and otherwise once its code, a binding or a setting changed, or it was modified at all", async () => {
+    const base = await liveDigest(state, settings);
+    const same = async (changed: Promise<string>) => (await changed) === base;
+    expect({
+      same: await same(liveDigest({ ...state }, { ...settings })),
+      reordered: await same(
+        liveDigest(state, {
+          ...settings,
+          compatibility_flags: settings.compatibility_flags.toReversed(),
+          bindings: settings.bindings.toReversed(),
+        })
+      ),
+      code: await same(liveDigest({ ...state, etag: "f" }, settings)),
+      modified: await same(
+        liveDigest(
+          { ...state, modifiedOn: "2026-11-27T19:03:15.700905Z" },
+          settings
+        )
+      ),
+      binding: await same(
+        liveDigest(state, {
+          ...settings,
+          bindings: [
+            { name: "DB", type: "d1", id: "another" },
+            { name: "KEY", type: "secret_text" },
+          ],
+        })
+      ),
+      secretRemoved: await same(
+        liveDigest(state, {
+          ...settings,
+          bindings: [{ name: "DB", type: "d1", id: "uuid" }],
+        })
+      ),
+    }).toStrictEqual({
+      same: true,
+      reordered: true,
+      code: false,
+      modified: false,
+      binding: false,
+      secretRemoved: false,
+    });
   });
 });

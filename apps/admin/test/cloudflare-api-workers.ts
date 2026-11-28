@@ -70,10 +70,23 @@ const readUpload = async (
     .object({ jwt: z.string().optional() })
     .optional()
     .parse(metadata.assets);
+  if (assets?.jwt !== undefined && account.spent.has(assets.jwt)) {
+    return refusal(400, 100_312, "Assets completion token already used");
+  }
   if (assets?.jwt !== undefined && !account.completions.has(assets.jwt)) {
     return refusal(400, 10_000, "Invalid assets completion token");
   }
   return { metadata, modules };
+};
+
+/**
+ * Marks `script` changed now, as the API's `modified_on` moves: later
+ * than its last change, however close the two.
+ */
+const touch = (script: ScriptState): void => {
+  const last =
+    script.modifiedOn === undefined ? 0 : Date.parse(script.modifiedOn);
+  script.modifiedOn = new Date(Math.max(Date.now(), last + 1)).toISOString();
 };
 
 const bindingsSchema = z
@@ -154,6 +167,7 @@ const changeSecrets = (
   change(secrets);
   const version = newVersion(script, latest, secrets);
   deploy(script, [{ version_id: version.id, percentage: 100 }], {});
+  touch(script);
   return undefined;
 };
 
@@ -351,9 +365,18 @@ const putScript = async (
   if (migrations !== undefined) {
     script.migrationTag = migrations.new_tag;
   }
+  // A completion token names one upload's files: spent once it's taken.
+  const jwt = z
+    .object({ jwt: z.string().optional() })
+    .optional()
+    .parse(upload.metadata.assets)?.jwt;
+  if (jwt !== undefined) {
+    account.spent.add(jwt);
+  }
   scripts.set(name, script);
   const version = newVersion(script, upload, secretsOf(upload));
   deploy(script, [{ version_id: version.id, percentage: 100 }], {});
+  touch(script);
   return envelope({ id: name });
 };
 
@@ -446,6 +469,34 @@ const putSecret = (script: ScriptState | Response, json: Json): Response => {
       secrets.set(name, text(json, "text"));
     }) ?? envelope({ name, type: "secret_text" })
   );
+};
+
+/**
+ * `script`'s settings as the API reads them back: its latest version's
+ * bindings, its secrets by name and type alone, its compatibility, limits
+ * and observability.
+ */
+const settingsOf = (script: ScriptState | Response): Response => {
+  if (script instanceof Response) {
+    return script;
+  }
+  const latest = script.versions.at(-1);
+  const metadata = latest?.metadata ?? {};
+  return envelope({
+    compatibility_date: metadata.compatibility_date ?? null,
+    compatibility_flags: metadata.compatibility_flags ?? [],
+    limits: metadata.limits ?? {},
+    observability: metadata.observability ?? null,
+    bindings: [
+      ...bindingsSchema
+        .parse(metadata.bindings)
+        .filter(({ type }) => type !== "secret_text"),
+      ...[...(latest?.secrets.keys() ?? [])].map((name) => ({
+        name,
+        type: "secret_text",
+      })),
+    ],
+  });
 };
 
 /** The names of `script`'s secrets, as the API lists them: never a value. */
@@ -745,6 +796,7 @@ export const dispatchRoutes: Route[] = [
           id: params.script,
           migration_tag: script.migrationTag ?? null,
           etag: script.versions.at(-1)?.id,
+          modified_on: script.modifiedOn ?? null,
         },
       });
     },
@@ -758,6 +810,11 @@ export const dispatchRoutes: Route[] = [
         ? scripts
         : openAssetsSession(account, json);
     },
+  },
+  {
+    method: "GET",
+    path: dispatchPath("/settings"),
+    answer: ({ account, params }) => settingsOf(userWorkerOf(account, params)),
   },
   {
     method: "PUT",

@@ -47,7 +47,7 @@ export const sha256 = (bytes: Uint8Array | string): string =>
  * What breaks the rule "the kit is the registry's, but for the listed
  * changes", given each pinned file's current bytes (`undefined`: gone):
  * a file that differs and isn't listed, a listed one that no longer
- * differs or isn't pinned at all, a pinned file that is missing, and a
+ * differs or is neither pinned nor the kit's own, a pinned file that is missing, and a
  * file in the CLI's folders that is neither pinned nor the kit's own.
  */
 export const problemsOf = (
@@ -83,10 +83,12 @@ export const problemsOf = (
       );
     }
   }
+  // An own file copied from upstream (the Markdown) lists its changes
+  // too, though no pin holds what it was.
   for (const file of listed.keys()) {
-    if (!Object.hasOwn(pin.files, file)) {
+    if (!Object.hasOwn(pin.files, file) && !own.has(file)) {
       problems.push(
-        `${file} is listed in local-changes.json but isn't a file the registry installs.`
+        `${file} is listed in local-changes.json but is neither a file the registry installs nor one of the kit's own.`
       );
     }
   }

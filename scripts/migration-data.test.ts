@@ -1,0 +1,786 @@
+import { readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+
+import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
+
+import { asDeployed, seed, skippedErrors } from "./migration-data.ts";
+import { checkDatabase } from "./migration-safety.ts";
+import type { Migration } from "./migration-safety.ts";
+
+const base = `CREATE TABLE \`chats\` (
+	\`id\` text PRIMARY KEY NOT NULL,
+	\`title\` text,
+	\`kind\` text DEFAULT 'chat' NOT NULL,
+	\`owner_id\` text NOT NULL,
+	\`created_at\` integer NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE \`people\` (\`id\` text PRIMARY KEY NOT NULL, \`name\` text);
+--> statement-breakpoint
+CREATE TABLE \`notes\` (
+	\`id\` text PRIMARY KEY NOT NULL,
+	\`person_id\` text NOT NULL REFERENCES \`people\`(\`id\`) ON DELETE cascade,
+	\`body\` text
+);`;
+
+const judging = {
+  now: new Date("2026-11-28T12:00:00Z"),
+  indexedBy: new Set<string>(),
+};
+
+/** The errors of `migrations`, the last of them added by the branch. */
+const errorsOf = (migrations: Migration[]) => {
+  const added = migrations.length - 1;
+  return checkDatabase("db", migrations, { ...judging, from: added, added });
+};
+
+/** What a marker must name for `next`, a migration the branch adds. */
+const flagged = (next: string, before = base): string[] =>
+  errorsOf([
+    { idx: 0, tag: "0000_base", sql: before },
+    { idx: 1, tag: "0001_next", sql: next },
+  ]).errors.flatMap((found) =>
+    found
+      .split("\n")
+      .filter((line) => !line.startsWith("  ") || line.startsWith("  - "))
+      .filter((line) => !line.endsWith("after a rollback:"))
+      .map((line) => line.replace(/^ {2}- /u, "").replace(/ \(.*\)$/u, ""))
+  );
+
+/** The first change's detail and statements, as the message lists them. */
+const listed = (next: string, before = base): string[] =>
+  errorsOf([
+    { idx: 0, tag: "0000_base", sql: before },
+    { idx: 1, tag: "0001_next", sql: next },
+  ])
+    .errors.flatMap((found) => found.split("\n"))
+    .filter((line) => line.startsWith("  - ") || line.startsWith("      by: "));
+
+/** drizzle-kit's rebuild of `chats`, copying `copy` (an INSERT … SELECT). */
+const rebuildChats = (
+  copy: string
+) => `PRAGMA foreign_keys=OFF;--> statement-breakpoint
+CREATE TABLE \`__new_chats\` (
+	\`id\` text PRIMARY KEY NOT NULL,
+	\`title\` text,
+	\`kind\` text DEFAULT 'chat' NOT NULL,
+	\`owner_id\` text NOT NULL,
+	\`created_at\` integer NOT NULL,
+	\`summary\` text
+);
+--> statement-breakpoint
+${copy}
+DROP TABLE \`chats\`;--> statement-breakpoint
+ALTER TABLE \`__new_chats\` RENAME TO \`chats\`;--> statement-breakpoint
+PRAGMA foreign_keys=ON;`;
+
+const copyAll =
+  "INSERT INTO `__new_chats`(id, title, kind, owner_id, created_at) SELECT id, title, kind, owner_id, created_at FROM `chats`;--> statement-breakpoint";
+
+/** A table no generated row gets into: a trigger refuses them all. */
+const locked = `${base}
+--> statement-breakpoint
+CREATE TABLE \`locked\` (\`id\` text PRIMARY KEY NOT NULL, \`note\` text);
+--> statement-breakpoint
+CREATE TRIGGER \`locked_closed\` BEFORE INSERT ON \`locked\` BEGIN SELECT RAISE(ABORT, 'locked is closed'); END;`;
+
+const journalSchema = z.object({
+  entries: z.array(z.object({ idx: z.number(), tag: z.string() })),
+});
+
+const repo = (dir: string): Migration[] =>
+  journalSchema
+    .parse(JSON.parse(readFileSync(`${dir}/meta/_journal.json`, "utf-8")))
+    .entries.map(({ idx, tag }) => ({
+      idx,
+      tag,
+      sql: readFileSync(`${dir}/${tag}.sql`, "utf-8"),
+    }));
+
+/** What a marker must name for real migration `idx`, as if newly added. */
+const flaggedInHistory = (dir: string, idx: number): string[] =>
+  errorsOf(repo(dir).slice(0, idx + 1))
+    .errors.flatMap((found) => found.split("\n"))
+    .filter((line) => line.startsWith("  - "))
+    .map((line) => line.replace(/^ {2}- /u, "").replace(/ \(.*\)$/u, ""));
+
+describe("deletes and updates, whatever their WHERE", () => {
+  it.each([
+    ["DELETE FROM `chats` WHERE `kind` = 'chat';", "delete rows chats"],
+    ["DELETE FROM `chats` WHERE `title` LIKE 'tmp%';", "delete rows chats"],
+    [
+      "DELETE FROM `chats` WHERE `created_at` > 1700000000000;",
+      "delete rows chats",
+    ],
+    [
+      "UPDATE `chats` SET `title` = NULL WHERE json_extract(`title`, '$.type') = 'file';",
+      "change values chats.title",
+    ],
+    [
+      "UPDATE `chats` SET `title` = json_remove(`title`, '$.seed');",
+      "change values chats.title",
+    ],
+    [
+      "INSERT OR REPLACE INTO `chats` (`id`, `kind`, `owner_id`, `created_at`) VALUES ('c-1', 'chat', 'p-1', 1);",
+      "delete rows chats",
+    ],
+    [
+      "REPLACE INTO `chats` (`id`, `kind`, `owner_id`, `created_at`) VALUES ('c-1', 'chat', 'p-1', 1);",
+      "delete rows chats",
+    ],
+    [
+      "INSERT INTO `people` (`id`, `name`) VALUES ('p-1', 'New') ON CONFLICT (`id`) DO UPDATE SET `name` = excluded.`name`;",
+      "change values people.name",
+    ],
+  ])("refuses %s", (statement, subject) => {
+    expect(flagged(statement)).toStrictEqual([subject]);
+  });
+
+  it("lists the statement that makes the change", () => {
+    expect(listed("DELETE FROM `chats` WHERE `kind` = 'chat';")).toStrictEqual([
+      "  - delete rows chats (a DELETE, whatever rows it matches)",
+      "      by: DELETE FROM `chats` WHERE `kind` = 'chat';",
+    ]);
+  });
+
+  it("refuses a replace whose deletes reach children through ON DELETE", () => {
+    expect(
+      flagged("REPLACE INTO `people` (`id`, `name`) VALUES ('p-1', 'New');")
+    ).toStrictEqual(["delete rows notes", "delete rows people"]);
+  });
+
+  it("refuses an insert into a table whose constraint replaces on conflict", () => {
+    expect(
+      flagged(
+        "INSERT INTO `tags` (`name`) VALUES ('urgent');",
+        `${base}
+--> statement-breakpoint
+CREATE TABLE \`tags\` (\`name\` text NOT NULL UNIQUE ON CONFLICT REPLACE);`
+      )
+    ).toStrictEqual(["delete rows tags"]);
+  });
+
+  it("refuses a delete written before a rebuild of the same table, with no breakpoint between", () => {
+    expect(
+      flagged(`DELETE FROM \`chats\` WHERE \`title\` LIKE 'tmp%';
+${rebuildChats(copyAll).replaceAll("--> statement-breakpoint", "")}`)
+    ).toStrictEqual(["delete rows chats"]);
+  });
+
+  it("refuses a delete from a table no generated row gets into", () => {
+    expect(flagged("DELETE FROM `locked`;", locked)).toStrictEqual([
+      "delete rows locked",
+    ]);
+  });
+
+  it("refuses rebuilding a table no generated row gets into", () => {
+    expect(
+      flagged(
+        `CREATE TABLE \`__new_locked\` (\`id\` text PRIMARY KEY NOT NULL, \`note\` text);--> statement-breakpoint
+INSERT INTO \`__new_locked\` SELECT * FROM \`locked\`;--> statement-breakpoint
+DROP TABLE \`locked\`;--> statement-breakpoint
+ALTER TABLE \`__new_locked\` RENAME TO \`locked\`;`,
+        locked
+      )
+    ).toStrictEqual(["delete rows locked"]);
+  });
+
+  it("passes inserts, one that does nothing on conflict, a backfill of a new column, and a copy into a derived table", () => {
+    expect(
+      flagged(`INSERT INTO \`people\` (\`id\`, \`name\`) VALUES ('p-new', 'New'), ('p-2', 'Two');--> statement-breakpoint
+INSERT INTO \`people\` (\`id\`, \`name\`) VALUES ('p-1', 'New') ON CONFLICT DO NOTHING;--> statement-breakpoint
+ALTER TABLE \`chats\` ADD \`summary\` text;--> statement-breakpoint
+UPDATE \`chats\` SET \`summary\` = \`title\` || ' by ' || \`owner_id\`;--> statement-breakpoint
+CREATE TABLE \`drafts\` (\`id\` text PRIMARY KEY NOT NULL, \`body\` text);--> statement-breakpoint
+INSERT INTO \`drafts\` SELECT \`id\`, \`title\` FROM \`chats\`;`)
+    ).toStrictEqual([]);
+  });
+
+  it("refuses an update or a delete on a table the migration creates too", () => {
+    expect(
+      flagged(`CREATE TABLE \`drafts\` (\`id\` text PRIMARY KEY NOT NULL, \`body\` text);--> statement-breakpoint
+INSERT INTO \`drafts\` SELECT \`id\`, \`title\` FROM \`chats\`;--> statement-breakpoint
+UPDATE \`drafts\` SET \`body\` = NULL;--> statement-breakpoint
+DELETE FROM \`drafts\`;`)
+    ).toStrictEqual(["change values drafts.body", "delete rows drafts"]);
+  });
+
+  it("passes what a trigger writes", () => {
+    expect(
+      flagged(
+        "INSERT INTO `people` (`id`, `name`) VALUES ('p-new', 'New');",
+        `${base}
+--> statement-breakpoint
+CREATE TRIGGER \`people_touch\` AFTER INSERT ON \`people\` BEGIN UPDATE \`chats\` SET \`title\` = NULL WHERE 0; END;`
+      )
+    ).toStrictEqual([]);
+  });
+
+  it("passes a change its marker names, and lists what the marker covers", () => {
+    const { errors, notes } = errorsOf([
+      { idx: 0, tag: "0000_base", sql: base },
+      {
+        idx: 1,
+        tag: "0001_next",
+        sql: "-- contract: delete rows chats: release 26.11.40 removed the last use\nDELETE FROM `chats` WHERE `kind` = 'chat';",
+      },
+    ]);
+    expect(errors).toStrictEqual([]);
+    expect(notes).toStrictEqual([
+      "db/0001_next.sql: its contract markers cover",
+      "  - delete rows chats (a DELETE, whatever rows it matches)",
+      "      by: DELETE FROM `chats` WHERE `kind` = 'chat';",
+    ]);
+  });
+
+  it("refuses a marker for no change", () => {
+    expect(
+      flagged(
+        "-- contract: change values chats.title: release 26.11.40 removed the last use\nALTER TABLE `chats` ADD `summary` text;"
+      )
+    ).toStrictEqual([
+      "db/0001_next.sql has a contract marker for change values chats.title, which it does not change in a way the release before it relies on: remove the marker.",
+    ]);
+  });
+});
+
+describe("a rebuild's copy", () => {
+  const copy = (select: string, tail = "") =>
+    rebuildChats(
+      `INSERT INTO \`__new_chats\`(id, title, kind, owner_id, created_at) SELECT ${select} FROM \`chats\`${tail};--> statement-breakpoint`
+    );
+  const columns = "id, title, kind, owner_id, created_at";
+
+  it.each([
+    ["a WHERE on a value", copy(columns, " WHERE `kind` != 'archived'")],
+    ["a NOT IN", copy(columns, " WHERE `kind` NOT IN ('legacy', 'v1')")],
+    [
+      "a WHERE on JSON",
+      copy(columns, " WHERE json_extract(`title`, '$.v') IS NOT 1"),
+    ],
+    [
+      "a CASE",
+      copy(
+        "id, title, CASE kind WHEN 'archived' THEN 'deleted' ELSE kind END, owner_id, created_at"
+      ),
+    ],
+    [
+      "a JSON rewrite",
+      copy("id, json_remove(title, '$.legacy'), kind, owner_id, created_at"),
+    ],
+    ["a LIMIT", copy(columns, " LIMIT 1000")],
+  ])("refuses a copy with %s", (_, migration) => {
+    expect(flagged(migration)).toContain("change values __new_chats");
+  });
+
+  it("names the opcodes that make a copy more than plain", () => {
+    expect(listed(copy(columns, " WHERE `kind` != 'archived'"))).toStrictEqual([
+      "  - change values __new_chats (filled by a copy that is more than a plain copy, so it may leave rows out or rewrite them (a new column filled from an expression counts too): Eq)",
+      "      by: INSERT INTO `__new_chats`(id, title, kind, owner_id, created_at) SELECT id, title, kind, owner_id, created_at FROM `chats` WHERE `kind` != 'archived';",
+    ]);
+  });
+
+  it("passes a plain copy, one that fills a new column with a literal, and a filtered copy into a table that leaves the old one in place", () => {
+    expect(flagged(rebuildChats(copyAll))).toStrictEqual([]);
+    expect(
+      flagged(
+        rebuildChats(
+          "INSERT INTO `__new_chats`(id, title, kind, owner_id, created_at, summary) SELECT id, title, kind, owner_id, created_at, 'none' FROM `chats`;--> statement-breakpoint"
+        )
+      )
+    ).toStrictEqual([]);
+    expect(
+      flagged(`CREATE TABLE \`task_chats\` (\`id\` text PRIMARY KEY NOT NULL);--> statement-breakpoint
+INSERT INTO \`task_chats\` SELECT \`id\` FROM \`chats\` WHERE \`kind\` = 'task';`)
+    ).toStrictEqual([]);
+  });
+});
+
+/** A trigger on `people` that runs `body` after each insert. */
+const touch = (body: string) =>
+  `CREATE TRIGGER \`people_touch\` AFTER INSERT ON \`people\` BEGIN ${body} END;`;
+
+/** A table named `name` with the columns of `chats`. */
+const sameTable = (name: string) =>
+  `CREATE TABLE \`${name}\` (\`id\` text PRIMARY KEY NOT NULL, \`title\` text, \`kind\` text DEFAULT 'chat' NOT NULL, \`owner_id\` text NOT NULL, \`created_at\` integer NOT NULL);`;
+
+describe("rewrites through a table the migration creates, a view, a CTE or a rename", () => {
+  const plainCopy =
+    "INSERT INTO `__new_chats`(id, title, kind, owner_id, created_at) SELECT id, title, kind, owner_id, created_at FROM `chats`;--> statement-breakpoint";
+
+  it.each([
+    [
+      "a delete from the copy before its rename",
+      rebuildChats(
+        `${plainCopy}\nDELETE FROM \`__new_chats\` WHERE \`kind\` = 'archived';--> statement-breakpoint`
+      ),
+      "delete rows __new_chats",
+    ],
+    [
+      "an update of the copy before its rename",
+      rebuildChats(
+        `${plainCopy}\nUPDATE \`__new_chats\` SET \`kind\` = 'deleted' WHERE \`kind\` = 'archived';--> statement-breakpoint`
+      ),
+      "change values __new_chats.kind",
+    ],
+    [
+      "a JSON rewrite of the copy",
+      rebuildChats(
+        `${plainCopy}\nUPDATE \`__new_chats\` SET \`title\` = json_remove(\`title\`, '$.x');--> statement-breakpoint`
+      ),
+      "change values __new_chats.title",
+    ],
+    [
+      "a filter through an intermediate table",
+      rebuildChats(
+        `${sameTable("tmp")}--> statement-breakpoint
+INSERT INTO \`tmp\` SELECT * FROM \`chats\`;--> statement-breakpoint
+INSERT INTO \`__new_chats\`(id, title, kind, owner_id, created_at) SELECT id, title, kind, owner_id, created_at FROM \`tmp\` WHERE \`kind\` != 'archived';--> statement-breakpoint`
+      ),
+      "change values __new_chats",
+    ],
+    [
+      "a filter through a view",
+      rebuildChats(
+        `CREATE VIEW \`pv\` AS SELECT * FROM \`chats\` WHERE \`kind\` != 'archived';--> statement-breakpoint
+INSERT INTO \`__new_chats\`(id, title, kind, owner_id, created_at) SELECT id, title, kind, owner_id, created_at FROM \`pv\`;--> statement-breakpoint
+DROP VIEW \`pv\`;--> statement-breakpoint`
+      ),
+      "change values __new_chats",
+    ],
+    [
+      "a filter through a CTE",
+      rebuildChats(
+        "WITH `k` AS (SELECT * FROM `chats` WHERE `kind` != 'archived') INSERT INTO `__new_chats`(id, title, kind, owner_id, created_at) SELECT id, title, kind, owner_id, created_at FROM `k`;--> statement-breakpoint"
+      ),
+      "change values __new_chats",
+    ],
+  ])("refuses %s", (_, migration, subject) => {
+    expect(flagged(migration)).toContain(subject);
+  });
+
+  it("refuses a delete from an intermediate table renamed in place", () => {
+    expect(
+      flagged(`${sameTable("tmp")}--> statement-breakpoint
+INSERT INTO \`tmp\` SELECT * FROM \`chats\`;--> statement-breakpoint
+DELETE FROM \`tmp\` WHERE \`kind\` = 'archived';--> statement-breakpoint
+DROP TABLE \`chats\`;--> statement-breakpoint
+ALTER TABLE \`tmp\` RENAME TO \`chats\`;`)
+    ).toContain("delete rows tmp");
+  });
+
+  it("refuses renaming the table away and copying it back filtered", () => {
+    expect(
+      flagged(`ALTER TABLE \`chats\` RENAME TO \`chats_old\`;--> statement-breakpoint
+${sameTable("chats")}--> statement-breakpoint
+INSERT INTO \`chats\` SELECT * FROM \`chats_old\` WHERE \`kind\` != 'archived';--> statement-breakpoint
+DROP TABLE \`chats_old\`;`)
+    ).toContain("change values chats");
+  });
+
+  it("refuses a filtered copy into a new table the branch renames", () => {
+    expect(
+      flagged(`CREATE TABLE \`task_chats\` (\`id\` text PRIMARY KEY NOT NULL);--> statement-breakpoint
+INSERT INTO \`task_chats\` SELECT \`id\` FROM \`chats\` WHERE \`kind\` = 'task';--> statement-breakpoint
+ALTER TABLE \`task_chats\` RENAME TO \`tasks\`;`)
+    ).toStrictEqual(["change values task_chats"]);
+  });
+
+  it("passes a plain copy in order", () => {
+    expect(
+      flagged(
+        rebuildChats(
+          "INSERT INTO `__new_chats`(id, title, kind, owner_id, created_at) SELECT id, title, kind, owner_id, created_at FROM `chats` ORDER BY `created_at`;--> statement-breakpoint"
+        )
+      )
+    ).toStrictEqual([]);
+  });
+});
+
+describe("triggers the branch adds", () => {
+  it("refuses a delete through a trigger created in the migration", () => {
+    expect(
+      flagged(`CREATE TABLE \`g\` (\`ref\` text, \`v\` text);--> statement-breakpoint
+CREATE TRIGGER \`g_wipe\` AFTER INSERT ON \`g\` BEGIN DELETE FROM \`chats\` WHERE \`kind\` = 'archived'; END;--> statement-breakpoint
+INSERT INTO \`g\` (\`ref\`, \`v\`) VALUES ('x', 'y');--> statement-breakpoint
+DROP TRIGGER \`g_wipe\`;`)
+    ).toStrictEqual(["delete rows chats"]);
+  });
+
+  it("refuses an update through an INSTEAD OF trigger on a view created in the migration", () => {
+    expect(
+      flagged(`CREATE VIEW \`titles\` AS SELECT \`id\`, \`title\` FROM \`chats\`;--> statement-breakpoint
+CREATE TRIGGER \`titles_write\` INSTEAD OF INSERT ON \`titles\` BEGIN UPDATE \`chats\` SET \`title\` = NULL WHERE \`id\` = NEW.\`id\`; END;--> statement-breakpoint
+INSERT INTO \`titles\` (\`id\`, \`title\`) VALUES ('c-1', 'x');`)
+    ).toStrictEqual(["change values chats.title"]);
+  });
+
+  it("refuses a write through a trigger main has that the migration redefines", () => {
+    expect(
+      flagged(
+        `DROP TRIGGER \`people_touch\`;--> statement-breakpoint
+${touch("DELETE FROM `chats` WHERE `kind` = 'archived';")}--> statement-breakpoint
+INSERT INTO \`people\` (\`id\`, \`name\`) VALUES ('p-new', 'New');`,
+        `${base}
+--> statement-breakpoint
+${touch("UPDATE `chats` SET `title` = `title` WHERE 0;")}`
+      )
+    ).toStrictEqual(["delete rows chats"]);
+  });
+});
+
+describe("replaces Greptile found", () => {
+  it("refuses a replace made by a trigger the migration creates", () => {
+    expect(
+      flagged(`CREATE TABLE \`g\` (\`ref\` text);--> statement-breakpoint
+CREATE TRIGGER \`g_put\` AFTER INSERT ON \`g\` BEGIN INSERT OR REPLACE INTO \`chats\` (\`id\`, \`kind\`, \`owner_id\`, \`created_at\`) VALUES (NEW.\`ref\`, 'chat', 'p', 1); END;--> statement-breakpoint
+INSERT INTO \`g\` (\`ref\`) VALUES ('c-1');`)
+    ).toStrictEqual(["delete rows chats"]);
+  });
+
+  it("refuses a replace whose trigger updates another table", () => {
+    expect(
+      flagged(`CREATE TABLE \`seen\` (\`n\` integer);--> statement-breakpoint
+CREATE TRIGGER \`chats_seen\` AFTER INSERT ON \`chats\` BEGIN UPDATE \`seen\` SET \`n\` = 1; END;--> statement-breakpoint
+REPLACE INTO \`chats\` (\`id\`, \`kind\`, \`owner_id\`, \`created_at\`) VALUES ('c-1', 'chat', 'p', 1);`)
+    ).toStrictEqual(["change values seen.n", "delete rows chats"]);
+  });
+
+  it("passes a plain copy of a REAL column", () => {
+    expect(
+      flagged(
+        `CREATE TABLE \`__new_costs\` (\`id\` text PRIMARY KEY NOT NULL, \`cost\` real);--> statement-breakpoint
+INSERT INTO \`__new_costs\`(id, cost) SELECT id, cost FROM \`costs\`;--> statement-breakpoint
+DROP TABLE \`costs\`;--> statement-breakpoint
+ALTER TABLE \`__new_costs\` RENAME TO \`costs\`;`,
+        "CREATE TABLE `costs` (`id` text PRIMARY KEY NOT NULL, `cost` real);"
+      )
+    ).toStrictEqual([]);
+  });
+
+  it("follows main's rows after a marked key change, so a later loss still counts", () => {
+    const { errors } = checkDatabase(
+      "db",
+      [
+        {
+          idx: 0,
+          tag: "0000_base",
+          sql: "CREATE TABLE `tags` (`id` text PRIMARY KEY NOT NULL, `name` text);",
+        },
+        {
+          idx: 1,
+          tag: "0001_rekey",
+          sql: "-- contract: change values tags.id: release 26.11.40 removed the last use\nUPDATE `tags` SET `id` = `id` || '-new';",
+        },
+        {
+          idx: 2,
+          tag: "0002_empty",
+          sql: "DROP TABLE `tags`;--> statement-breakpoint\nCREATE TABLE `tags` (`id` text PRIMARY KEY NOT NULL, `name` text);",
+        },
+      ],
+      { ...judging, from: 1, added: 1 }
+    );
+    expect(errors.join("\n")).not.toContain("db/0001_rekey.sql");
+    expect(errors.join("\n")).toContain("db/0002_empty.sql breaks");
+    expect(errors.join("\n")).toContain("delete rows tags (5 of 5 rows gone)");
+  });
+});
+
+describe("a branch of several migrations", () => {
+  it("passes losing a row the branch added, through a trigger main has", () => {
+    const { errors } = checkDatabase(
+      "db",
+      [
+        {
+          idx: 0,
+          tag: "0000_base",
+          sql: `CREATE TABLE \`t\` (\`id\` text PRIMARY KEY NOT NULL, \`kind\` text);
+CREATE TABLE \`events\` (\`id\` text PRIMARY KEY NOT NULL);
+CREATE TRIGGER \`events_sweep\` AFTER INSERT ON \`events\` BEGIN DELETE FROM \`t\` WHERE \`kind\` = 'scratch'; END;`,
+        },
+        {
+          idx: 1,
+          tag: "0001_scratch",
+          sql: "INSERT INTO `t` (`id`, `kind`) VALUES ('s-1', 'scratch');",
+        },
+        {
+          idx: 2,
+          tag: "0002_event",
+          sql: "INSERT INTO `events` (`id`) VALUES ('e-1');",
+        },
+      ],
+      { ...judging, from: 1, added: 1 }
+    );
+    expect(errors).toStrictEqual([]);
+  });
+
+  it("passes a backfill of a column an earlier migration of the branch added", () => {
+    const { errors } = checkDatabase(
+      "db",
+      [
+        { idx: 0, tag: "0000_base", sql: base },
+        {
+          idx: 1,
+          tag: "0001_add",
+          sql: "ALTER TABLE `chats` ADD `topic` text;",
+        },
+        {
+          idx: 2,
+          tag: "0002_fill",
+          sql: "UPDATE `chats` SET `topic` = `title`;",
+        },
+      ],
+      { ...judging, from: 1, added: 1 }
+    );
+    expect(errors).toStrictEqual([]);
+  });
+});
+
+describe("history replayed as if added", () => {
+  // Replays a real database whole: slower than the rest.
+  it(
+    "refuses core 0050, 0113 and 0192's deletes and rewrites",
+    { timeout: 60_000 },
+    () => {
+      const core = "apps/core/src/db/core/migrations";
+      expect(flaggedInHistory(core, 50)).toStrictEqual([
+        "change values dependency_locks.lock",
+        "delete rows dependency_requests",
+      ]);
+      expect(flaggedInHistory(core, 113)).toStrictEqual([
+        "delete rows workflow_binding_approvals",
+        "delete rows sdk_release_pins",
+      ]);
+      expect(flaggedInHistory(core, 192)).toContain("delete rows permissions");
+    }
+  );
+
+  // Replays a real database whole: slower than the rest.
+  it(
+    "refuses deletes from today's permissions, accounts and stored records",
+    { timeout: 60_000 },
+    () => {
+      const added = (dir: string, sql: string) => {
+        const migrations = repo(dir);
+        return errorsOf([
+          ...migrations,
+          { idx: migrations.length, tag: "9999_next", sql },
+        ])
+          .errors.flatMap((found) => found.split("\n"))
+          .filter((line) => line.startsWith("  - "))
+          .map((line) => line.replace(/^ {2}- /u, "").replace(/ \(.*\)$/u, ""));
+      };
+      const core = "apps/core/src/db/core/migrations";
+      expect(
+        added(core, "DELETE FROM `permissions` WHERE `subject_type` = 'agent';")
+      ).toStrictEqual(["delete rows permissions"]);
+      expect(added(core, "DELETE FROM `accounts`;")).toStrictEqual([
+        "delete rows accounts",
+      ]);
+      expect(
+        added(
+          "apps/core/src/db/data-store/migrations",
+          "DELETE FROM `sdk_records`;"
+        )
+      ).toStrictEqual(["delete rows sdk_records"]);
+    }
+  );
+});
+
+describe("rows before and after", () => {
+  it("refuses a rebuild that copies nothing", () => {
+    expect(flagged(rebuildChats(""))).toStrictEqual(["delete rows chats"]);
+  });
+
+  it("refuses a rebuild that swaps two columns", () => {
+    expect(
+      listed(
+        rebuildChats(
+          "INSERT INTO `__new_chats`(id, title, kind, owner_id, created_at) SELECT id, title, owner_id, kind, created_at FROM `chats`;--> statement-breakpoint"
+        )
+      )
+    ).toStrictEqual([
+      "  - change values chats.kind (4 of 5 rows, now holds what chats.owner_id held)",
+      "  - change values chats.owner_id (4 of 5 rows, now holds what chats.kind held)",
+    ]);
+  });
+
+  it("refuses a rebuild that rewrites JSON on the way", () => {
+    expect(
+      flagged(
+        rebuildChats(
+          "INSERT INTO `__new_chats`(id, title, kind, owner_id, created_at) SELECT id, json_set(title, '$.moved', 1), kind, owner_id, created_at FROM `chats`;--> statement-breakpoint"
+        )
+      )
+    ).toStrictEqual(["change values chats.title", "change values __new_chats"]);
+  });
+
+  it("refuses renaming a column and adding one under its name", () => {
+    expect(
+      flagged(`ALTER TABLE \`chats\` RENAME COLUMN \`title\` TO \`title2\`;--> statement-breakpoint
+ALTER TABLE \`chats\` ADD \`title\` text;`)
+    ).toStrictEqual(["change values chats.title"]);
+  });
+
+  it("refuses dropping a table and creating it again as it was", () => {
+    expect(
+      flagged(`DROP TABLE \`chats\`;--> statement-breakpoint
+CREATE TABLE \`chats\` (
+	\`id\` text PRIMARY KEY NOT NULL,
+	\`title\` text,
+	\`kind\` text DEFAULT 'chat' NOT NULL,
+	\`owner_id\` text NOT NULL,
+	\`created_at\` integer NOT NULL
+);`)
+    ).toStrictEqual(["delete rows chats"]);
+  });
+
+  it("refuses a rebuild of a parent whose children go with it, as D1 runs it", () => {
+    expect(
+      flagged(`PRAGMA foreign_keys=OFF;--> statement-breakpoint
+CREATE TABLE \`__new_people\` (\`id\` text PRIMARY KEY NOT NULL, \`name\` text, \`email\` text);
+--> statement-breakpoint
+INSERT INTO \`__new_people\`(id, name) SELECT id, name FROM \`people\`;--> statement-breakpoint
+DROP TABLE \`people\`;--> statement-breakpoint
+ALTER TABLE \`__new_people\` RENAME TO \`people\`;--> statement-breakpoint
+PRAGMA foreign_keys=ON;`)
+    ).toStrictEqual(["delete rows notes"]);
+  });
+
+  it("refuses a dedupe of rows that differ only by key", () => {
+    expect(
+      flagged(
+        `CREATE TABLE \`__new_tags\` (\`name\` text NOT NULL, \`color\` text, CONSTRAINT \`tags_name\` UNIQUE(\`name\`));--> statement-breakpoint
+INSERT OR IGNORE INTO \`__new_tags\` SELECT \`name\`, \`color\` FROM \`tags\`;--> statement-breakpoint
+DROP TABLE \`tags\`;--> statement-breakpoint
+ALTER TABLE \`__new_tags\` RENAME TO \`tags\`;`,
+        "CREATE TABLE `tags` (`name` text NOT NULL, `color` text);"
+      )
+    ).toContain("delete rows tags");
+  });
+
+  it("names a migration the rows refuse", () => {
+    expect(
+      flagged(
+        "CREATE UNIQUE INDEX `chats_kind` ON `chats` (`kind`);",
+        base.replace(
+          "`kind` text DEFAULT 'chat' NOT NULL",
+          "`kind` text DEFAULT 'chat' NOT NULL CHECK(`kind` IN ('chat', 'task'))"
+        )
+      )
+    ).toStrictEqual([
+      "db/0001_next.sql does not apply to the rows the release before it wrote: UNIQUE constraint failed: chats.kind",
+      "add unique key chats",
+    ]);
+  });
+
+  it("passes a faithful rebuild, and one that reads text as a JSON list", () => {
+    expect(flagged(rebuildChats(copyAll))).toStrictEqual([]);
+    expect(
+      flagged(
+        "CREATE TABLE `chat_regions` AS SELECT json_set(`region`.`value`, '$.ok', 1) AS `value` FROM `chats`, json_each(`chats`.`title`) AS `region`;"
+      )
+    ).toStrictEqual([]);
+  });
+
+  it("keeps a table that takes only JSON strings when another needs a list", () => {
+    expect(
+      flagged(
+        `CREATE TABLE \`regions\` AS SELECT json_set(\`region\`.\`value\`, '$.ok', 1) AS \`value\` FROM \`chats\`, json_each(\`chats\`.\`title\`) AS \`region\`;--> statement-breakpoint
+CREATE TABLE \`__new_labels\` (\`id\` text PRIMARY KEY NOT NULL, \`name\` text NOT NULL);--> statement-breakpoint
+DROP TABLE \`labels\`;--> statement-breakpoint
+ALTER TABLE \`__new_labels\` RENAME TO \`labels\`;`,
+        `${base}
+--> statement-breakpoint
+CREATE TABLE \`labels\` (\`id\` text PRIMARY KEY NOT NULL, \`name\` text NOT NULL, CONSTRAINT "plain" CHECK(json_type(\`name\`) = 'text'));`
+      )
+    ).toStrictEqual(["delete rows labels"]);
+  });
+
+  it("judges no data of a migration main already has", () => {
+    const { errors } = checkDatabase(
+      "db",
+      [
+        { idx: 0, tag: "0000_base", sql: base },
+        {
+          idx: 1,
+          tag: "0001_next",
+          sql: "-- contract: delete rows chats: release 26.11.40 removed the last use\nDELETE FROM `chats`;",
+        },
+      ],
+      { ...judging, from: 1, added: 2 }
+    );
+    expect(errors).toStrictEqual([]);
+  });
+});
+
+/** What `seed` writes to a database of `sql`: rows per table, and what it skips. */
+const seeded = (sql: string) => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(sql);
+  const result = seed(db);
+  const counts = Object.fromEntries(
+    result.seeded.map((table) => [
+      table,
+      db.prepare(`SELECT count(*) AS n FROM "${table}"`).get()?.n,
+    ])
+  );
+  const kinds = db
+    .prepare("SELECT DISTINCT `kind` FROM `notes` ORDER BY `kind`")
+    .all()
+    .map(({ kind }) => kind);
+  db.close();
+  return { counts, kinds, skipped: result.skipped };
+};
+
+describe(seed, () => {
+  it("writes rows parents first, every value a CHECK allows, a repeat, an empty one, and a table of one row", () => {
+    expect(
+      seeded(`CREATE TABLE \`notes\` (\`id\` text PRIMARY KEY, \`person_id\` text NOT NULL REFERENCES \`people\`(\`id\`), \`kind\` text NOT NULL, \`body\` text, CONSTRAINT "kinds" CHECK(\`kind\` IN ('a', 'b', 'c', 'd')));
+CREATE TABLE \`people\` (\`id\` text PRIMARY KEY);
+CREATE TABLE \`settings\` (\`id\` integer PRIMARY KEY, \`value\` text, CONSTRAINT "one_row" CHECK(\`id\` = 1));`)
+    ).toStrictEqual({
+      counts: { people: 5, notes: 6, settings: 1 },
+      kinds: ["a", "b", "c", "d"],
+      skipped: [],
+    });
+  });
+
+  it("names each table that takes no row, and why", () => {
+    expect(
+      seeded(`CREATE TABLE \`notes\` (\`id\` text PRIMARY KEY, \`kind\` text);
+CREATE TABLE \`locked\` (\`id\` text PRIMARY KEY);
+CREATE TRIGGER \`locked_closed\` BEFORE INSERT ON \`locked\` BEGIN SELECT RAISE(ABORT, 'locked is closed'); END;
+CREATE VIRTUAL TABLE \`words\` USING fts5(\`word\`);`).skipped
+    ).toStrictEqual([
+      { table: "words", reason: "a virtual table" },
+      { table: "locked", reason: "locked is closed" },
+    ]);
+  });
+});
+
+describe(skippedErrors, () => {
+  const skipped = [{ table: "locked", reason: "locked is closed" }];
+
+  it("passes the skipped tables recorded, by name", () => {
+    expect(skippedErrors("db", skipped, { db: ["locked"] })).toStrictEqual([]);
+  });
+
+  it("refuses a table skipped that is not recorded, and one recorded that is covered", () => {
+    expect(skippedErrors("db", skipped, { db: ["sealed"] })).toStrictEqual([
+      "db: locked (locked is closed) take no generated row, so the data check covers less: make them take one, or add them to skippedTables in scripts/migration-data.ts with the reason.",
+      "db: sealed take generated rows now: remove them from skippedTables in scripts/migration-data.ts.",
+    ]);
+  });
+});
+
+describe(asDeployed, () => {
+  it("drops foreign_keys toggles, which D1 and Durable Objects ignore", () => {
+    expect(
+      asDeployed(
+        "PRAGMA foreign_keys=OFF;--> statement-breakpoint\nDROP TABLE `x`;\nPRAGMA foreign_keys = ON;"
+      )
+    ).toBe("--> statement-breakpoint\nDROP TABLE `x`;\n");
+  });
+});

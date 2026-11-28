@@ -1589,6 +1589,13 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
             watchId = await start(listener);
             return;
           } catch (error) {
+            // Deleted (or never theirs): nothing more to follow. Let go of,
+            // quietly: the page hears its callback let go of, and the chat
+            // is gone from its list.
+            if (agentErrors.codeOf(error) === "agent.chat_not_found") {
+              page[Symbol.dispose]();
+              return;
+            }
             log.warn("chat.rewatch_failed", {
               ...logged,
               ...errorFields(error),

@@ -62,6 +62,7 @@ import {
 } from "@grasp-os/shared/errors";
 import {
   chatIdSchema,
+  chatRefSchema,
   identifierSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
@@ -143,6 +144,13 @@ import {
   keepAudience,
 } from "./chat-audiences.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
+import type {
+  ExportedFile,
+  ExportedHeldCall,
+  ExportedMessage,
+  ExportedPage,
+  ExportedTurnState,
+} from "./chat-export.ts";
 import type {
   QueuedQuestion,
   TurnCapture,
@@ -836,9 +844,26 @@ export const stopReason = (chatId: ChatId, error: unknown): string => {
  * What a chat that came through a chat platform read, as `trace:<chat>`:
  * each text value its connection reads returned, newest first, that its
  * writes are traced to before they are held (channels/stephen-rules.ts).
- * Kept across turns, up to {@link traceCharsMax}, oldest dropped first.
+ * Kept across turns, up to {@link traceCharsMax}, oldest dropped first;
+ * dropped whole once a source the chat read is erased (`#dropErasedCopies`).
  */
 const traceKeyPrefix = "trace:";
+
+/**
+ * The sources a chat read found erased, as `erased:<chat>`, once what else
+ * the chat keeps that may quote them is dropped (`#dropErasedCopies`):
+ * dropped once for each, never again for a source already counted.
+ */
+const erasedKeyPrefix = "erased:";
+
+const erasedKeptSchema = z.array(z.string());
+
+/**
+ * That its person's erasure began (`erasePerson`), as `erasing`: kept in
+ * storage, so a restart before the wipe keeps it, and gone with the wipe,
+ * which empties the storage.
+ */
+const erasingKey = "erasing";
 
 /**
  * The plans of a chat Build it made, as `built:<chat>`: the calls that
@@ -943,6 +968,27 @@ const chatQueuedSchema = z.array(
  * is passed over, and answered as the first was (`keepTurnMessages`).
  */
 const copiedKeyPrefix = "copied:";
+
+/** Most messages one page of `exportMessages` hands over. */
+const exportPageMax = 200;
+
+/**
+ * Most bytes of messages one page of `exportMessages` hands over, past
+ * its first: far under the 32 MiB an object's RPC carries. One message is
+ * one row, at most the few MB the object's SQLite keeps in a row, so a
+ * page of one always fits.
+ */
+const exportPageBytes = 4 * 1024 * 1024;
+
+/** Where an export's page goes on after (a message's ID, 0 from the start), and how many it holds. */
+const exportAfterSchema = z.int().nonnegative();
+const exportLimitSchema = z.int().min(1).max(exportPageMax);
+
+/** One of a picture's parts an export hands over (`exportFilePart`). */
+const exportPartSchema = z.int().nonnegative();
+
+/** A time as an export hands it over: milliseconds. */
+const msOf = (date: Date): number => date.getTime();
 
 const copiedSchema = z.object({
   through: z.number(),
@@ -1209,11 +1255,15 @@ export class Workspace extends DurableObject<Env> {
   >();
 
   /**
-   * Set once its person's erasure began (`erasePerson`): from then on
-   * nothing more is told in their chats (`#note`), so nothing lands after
-   * the erasure.
+   * Whether its person's erasure began (`erasePerson`): from then on
+   * nothing more is told in their chats (`#note`) or handed over of them
+   * (`#exported`, `turnForBrain`), so nothing lands after the erasure. Read
+   * from storage (`erasingKey`), so a restart before the wipe never opens
+   * them again.
    */
-  #erasing = false;
+  get #erasing(): boolean {
+    return this.ctx.storage.kv.get(erasingKey) === true;
+  }
 
   /**
    * Bumped whenever a chat's sources or restricted mode change, so a
@@ -2335,8 +2385,9 @@ export class Workspace extends DurableObject<Env> {
    * what it used). Read back from the answer, this turn's rows alone,
    * never the chat's history before it.
    *
-   * `deleting` while a deletion of the chat is under way: the hand-over
-   * is tried again later, as that deletion may yet fail. Skipped, with
+   * `deleting` while a deletion of the chat or its person's erasure is
+   * under way: the hand-over is tried again later, as that may yet fail,
+   * and finds the chat gone once it is done. Skipped, with
    * why, otherwise: `deleted` once the chat is gone or someone else's, or the message isn't one of its answers;
    * `restricted` once it is no longer one whose turns go to the Brain
    * (`handsTurnsOver`: restricted since, say); `no_text` for a turn with
@@ -2356,7 +2407,7 @@ export class Workspace extends DurableObject<Env> {
       return deleted;
     }
     // Being deleted, which may yet fail: not gone, so not `deleted`.
-    if (this.#isDeleting(id.data)) {
+    if (this.#erasing || this.#isDeleting(id.data)) {
       return { kind: "deleting" };
     }
     const chat = this.#db
@@ -2493,7 +2544,8 @@ export class Workspace extends DurableObject<Env> {
    * for the chat's person: the same request still waiting in the chat is
    * the same hold, so a call made again (a step a restart ran again) is
    * held once. The call that holds it records it (`agent.call`, with the
-   * hold's ID). Refused for a chat that isn't `personId`'s.
+   * hold's ID). Refused for a chat that isn't `personId`'s, and while its
+   * model may still have what an erasure took (`#erasedUnseen`).
    */
   async holdAppCall(
     chatId: unknown,
@@ -2503,7 +2555,16 @@ export class Workspace extends DurableObject<Env> {
   ): Promise<HeldAppCallRow> {
     const chat = this.#ownChat(chatId, personId);
     await this.#lapseHeldAppCalls(chat.id, now);
+    const erasedKey = `${erasedKeyPrefix}${chat.id}`;
+    const counted = JSON.stringify(this.ctx.storage.kv.get(erasedKey) ?? []);
+    await this.#erasedUnseen(chat);
     const kept = this.ctx.storage.transactionSync(() => {
+      // An erasure found meanwhile withdrew what waited: this too.
+      if (
+        JSON.stringify(this.ctx.storage.kv.get(erasedKey) ?? []) !== counted
+      ) {
+        throw agentErrors.create("agent.erasure_unchecked");
+      }
       const waiting = this.#db
         .select()
         .from(heldAppCalls)
@@ -2586,7 +2647,8 @@ export class Workspace extends DurableObject<Env> {
   /**
    * The App writes held for `personId` in their chat `chatId`, which came
    * through `via` (`#chatThrough`), that still wait, oldest first, a page
-   * of at most `heldAppCallsPage`: none past their day. A full page goes
+   * of at most `heldAppCallsPage`: none past their day, or resting on what
+   * an erasure took (`#erasureChecked`). A full page goes
    * on `after` its last one's ID; an ID that names no hold of the chat
    * starts from the first.
    */
@@ -2599,6 +2661,20 @@ export class Workspace extends DurableObject<Env> {
   ): Promise<HeldAppCallRow[]> {
     const chat = this.#chatThrough(chatId, personId, via);
     await this.#lapseHeldAppCalls(chat.id, now);
+    // None listed with what an erasure took (`#dropErasedCopies`).
+    const waits = this.#db
+      .select({ id: heldAppCalls.id })
+      .from(heldAppCalls)
+      .where(
+        and(
+          eq(heldAppCalls.chatId, chat.id),
+          eq(heldAppCalls.status, "waiting")
+        )
+      )
+      .get();
+    if (waits !== undefined) {
+      await this.#erasureChecked(chat);
+    }
     const from =
       after === undefined
         ? undefined
@@ -2638,7 +2714,9 @@ export class Workspace extends DurableObject<Env> {
    * Decides held App call `id` of `personId`'s chat `chatId`, which came
    * through `via` (`#chatThrough`), once: only while it waits, within its
    * day, and, to confirm it, only for the request whose SHA-256 is
-   * `requestHash`, the one the person was shown. Its request is emptied in
+   * `requestHash`, the one the person was shown, once what the chat read
+   * was checked against what an erasure took (`#erasureChecked`). Its
+   * request is emptied in
    * the same write, and handed back to run once confirmed. Anything else
    * (another's, decided already, lapsed, another request) answers as none:
    * `agent.held_call_not_found`.
@@ -2653,6 +2731,10 @@ export class Workspace extends DurableObject<Env> {
   ): Promise<HeldAppCallRow> {
     const chat = this.#chatThrough(chatId, personId, via);
     await this.#lapseHeldAppCalls(chat.id, now);
+    // Never carried out with what an erasure took (`#dropErasedCopies`).
+    if (decision.confirm) {
+      await this.#erasureChecked(chat);
+    }
     const decided = this.ctx.storage.transactionSync(() => {
       const row = this.#db
         .select()
@@ -4733,7 +4815,8 @@ export class Workspace extends DurableObject<Env> {
    * returned (`values`, its text values), that the chat's later writes are
    * traced to, and, while its turn is under way, what it read for the
    * turn's check line (`check`). Why not, and nothing kept, once the run
-   * has ended or a revocation closed it (`open` when kept).
+   * has ended or a revocation closed it, or while what an erasure found
+   * took is not yet kept from the model (`revoked`; `open` when kept).
    */
   keepRead(
     chatId: ChatId,
@@ -4744,6 +4827,12 @@ export class Workspace extends DurableObject<Env> {
     const { call } = this.admitFromCodeRun(chatId, runId);
     if (call !== "open") {
       return call;
+    }
+    // A read that may echo what an erasure found since took, as a run
+    // still under way may, is never kept back after the trace was dropped
+    // for it (`#dropErasedCopies`): refused until the model is kept from it.
+    if (this.#erasedUnwithheld(chatId)) {
+      return "revoked";
     }
     this.#turns.get(chatId)?.reads.push(check);
     const key = `${traceKeyPrefix}${chatId}`;
@@ -5155,8 +5244,182 @@ export class Workspace extends DurableObject<Env> {
     ];
     if (runs.length > 0 && !this.#isDeleting(chatId)) {
       this.#replaceResults(chatId, runs);
+      this.#dropErasedCopies(chatId, [...erased]);
     }
     return new Set();
+  }
+
+  /**
+   * Refuses (`agent.erasure_unchecked`) unless what chat `chat` read was
+   * just checked against what an erasure took, and what it keeps of that
+   * replaced or dropped (`#replaceErased`): before anything it keeps that
+   * may quote it is listed, handed over or carried out. Asked again once
+   * the Brain answers.
+   */
+  async #erasureChecked(chat: Chat): Promise<void> {
+    const unchecked = await this.#replaceErased(this.#scopeOf(chat));
+    if (unchecked.size > 0) {
+      throw agentErrors.create("agent.erasure_unchecked");
+    }
+  }
+
+  /**
+   * Refuses (`agent.erasure_unchecked`) holding a write in chat `chat`
+   * while its model may still have what an erasure took, or while that
+   * can't be asked: a run of the chat resting on an erased source that no
+   * check before a model request withheld yet (`#withheldRuns` marks it,
+   * as an erased source is never readable again), whose result the request
+   * may quote. Held after the next request, as the model no longer has it.
+   * A write held before the erasure is withdrawn once it is found
+   * (`#dropErasedCopies`).
+   */
+  async #erasedUnseen(chat: Chat): Promise<void> {
+    const unmarked = this.#db
+      .selectDistinct({ sourceId: chatRunSources.sourceId })
+      .from(chatRunSources)
+      .where(
+        and(
+          eq(chatRunSources.chatId, chat.id),
+          isNull(chatRunSources.withheldAt)
+        )
+      )
+      .all()
+      .map(({ sourceId }) => sourceId);
+    let erased: Set<string>;
+    try {
+      erased = await erasedSources(this.env, chat.personId, unmarked);
+    } catch (error) {
+      log.warn("agent.erased_check_failed", {
+        chatId: chat.id,
+        ...errorFields(error),
+      });
+      throw agentErrors.create("agent.erasure_unchecked");
+    }
+    if (erased.size > 0) {
+      throw agentErrors.create("agent.erasure_unchecked");
+    }
+  }
+
+  /** The sources chat `chatId` read found erased so far (`erasedKeyPrefix`). */
+  #erasedKept(chatId: ChatId): string[] {
+    return (
+      erasedKeptSchema.safeParse(
+        this.ctx.storage.kv.get(`${erasedKeyPrefix}${chatId}`)
+      ).data ?? []
+    );
+  }
+
+  /**
+   * Whether chat `chatId`'s model may still have what an erasure found
+   * since took: a run's read of a source counted erased (`#erasedKept`)
+   * that no check before a model request withheld yet (`#withheldRuns`).
+   */
+  #erasedUnwithheld(chatId: ChatId): boolean {
+    const erased = this.#erasedKept(chatId);
+    return (
+      erased.length > 0 &&
+      this.#db
+        .select({ runId: chatRunSources.runId })
+        .from(chatRunSources)
+        .where(
+          and(
+            eq(chatRunSources.chatId, chatId),
+            isNull(chatRunSources.withheldAt),
+            inList(chatRunSources.sourceId, erased)
+          )
+        )
+        .get() !== undefined
+    );
+  }
+
+  /**
+   * Drops what else chat `chatId` keeps that may quote sources `erased` it
+   * read, found erased (`#replaceErased`), the first time any of them is
+   * (`erasedKeyPrefix`): a later erasure drops again, a repeat nothing, so
+   * what the chat keeps after it is never dropped for it. Neither names the
+   * run it came from, so all of it goes:
+   * - what its connection reads returned that its writes are traced to
+   *   (`keepRead`): holding less only refuses more of its writes
+   *   (channels/stephen-rules.ts) until it reads again;
+   * - every App write still held for its person, withdrawn unrun, its
+   *   request and function's name emptied and its end recorded (`chat.app_call.withdrawn`) in
+   *   the same write, then its agent told to ask afresh: no rule finds what
+   *   of a request quotes what was erased, and a request blanked is not the
+   *   one they were shown.
+   */
+  #dropErasedCopies(chatId: ChatId, erased: readonly string[]): void {
+    const key = `${erasedKeyPrefix}${chatId}`;
+    const withdrawn = this.ctx.storage.transactionSync(() => {
+      const counted = this.#erasedKept(chatId);
+      const fresh = erased.filter((source) => !counted.includes(source));
+      const held = this.#db
+        .select({ id: chats.id })
+        .from(chats)
+        .where(eq(chats.id, chatId))
+        .get();
+      // Nothing kept for a chat deleted meanwhile.
+      if (fresh.length === 0 || held === undefined) {
+        return [];
+      }
+      this.ctx.storage.kv.put(key, [...counted, ...fresh]);
+      this.ctx.storage.kv.delete(`${traceKeyPrefix}${chatId}`);
+      const rows = this.#db
+        .update(heldAppCalls)
+        // Its function's name too: the agent's own words, which may quote it.
+        .set({ status: "withdrawn", request: null, function: "" })
+        .where(
+          and(
+            eq(heldAppCalls.chatId, chatId),
+            eq(heldAppCalls.status, "waiting")
+          )
+        )
+        .returning()
+        .all();
+      for (const row of rows) {
+        this.#outboxEntry({
+          actor: { type: "system" },
+          action: "chat.app_call.withdrawn",
+          target: { type: "app", id: row.appId },
+          detail: {
+            workspace: this.ctx.id.name ?? null,
+            chat: chatId,
+            held: row.id,
+            kind: row.kind,
+          },
+        });
+      }
+      return rows;
+    });
+    if (withdrawn.length === 0) {
+      return;
+    }
+    this.#deliverAudit();
+    this.heldChanged(chatId);
+    // Told after: a check before a turn's model request comes here too,
+    // and the chat's object waits on it then.
+    this.ctx.waitUntil(this.#noteWithdrawn(chatId, withdrawn));
+  }
+
+  /**
+   * Tells the agent of chat `chatId` each held App write in `withdrawn` was
+   * withdrawn, by its ID alone: nothing it named may quote what was erased.
+   */
+  async #noteWithdrawn(
+    chatId: ChatId,
+    withdrawn: readonly { id: string }[]
+  ): Promise<void> {
+    for (const { id } of withdrawn) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one note each, in order
+        await this.#note(
+          chatId,
+          `The write to an App you asked for (held ID ${id}) was withdrawn before the person decided it: this chat can no longer read something it may have come from, so it was not carried out. Tell them, and if they still want it, ask for it afresh.`
+        );
+      } catch (error) {
+        // Withdrawn either way: the agent finds it no longer waits.
+        log.warn("chat.held_app_call_withdraw_note_failed", errorFields(error));
+      }
+    }
   }
 
   /**
@@ -5865,6 +6128,282 @@ export class Workspace extends DurableObject<Env> {
     this.#listChanged();
   }
 
+  // What a chat's own object (chat-session.ts) takes over of the chat as
+  // kept here (chat-export.ts): nothing but what an erasure took changes
+  // (`#exportedChecked`), so a part asked for again answers the same, and a
+  // take-over cut short goes on. Each takes the chat's reference: the
+  // object's own name is all a chat's object knows of itself before it
+  // holds the chat, which it checks every caller against from then on.
+  // `undefined` for a chat this object isn't, or doesn't hold, or is
+  // deleting, and while its person is being erased.
+
+  /** Chat `ref`, when this object holds it and neither it nor its person is being deleted. */
+  #exported(ref: ChatRef): Chat | undefined {
+    const { workspaceId, chatId } = chatRefSchema.parse(ref);
+    if (
+      workspaceId !== this.ctx.id.name ||
+      this.#erasing ||
+      this.#isDeleting(chatId)
+    ) {
+      return undefined;
+    }
+    return this.#db.select().from(chats).where(eq(chats.id, chatId)).get();
+  }
+
+  /**
+   * Chat `ref` as `#exported` finds it, once what an erasure took is
+   * replaced or dropped (`#erasureChecked`): refused while that can't be
+   * asked, for the take-over to ask again later.
+   */
+  async #exportedChecked(ref: ChatRef): Promise<Chat | undefined> {
+    const held = this.#exported(ref);
+    if (held === undefined) {
+      return undefined;
+    }
+    await this.#erasureChecked(held);
+    // Read again after the await: the chat may have gone meanwhile.
+    return this.#exported(ref);
+  }
+
+  /**
+   * A page of chat `ref`'s messages after the one with ID `after` (0 from
+   * the start), oldest first, at most `limit` (1 to
+   * {@link exportPageMax}) and {@link exportPageBytes} past the first,
+   * with what the chat is, the last pi entry its messages here hold
+   * (`copiedKeyPrefix`), and where the next page goes on. What an erasure
+   * took is replaced first, as before the chat is shown (`watch`):
+   * refused (`agent.erasure_unchecked`) while that can't be asked, for the
+   * take-over to ask again later.
+   */
+  async exportMessages(
+    ref: ChatRef,
+    after: unknown,
+    limit: unknown
+  ): Promise<ExportedPage | undefined> {
+    const since = exportAfterSchema.safeParse(after);
+    const most = exportLimitSchema.safeParse(limit);
+    if (!since.success || !most.success) {
+      throw agentErrors.create("agent.invalid_request");
+    }
+    const chat = await this.#exportedChecked(ref);
+    if (chat === undefined) {
+      return undefined;
+    }
+    // One more than asked, to tell whether a page follows.
+    const rows = this.#db
+      .select({
+        id: chatMessages.id,
+        message: chatMessages.message,
+        createdAt: chatMessages.createdAt,
+        thinkingMs: chatMessages.thinkingMs,
+        built: chatMessages.built,
+        agentId: chatMessages.agentId,
+        rating: chatMessages.rating,
+        ratingReason: chatMessages.ratingReason,
+        requestKey: chatMessages.requestKey,
+        bytes: sql<number>`length(CAST(${chatMessages.message} AS BLOB))`,
+      })
+      .from(chatMessages)
+      .where(
+        and(eq(chatMessages.chatId, chat.id), gt(chatMessages.id, since.data))
+      )
+      .orderBy(asc(chatMessages.id))
+      .limit(most.data + 1)
+      .all();
+    const page: ExportedMessage[] = [];
+    let bytes = 0;
+    for (const { bytes: size, ...row } of rows) {
+      if (
+        page.length === most.data ||
+        (page.length > 0 && bytes + size > exportPageBytes)
+      ) {
+        break;
+      }
+      bytes += size;
+      page.push({ ...row, createdAt: msOf(row.createdAt) });
+    }
+    const copied = copiedSchema.safeParse(
+      this.ctx.storage.kv.get(`${copiedKeyPrefix}${chat.id}`)
+    );
+    const { personId, via, agentId, thread, restricted, privateRead } = chat;
+    return {
+      facts: { personId, via, agentId, thread, restricted, privateRead },
+      through: copied.success ? copied.data.through : null,
+      page,
+      next: page.length < rows.length ? (page.at(-1)?.id ?? null) : null,
+    };
+  }
+
+  /**
+   * Chat `ref`'s files, each one's record and how many parts its bytes
+   * are in (`exportFilePart`). Small whatever the chat: at most
+   * `chatFilesMax` records, and no file's bytes.
+   */
+  exportFiles(ref: ChatRef): ExportedFile[] | undefined {
+    const chat = this.#exported(ref);
+    if (chat === undefined) {
+      return undefined;
+    }
+    return this.#db
+      .select({
+        id: chatFiles.id,
+        messageId: chatFiles.messageId,
+        name: chatFiles.name,
+        type: chatFiles.type,
+        createdAt: chatFiles.createdAt,
+        bytes: chatFiles.bytes,
+        pictureParts: sql<number>`(select count(*) from ${chatFileParts} where ${chatFileParts.fileId} = ${chatFiles.id})`,
+      })
+      .from(chatFiles)
+      .where(eq(chatFiles.chatId, chat.id))
+      .orderBy(asc(chatFiles.createdAt), asc(chatFiles.id))
+      .all()
+      .map(({ pictureParts, ...row }) => ({
+        ...row,
+        createdAt: msOf(row.createdAt),
+        parts: isChatPictureType(row.type) ? pictureParts : 1,
+      }));
+  }
+
+  /**
+   * Part `part` of file `fileId` of chat `ref` (`exportFiles`): one of a
+   * picture's 1 MB parts, or a file's text whole (at most 1 MB) as its one.
+   */
+  exportFilePart(
+    ref: ChatRef,
+    fileId: string,
+    part: unknown
+  ): Uint8Array | undefined {
+    const at = exportPartSchema.safeParse(part);
+    if (!at.success) {
+      throw agentErrors.create("agent.invalid_request");
+    }
+    const chat = this.#exported(ref);
+    if (chat === undefined) {
+      return undefined;
+    }
+    const file = this.#db
+      .select({ type: chatFiles.type, text: chatFiles.text })
+      .from(chatFiles)
+      .where(and(eq(chatFiles.chatId, chat.id), eq(chatFiles.id, fileId)))
+      .get();
+    if (file === undefined) {
+      return undefined;
+    }
+    if (!isChatPictureType(file.type)) {
+      return at.data === 0
+        ? new TextEncoder().encode(file.text ?? "")
+        : undefined;
+    }
+    return this.#db
+      .select({ bytes: chatFileParts.bytes })
+      .from(chatFileParts)
+      .where(
+        and(eq(chatFileParts.fileId, fileId), eq(chatFileParts.part, at.data))
+      )
+      .get()?.bytes;
+  }
+
+  /**
+   * The App writes held in chat `ref`, whatever became of them, once what
+   * an erasure took is dropped (`#exportedChecked`). Small whatever the
+   * chat: a write keeps its request only while it waits, at most a day,
+   * and one decided, lapsed or withdrawn keeps none.
+   */
+  async exportHeldAppCalls(
+    ref: ChatRef
+  ): Promise<ExportedHeldCall[] | undefined> {
+    const chat = await this.#exportedChecked(ref);
+    if (chat === undefined) {
+      return undefined;
+    }
+    return this.#db
+      .select()
+      .from(heldAppCalls)
+      .where(eq(heldAppCalls.chatId, chat.id))
+      .all()
+      .map(({ chatId: _chat, heldAt, ...held }) => ({
+        ...held,
+        heldAt: msOf(heldAt),
+      }));
+  }
+
+  /**
+   * What chat `ref` read and ran: its sources, its runs' sources, its code
+   * runs' records, its tool calls as shown, what it read that its writes
+   * are traced to (`traceKeyPrefix`), and which of its calls a press took
+   * (`builtKeyPrefix`, `draftedKeyPrefix`, `changedKeyPrefix`,
+   * `draftMadeKeyPrefix`). IDs and records but for the trace, which is
+   * text the chat read: handed over once what an erasure took is dropped
+   * from it (`#exportedChecked`). Not paged: it is what this object reads whole
+   * before every model request of the chat (`turnGuard`, whose sources
+   * cross to the chat's object each time), with at most
+   * `chatToolEventsKept` events and `traceCharsMax` of trace beside it.
+   */
+  async exportTurnState(ref: ChatRef): Promise<ExportedTurnState | undefined> {
+    const chat = await this.#exportedChecked(ref);
+    if (chat === undefined) {
+      return undefined;
+    }
+    const chatId = chat.id;
+    const takenOf = (prefix: string): string[] =>
+      builtSchema.safeParse(this.ctx.storage.kv.get(`${prefix}${chatId}`))
+        .data ?? [];
+    return {
+      sources: this.#db
+        .select()
+        .from(chatSources)
+        .where(eq(chatSources.chatId, chatId))
+        .all()
+        .map(({ sourceId, createdAt }) => ({
+          sourceId,
+          createdAt: msOf(createdAt),
+        })),
+      runSources: this.#db
+        .select()
+        .from(chatRunSources)
+        .where(eq(chatRunSources.chatId, chatId))
+        .all()
+        .map(({ runId, sourceId, withheldAt }) => ({
+          runId,
+          sourceId,
+          withheldAt: withheldAt === null ? null : msOf(withheldAt),
+        })),
+      codeRuns: this.#db
+        .select()
+        .from(chatCodeRuns)
+        .where(eq(chatCodeRuns.chatId, chatId))
+        .all()
+        .map(({ chatId: _chat, startedAt, endedAt, ...run }) => ({
+          ...run,
+          startedAt: msOf(startedAt),
+          endedAt: endedAt === null ? null : msOf(endedAt),
+        })),
+      toolEvents: this.#db
+        .select()
+        .from(chatToolEvents)
+        .where(eq(chatToolEvents.chatId, chatId))
+        .all()
+        .map(({ chatId: _chat, createdAt, ...event }) => ({
+          ...event,
+          createdAt: msOf(createdAt),
+        })),
+      trace:
+        traceSchema.safeParse(
+          this.ctx.storage.kv.get(`${traceKeyPrefix}${chatId}`)
+        ).data ?? [],
+      taken: {
+        proposePlan: takenOf(builtKeyPrefix),
+        draftAgent: takenOf(draftedKeyPrefix),
+        draftAgentChange: takenOf(changedKeyPrefix),
+      },
+      draftMade:
+        draftMadeSchema.safeParse(
+          this.ctx.storage.kv.get(`${draftMadeKeyPrefix}${chatId}`)
+        ).data ?? {},
+    };
+  }
+
   /** Whether chat `chatId` is being deleted (`chatDeletes`). */
   #isDeleting(chatId: ChatId): boolean {
     return (
@@ -6096,6 +6635,7 @@ export class Workspace extends DurableObject<Env> {
       // Its ID stays taken here for good (`createChat`).
       this.#db.insert(deletedChats).values({ id }).onConflictDoNothing().run();
       this.ctx.storage.kv.delete(`${traceKeyPrefix}${id}`);
+      this.ctx.storage.kv.delete(`${erasedKeyPrefix}${id}`);
       this.ctx.storage.kv.delete(`${builtKeyPrefix}${id}`);
       this.ctx.storage.kv.delete(`${runningKeyPrefix}${id}`);
       this.ctx.storage.kv.delete(`${queuedKeyPrefix}${id}`);
@@ -6135,9 +6675,10 @@ export class Workspace extends DurableObject<Env> {
     if (this.#turns.size > 0) {
       throw agentErrors.create("agent.busy");
     }
-    // Nothing more is told in their chats from now on, and the capture
-    // intents kept for today's Brain go: nothing delivers them any more.
-    this.#erasing = true;
+    // Nothing more is told in their chats from now on, also after a
+    // restart before the wipe (`#erasing`), and the capture intents kept
+    // for today's Brain go: nothing delivers them any more.
+    this.ctx.storage.kv.put(erasingKey, true);
     this.#db
       .delete(brainCaptureIntents)
       .where(eq(brainCaptureIntents.state, "pending"))

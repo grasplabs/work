@@ -1,6 +1,4 @@
 import { recallBudgetMax, recallLimit } from "@grasp-os/brain-next/contract";
-import type { WorkOverview } from "@grasp-os/brain-next/contract";
-import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import {
   beforeAll,
@@ -35,14 +33,21 @@ import type {
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { says } from "./agent-chat.ts";
 import {
+  allEmbedded,
+  embeddedOf,
+  embeddedThrough,
+  erasureUnfinished,
   markerWord,
   surfaces,
   meaningSurfaces,
   findingsOf,
   ownStoreOf,
-  settledOwnStores,
   answersOf,
+  nearestReadable,
+  ownedRecall,
+  ownedRecallOf,
   recalledByMeaning,
+  whileErasureHeld,
   join,
   leave,
   newTeam,
@@ -136,66 +141,6 @@ const meaningSourcesIn = (answers: Iterable<readonly Answer[]>): string[] =>
         ({ groups }) => groups?.id ?? ""
       )
     );
-
-/**
- * How many passages the current versions of `sources` hold in the shared
- * store, and how many of them have a vector: read from its storage, as
- * the store's overview counts only the whole store.
- */
-const embeddedOf = async (
-  sources: readonly SourceRef[]
-): Promise<{ chunks: number; embedded: number }> =>
-  await runInDurableObject(
-    inJurisdiction(env, env.BRAIN_STORE).getByName("brain"),
-    (_instance, state) =>
-      state.storage.sql
-        .exec<{ chunks: number; embedded: number }>(
-          `SELECT count(*) AS chunks,
-          count(DISTINCT vector_codes.chunk) AS embedded
-        FROM source_versions
-        JOIN current_versions
-          ON current_versions.version_row = source_versions.row
-        JOIN chunks ON chunks.version_row = source_versions.row
-        LEFT JOIN vector_codes ON vector_codes.chunk = chunks.row
-        WHERE source_versions.source IN (SELECT value FROM json_each(?))`,
-          JSON.stringify(sources.map(({ producer, id }) => `${producer}:${id}`))
-        )
-        .one()
-  );
-
-/** The queue's clock for ticks of this file: only forward. */
-const clock = { at: Date.now() };
-
-/** Most ticks the shared store may take to embed. */
-const embedTicksMost = 50;
-
-/**
- * Each of `people`'s own stores settled (`settledOwnStores`), then the
- * shared store ticked, as core's clock does, until everything it holds is
- * embedded, nothing waits and no erasure is under way: the shared store's
- * embedding then.
- */
-const allEmbedded = async (
-  people: readonly string[]
-): Promise<WorkOverview["embedding"]> => {
-  await settledOwnStores(people);
-  for (let ticks = 0; ticks < embedTicksMost; ticks += 1) {
-    clock.at = Math.max(clock.at, Date.now()) + 60_000;
-    // oxlint-disable-next-line no-await-in-loop -- one tick at a time, as core's clock
-    await workBrain(env, new Date(clock.at), noProducers);
-    // oxlint-disable-next-line no-await-in-loop -- read after each tick
-    const { embedding, waiting, erasing } = await brainWorkOverview(env);
-    if (
-      embedding.rebuilt &&
-      embedding.embedded + embedding.unembeddable === embedding.chunks &&
-      waiting.length === 0 &&
-      erasing === 0
-    ) {
-      return embedding;
-    }
-  }
-  throw new Error(`Not everything was embedded in ${embedTicksMost} ticks`);
-};
 
 /**
  * A request of core's own page as the admin signed in on `cookie`: its
@@ -761,6 +706,124 @@ describe(
       });
     });
 
+    it("gives a reader the answer they had before, whether their own store changed it among it, however many copies of their question are added where they may not read them, and through an erasure", async () => {
+      // The reader may read exactly the ten passages nearest the markers'
+      // question: one of their own and nine of their team's. Then twice as
+      // many exact copies of the question as recall takes by meaning are
+      // added in each place they may not read: another team, someone
+      // else's own store, nowhere, and a team they are in and then leave;
+      // and one copy they may read, erased, and one narrowed away from
+      // them. Exact copies are the nearest there are: any one that counted
+      // would take a place, and ten would put their own passage out.
+      const [{ userId: reader }, { userId: holder }] = await Promise.all([
+        signedInWithRole(idp, "user"),
+        signedInWithRole(idp, "user"),
+      ]);
+      const readersTeam = await newTeam(reader);
+      const holdersTeam = await newTeam(holder);
+      const markers = Array.from({ length: 6 }, () => markerWord());
+      const question = markers.join(" ");
+      const sharedWord = `s${unique()}`;
+      const nearest = await nearestReadable(
+        reader,
+        readersTeam,
+        markers,
+        sharedWord
+      );
+      const probing: Probing = {
+        personId: reader,
+        reader: { person: reader, groups: [`team:${readersTeam}`] },
+        personal: true,
+        sharedWord,
+        markers,
+        hiddenVersions: [],
+        hiddenInstructionFiles: [],
+        instructionGroups: [],
+      };
+      const forbidden = Object.fromEntries(
+        markers.map((marker) => [marker, marker])
+      );
+      await recallFixture(probing);
+      await allEmbedded([reader]);
+      const before = await answersOf(probing, ownedRecall);
+      const atFirst = await ownedRecallOf(reader, question);
+
+      const leftTeam = await newTeam(reader, holder);
+      for (const readers of [
+        { kind: "team", teamId: holdersTeam },
+        { kind: "owner", personId: holder },
+        { kind: "none" },
+        { kind: "team", teamId: leftTeam },
+      ] satisfies SourceReaders[]) {
+        // oxlint-disable-next-line no-await-in-loop -- one place at a time
+        await Promise.all(
+          Array.from(
+            { length: recallLimit * 2 },
+            async () => await add(question, readers)
+          )
+        );
+      }
+      const theirs: SourceReaders = { kind: "team", teamId: readersTeam };
+      const erased = await add(question, theirs);
+      const narrowed = await add(question, theirs);
+      await allEmbedded([reader, holder]);
+      // While the copies are theirs to read, they take every place: their
+      // own passage and their team's go out. So the passes below would
+      // see them if they counted.
+      const whileReadable = await ownedRecallOf(reader, question);
+
+      await add(question, { kind: "team", teamId: holdersTeam }, narrowed);
+      await leave(leftTeam, reader);
+      const asReader: Probing = {
+        ...probing,
+        hiddenVersions: everyVersionOf(erased, narrowed),
+      };
+      // Erased while its deletion is held part-way: hidden, still stored.
+      let held = false;
+      let whileErasing: Finding[] = [];
+      await whileErasureHeld(async () => {
+        await eraseSource(env, {
+          source: erased,
+          readers: theirs,
+          reason: "deleted",
+        });
+        held = await erasureUnfinished();
+        whileErasing = await findingsOf(
+          "the reader, an erasure under way",
+          asReader,
+          forbidden,
+          { among: ownedRecall, before }
+        );
+      });
+      await allEmbedded([reader, holder]);
+      const erasedGone = await findingsOf(
+        "the reader, the erasure done",
+        asReader,
+        forbidden,
+        { among: ownedRecall, before }
+      );
+
+      expect({
+        atFirst: {
+          fromOwn: atFirst.fromOwn,
+          own: atFirst.hands(nearest.own),
+          team: nearest.team.filter(atFirst.hands).length,
+        },
+        whileReadable: {
+          fromOwn: whileReadable.fromOwn,
+          own: whileReadable.hands(nearest.own),
+          team: nearest.team.filter(whileReadable.hands).length,
+        },
+        held,
+        findings: [...whileErasing, ...erasedGone],
+      }).toStrictEqual({
+        atFirst: { fromOwn: true, own: true, team: recallLimit - 1 },
+        whileReadable: { fromOwn: false, own: false, team: 0 },
+        held: true,
+        findings: [],
+      });
+    });
+
     it("gives a reader nothing a model drew from what they may not read, and prompts a model with one version's text at a time", async () => {
       // Extraction sends restricted text to a model on purpose, so the
       // rule for prompts is: no marker in a prompt made for a reader who
@@ -1076,12 +1139,36 @@ describe(
       } = markers;
       const secret = `team:${secretTeam}`;
       const own = `team:${ownTeam}`;
-      const teamSource = await add(
+      const teamSource = newSource();
+      const asOutsider: Probing = {
+        personId: outsider,
+        reader: { person: outsider, groups: [own] },
+        personal: true,
+        sharedWord,
+        markers: Object.values(markers),
+        hiddenVersions: everyVersionOf(teamSource),
+        hiddenInstructionFiles: [],
+        instructionGroups: ["company"],
+      };
+      // What the outsider may read nearest the markers, their own among
+      // it, and their answers before anything hidden from them was added:
+      // the restore must give them exactly these again.
+      const { team: teams } = await nearestReadable(
+        outsider,
+        ownTeam,
+        Object.values(markers),
+        sharedWord
+      );
+      await recallFixture(asOutsider);
+      await embeddedThrough([outsider], teams);
+      const outsiderBefore = await answersOf(asOutsider, ownedRecall);
+      await add(
         `Board minutes ${sharedWord} ${sourceMarker}`,
         {
           kind: "team",
           teamId: secretTeam,
-        }
+        },
+        teamSource
       );
       // The store's key of it, as core names a source to the Brain.
       const key = `${teamSource.producer}:${teamSource.id}`;
@@ -1157,18 +1244,19 @@ describe(
         reader: { person: insider, groups: [own, secret] },
       });
 
+      // Once what came back is embedded again, the hidden source among it:
+      // the answers of before, whether their own store changed them among
+      // them.
+      await embeddedThrough([outsider], [...teams, teamSource]);
+      const asBefore = await findingsOf(
+        "the outsider, after a restore of an export",
+        asOutsider,
+        markers,
+        { among: ownedRecall, before: outsiderBefore }
+      );
       const findings = await findingsOf(
         "the outsider, after a restore of an export",
-        {
-          personId: outsider,
-          reader: { person: outsider, groups: [own] },
-          personal: true,
-          sharedWord,
-          markers: Object.values(markers),
-          hiddenVersions: everyVersionOf(teamSource),
-          hiddenInstructionFiles: [],
-          instructionGroups: ["company"],
-        },
+        asOutsider,
         markers
       );
       const carried = await Promise.all(Object.values(markers).map(carrying));
@@ -1178,6 +1266,7 @@ describe(
         started: started.state,
         restored,
         insiders: insiders.memories.map(({ statement }) => statement),
+        asBefore,
         findings,
         prompted: carried.flat(),
       }).toStrictEqual({
@@ -1185,6 +1274,7 @@ describe(
         started: "running",
         restored: "done",
         insiders: [`${sharedWord} ${drawnMarker}`],
+        asBefore: [],
         findings: [],
         prompted: [],
       });

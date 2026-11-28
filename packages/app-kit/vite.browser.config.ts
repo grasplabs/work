@@ -1,3 +1,5 @@
+import { createRequire } from "node:module";
+
 import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
@@ -10,7 +12,17 @@ import { playwright } from "vite-plus/test/browser-playwright";
 // demo and every example, once each, apart from the stack the journeys
 // start: they read nothing from core. Core's Content Security Policy over
 // the kit's pages is held on the stack (e2e/catalog.e2e.ts).
+/**
+ * Markdown's entity decoder as an App page gets it: its build that decodes
+ * from a table, not its browser build, which decodes with innerHTML
+ * (`loadsWithoutDom`, packages/compiler/build.ts).
+ */
+const decoder = createRequire(import.meta.resolve("streamdown")).resolve(
+  "decode-named-character-reference"
+);
+
 export default defineProject({
+  resolve: { alias: { "decode-named-character-reference": decoder } },
   plugins: [
     react(),
     // The components compiled as the frontend compiles them, failing on

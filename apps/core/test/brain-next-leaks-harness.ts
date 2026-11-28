@@ -1,17 +1,26 @@
-import { recallBudgetMax } from "@grasp-os/brain-next/contract";
-import { runDurableObjectAlarm } from "cloudflare:test";
+import { recallBudgetMax, recallLimit } from "@grasp-os/brain-next/contract";
+import type { WorkOverview } from "@grasp-os/brain-next/contract";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { vi } from "vite-plus/test";
 
 import { organizationId } from "../src/auth/auth.ts";
-import { addSource, recallAs } from "../src/brain-next.ts";
+import {
+  addSource,
+  brainWorkOverview,
+  recallAs,
+  recallOwnedAs,
+  workBrain,
+} from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { brainSurfaces, textOf } from "./brain-next-surfaces.ts";
 import type { Answer, Probe, Probing } from "./brain-next-surfaces.ts";
+import { noProducers } from "./no-producers.ts";
+import { stopIfEnded } from "./test-attempts.ts";
 
 /**
  * What the marker test's files share (brain-next-leaks.test.ts and the
@@ -87,6 +96,17 @@ export const surfaces: [string, Probe][] = brainSurfaces.flatMap(
 );
 
 /**
+ * Core's recall with whether the reader's own store changed what it
+ * handed over (`recallOwnedAs`): the surface a test holds to its answers
+ * before anything hidden was added (`answersOf`, `findingsOf`'s
+ * `before`), `fromOwn` among them, which the comparison with the twins
+ * leaves out (`apartFromMeaning`).
+ */
+export const ownedRecall = surfaces.filter(
+  ([name]) => name === "core recallOwnedAs"
+);
+
+/**
  * The surfaces whose answers depend on a question's meaning
  * (`Answer.byMeaning`), each held to its answers before anything hidden
  * was added in the test that answers "by meaning exactly as before…".
@@ -116,8 +136,12 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * `value` without what recall found by meaning: every list of `items`
  * without those found by meaning, the rest of them in an order of their
  * own (a passage found by words is ranked by its meaning too, so the
- * order among them follows the question's meaning). Everything else as it
- * is.
+ * order among them follows the question's meaning), and no `fromOwn`
+ * (core's `recallOwnedAs`): the reader's own passages come in by meaning
+ * only as far as they rank among the nearest of every store they may
+ * read, so whether their own store changed the pack follows the
+ * question's meaning too. Everything else as it is: what their own store
+ * gave by words, an exact part or an entity shows in the rest.
  */
 const apartFromMeaning = (value: unknown): unknown => {
   if (Array.isArray(value)) {
@@ -127,17 +151,19 @@ const apartFromMeaning = (value: unknown): unknown => {
     return value;
   }
   return Object.fromEntries(
-    Object.entries(value).map(([key, part]) =>
-      key === "items" && Array.isArray(part)
-        ? [
-            key,
-            part
-              .filter((item) => !(isRecord(item) && item.found === "meaning"))
-              .map(textOf)
-              .toSorted(),
-          ]
-        : [key, apartFromMeaning(part)]
-    )
+    Object.entries(value)
+      .filter(([key]) => key !== "fromOwn")
+      .map(([key, part]) =>
+        key === "items" && Array.isArray(part)
+          ? [
+              key,
+              part
+                .filter((item) => !(isRecord(item) && item.found === "meaning"))
+                .map(textOf)
+                .toSorted(),
+            ]
+          : [key, apartFromMeaning(part)]
+      )
   );
 };
 
@@ -159,17 +185,17 @@ const cutShort = (got: Answer["got"]): boolean =>
  * moment holds a reader's own content without them) holds such an answer
  * to its markers and, apart from what meaning found (`apartFromMeaning`),
  * to its twins' answer: what was found by words, an exact part or an
- * entity, the memories, what was not found, `fromOwn` and whether the
- * budget cut it short must be the twins'. Two packs both cut short are
- * held to their markers alone: which passages a short budget keeps
- * follows their order, and that follows the question's meaning. The test
- * that answers "by meaning exactly as before anything the reader may not
- * read was added" holds them to non-interference, for each shape of
- * reader core builds (`readerOf`): a person in a team with their own
- * note, a team-mate to whom that note is hidden, a person in no team (an
- * admin with nothing of their own), the company alone (an App's or a
- * workflow's code, and a turn others read), the company with a team an
- * App's grant names, and teams with no person (a chat's code).
+ * entity, the memories, what was not found and whether the budget cut it
+ * short must be the twins'. Two packs both cut short are held to their
+ * markers alone: which passages a short budget keeps follows their order,
+ * and that follows the question's meaning. The test that answers "by
+ * meaning exactly as before anything the reader may not read was added"
+ * holds them to non-interference, for each shape of reader core builds
+ * (`readerOf`): a person in a team with their own note, a team-mate to
+ * whom that note is hidden, a person in no team (an admin with nothing of
+ * their own), the company alone (an App's or a workflow's code, and a turn
+ * others read), the company with a team an App's grant names, and teams
+ * with no person (a chat's code).
  */
 export const findingsIn = (
   answers: readonly Answer[],
@@ -343,11 +369,11 @@ const settleAlarmsMost = 50;
  * Runs each of `people`'s own stores' alarms until it sleeps, everything
  * it holds embedded: a store left to itself wakes on its own alarm, a
  * minute after a change, and embeds in the background, which a pass must
- * never straddle. Its embedding moves `fromOwn` for a question of any
- * words (by meaning, the reader's own passages come in only once they
- * have vectors), and a pass holds `fromOwn` to the twins'. Fails, naming
- * the store, when it still wakes after `settleAlarmsMost` alarms, or
- * sleeps with a passage of its own not embedded.
+ * never straddle: its tick moves what a recall finds of the reader's own
+ * between one question and the next (by meaning, their own passages come
+ * in only once they have vectors), and a pass compares those answers.
+ * Fails, naming the store, when it still wakes after `settleAlarmsMost`
+ * alarms, or sleeps with a passage of its own not embedded.
  */
 export const settledOwnStores = async (
   people: readonly string[]
@@ -355,9 +381,11 @@ export const settledOwnStores = async (
   for (const person of people) {
     let awake = true;
     for (let run = 0; awake && run < settleAlarmsMost; run += 1) {
+      stopIfEnded();
       // oxlint-disable-next-line no-await-in-loop -- one alarm after another
       awake = await runDurableObjectAlarm(ownStoreOf(person));
     }
+    stopIfEnded();
     // oxlint-disable-next-line no-await-in-loop -- one store at a time
     const { embedding } = await ownStoreOf(person).workOverview();
     const done =
@@ -372,6 +400,90 @@ export const settledOwnStores = async (
   }
 };
 
+/** The queue's clock for the ticks `allEmbedded` runs: only forward. */
+const clock = { at: Date.now() };
+
+/** Most ticks the shared store may take to embed. */
+const embedTicksMost = 50;
+
+/**
+ * Each of `people`'s own stores settled (`settledOwnStores`), then the
+ * shared store ticked, as core's clock does, until everything it holds is
+ * embedded, nothing waits and no erasure is under way: the shared store's
+ * embedding then.
+ */
+export const allEmbedded = async (
+  people: readonly string[]
+): Promise<WorkOverview["embedding"]> => {
+  await settledOwnStores(people);
+  for (let ticks = 0; ticks < embedTicksMost; ticks += 1) {
+    clock.at = Math.max(clock.at, Date.now()) + 60_000;
+    // oxlint-disable-next-line no-await-in-loop -- one tick at a time, as core's clock
+    await workBrain(env, new Date(clock.at), noProducers);
+    // oxlint-disable-next-line no-await-in-loop -- read after each tick
+    const { embedding, waiting, erasing } = await brainWorkOverview(env);
+    if (
+      embedding.rebuilt &&
+      embedding.embedded + embedding.unembeddable === embedding.chunks &&
+      waiting.length === 0 &&
+      erasing === 0
+    ) {
+      return embedding;
+    }
+  }
+  throw new Error(`Not everything was embedded in ${embedTicksMost} ticks`);
+};
+
+/**
+ * How many passages the current versions of `sources` hold in the shared
+ * store, and how many of them have a vector: read from its storage, as
+ * the store's overview counts only the whole store.
+ */
+export const embeddedOf = async (
+  sources: readonly SourceRef[]
+): Promise<{ chunks: number; embedded: number }> =>
+  await runInDurableObject(
+    inJurisdiction(env, env.BRAIN_STORE).getByName("brain"),
+    (_instance, state) =>
+      state.storage.sql
+        .exec<{ chunks: number; embedded: number }>(
+          `SELECT count(*) AS chunks,
+          count(DISTINCT vector_codes.chunk) AS embedded
+        FROM source_versions
+        JOIN current_versions
+          ON current_versions.version_row = source_versions.row
+        JOIN chunks ON chunks.version_row = source_versions.row
+        LEFT JOIN vector_codes ON vector_codes.chunk = chunks.row
+        WHERE source_versions.source IN (SELECT value FROM json_each(?))`,
+          JSON.stringify(sources.map(({ producer, id }) => `${producer}:${id}`))
+        )
+        .one()
+  );
+
+/**
+ * Each of `people`'s own stores settled (`settledOwnStores`), then the
+ * shared store ticked, as core's clock does, until every passage of the
+ * current versions of `sources` has a vector: as `allEmbedded`, for a test
+ * whose store still holds work earlier tests of its file left waiting.
+ */
+export const embeddedThrough = async (
+  people: readonly string[],
+  sources: readonly SourceRef[]
+): Promise<void> => {
+  await settledOwnStores(people);
+  for (let ticks = 0; ticks < embedTicksMost; ticks += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- read before each tick
+    const { chunks, embedded } = await embeddedOf(sources);
+    if (embedded === chunks) {
+      return;
+    }
+    clock.at = Math.max(clock.at, Date.now()) + 60_000;
+    // oxlint-disable-next-line no-await-in-loop -- one tick at a time, as core's clock
+    await workBrain(env, new Date(clock.at), noProducers);
+  }
+  throw new Error(`Not every source was embedded in ${embedTicksMost} ticks`);
+};
+
 /** Each of `among`'s answers by meaning (`recalledByMeaning`), and every line written. */
 const askedEachByMeaning = async (
   among: readonly [string, Probe][],
@@ -380,12 +492,13 @@ const askedEachByMeaning = async (
   const value: [string, Answer[]][] = [];
   const lines: unknown[] = [];
   for (const [name, probe] of among) {
+    stopIfEnded();
     // In a pass that reads as the person, their own store embedded and
     // asleep before each surface asks: a probe before this one may have
     // changed it (an own source added or removed, a skill, a memory), and
-    // its tick, on its own alarm, would then embed between a marker's
-    // question and its twin's, moving what meaning finds and `fromOwn`
-    // for one of them alone (GRA-2140). A pass as the company never reads
+    // its tick, on its own alarm, would then run between a marker's
+    // question and its twin's, moving what a recall finds of their own for
+    // one of them alone (GRA-2140). A pass as the company never reads
     // it, and holds that it is never even addressed.
     if (probing.personal) {
       // oxlint-disable-next-line no-await-in-loop -- one surface at a time
@@ -426,8 +539,8 @@ export const findingsOf = async (
 ): Promise<Finding[]> => {
   // Every pass asks by meaning: one held to before compares whole
   // answers, and one held to the twins compares them apart from what
-  // meaning found, whose cut and `fromOwn` still move when only one of a
-  // pair went without meaning.
+  // meaning found, whose cut still moves when only one of a pair went
+  // without meaning.
   const { value: answered, lines } = await askedEachByMeaning(among, probing);
   return [
     ...answered.flatMap(([name, answers]) =>
@@ -508,6 +621,39 @@ export const everyVersionOf = (...sources: SourceRef[]) =>
 export const sharedStore = () =>
   inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
 
+/** The trigger that holds the shared store's erasures (`whileErasureHeld`). */
+const heldErasures = "leaks_test_holds_erasures";
+
+/**
+ * Runs `run` while the shared store's erasures are held part-way: an
+ * erasure hides what it covers and returns, and every deletion of a
+ * version fails, in the erasure's own batch and in each tick's, so what
+ * it hid stays stored and hidden (erasure.ts) until a tick after `run`.
+ */
+export const whileErasureHeld = async (
+  run: () => Promise<void>
+): Promise<void> => {
+  await runInDurableObject(sharedStore(), (_store, state) => {
+    state.storage.sql.exec(
+      `CREATE TRIGGER IF NOT EXISTS ${heldErasures} BEFORE DELETE ON source_versions
+      BEGIN SELECT RAISE(ABORT, 'held by the test'); END`
+    );
+  });
+  try {
+    await run();
+  } finally {
+    await runInDurableObject(sharedStore(), (_store, state) => {
+      state.storage.sql.exec(`DROP TRIGGER IF EXISTS ${heldErasures}`);
+    });
+  }
+};
+
+/** Whether the shared store has an erasure recorded and not yet done. */
+export const erasureUnfinished = async (): Promise<boolean> => {
+  const { erasing } = await sharedStore().workOverview();
+  return erasing > 0;
+};
+
 /** A source of its own, as an upload names it. */
 export const newSource = (): SourceRef => ({
   producer: "upload",
@@ -527,6 +673,66 @@ export const add = async (
   });
   return source;
 };
+
+/** A source's key, as the Brain names it. */
+const keyOf = ({ producer, id }: SourceRef): string => `${producer}:${id}`;
+
+/**
+ * What `reader`'s recall of `question` in their own chat hands over, asked
+ * by meaning as a pass asks (`recalledByMeaning`): whether their own store
+ * changed it (`fromOwn`), and whether it hands over an item of a source.
+ */
+export const ownedRecallOf = async (
+  reader: string,
+  question: string
+): Promise<{ fromOwn: boolean; hands: (source: SourceRef) => boolean }> => {
+  const {
+    value: { pack, fromOwn },
+  } = await recalledByMeaning(
+    "core recallOwnedAs",
+    async () =>
+      await recallOwnedAs(env, reader, {
+        personal: true,
+        question,
+        budget: { tokens: recallBudgetMax },
+      })
+  );
+  const handed = new Set(pack.items.map(({ source }) => keyOf(source)));
+  return { fromOwn, hands: (source) => handed.has(keyOf(source)) };
+};
+
+/**
+ * `words`, each split in two: a passage of them holds none of the words,
+ * and meaning still finds their pieces in it.
+ */
+export const split = (words: readonly string[]): string =>
+  words.map((word) => `${word.slice(0, 7)} ${word.slice(7)}`).join(" ");
+
+/**
+ * What `reader` may read nearest a question of `markers`, and nothing
+ * else near it: a passage of their own, with `sharedWord`, and
+ * `recallLimit - 1` of the team `teamId`, each the markers split
+ * (`split`). Every place recall takes by meaning for the markers is
+ * theirs to read, their own passage among them (`fromOwn`), so anything
+ * hidden that took one would move their answer.
+ */
+export const nearestReadable = async (
+  reader: string,
+  teamId: string,
+  markers: readonly string[],
+  sharedWord: string
+): Promise<{ own: SourceRef; team: SourceRef[] }> => ({
+  own: await add(`${sharedWord} ${split(markers)}`, {
+    kind: "owner",
+    personId: reader,
+  }),
+  team: await Promise.all(
+    Array.from(
+      { length: recallLimit - 1 },
+      async () => await add(split(markers), { kind: "team", teamId })
+    )
+  ),
+});
 
 /** What a read answered: its value, or its error's message. */
 export const answerOf = async (

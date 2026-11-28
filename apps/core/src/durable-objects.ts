@@ -62,26 +62,45 @@ export const workspace = (
 /** How many times a call to an object is made, should a restart break it. */
 const callAttempts = 3;
 
+/** How long before the second attempt; each later one waits twice as long. */
+const retryAfterMs = 100;
+
+/**
+ * How the platform's error begins when an object's `blockConcurrencyWhile`
+ * ran past its limit (30 s) and the object was reset: marked `overloaded`
+ * as well as `durableObjectReset`, though the object that takes the next
+ * attempt is a new one.
+ */
+const blockOverrun =
+  "A call to blockConcurrencyWhile() in a Durable Object waited for too long.";
+
 /**
  * Whether `error` is the platform's word that a call to an object broke on
  * its way, so making it again may go through: the object reset under it
  * (`durableObjectReset`, its restart, a deploy, `ctx.abort`), or anything
- * else the platform marks `retryable` (a lost connection), never an
- * `overloaded` object, as Cloudflare advises for Durable Object calls. Never
- * an error the object threw itself.
+ * else the platform marks `retryable` (a lost connection). Never an
+ * `overloaded` object, as Cloudflare advises for Durable Object calls, but
+ * for one reset for a `blockConcurrencyWhile` that ran too long, which
+ * every call waiting behind it fails with. Never an error the object
+ * threw itself.
  */
-const brokeOnTheWay = (error: unknown): boolean =>
-  error instanceof Error &&
-  !isExpectedError(error) &&
-  (Reflect.get(error, "durableObjectReset") === true ||
-    Reflect.get(error, "retryable") === true) &&
-  Reflect.get(error, "overloaded") !== true;
+const brokeOnTheWay = (error: unknown): boolean => {
+  if (!(error instanceof Error) || isExpectedError(error)) {
+    return false;
+  }
+  const reset = Reflect.get(error, "durableObjectReset") === true;
+  if (Reflect.get(error, "overloaded") === true) {
+    return reset && error.message.startsWith(blockOverrun);
+  }
+  return reset || Reflect.get(error, "retryable") === true;
+};
 
 /**
  * Makes `call` to an object, again when it broke on its way
- * (`brokeOnTheWay`), at most `callAttempts` times in all. `call` makes a
- * stub of its own each attempt: one to an object that restarted stays
- * broken. Only for a call that is safe to make twice.
+ * (`brokeOnTheWay`), after a short wait that doubles, at most
+ * `callAttempts` times in all. `call` makes a stub of its own each
+ * attempt: one to an object that restarted stays broken. Only for a call
+ * that is safe to make twice: one that broke may have run.
  */
 export const callObject = async <T>(call: () => Promise<T>): Promise<T> => {
   for (let attempt = 1; ; attempt += 1) {
@@ -93,6 +112,8 @@ export const callObject = async <T>(call: () => Promise<T>): Promise<T> => {
         throw error;
       }
       log.warn("object.call_retried", { attempt, ...errorFields(error) });
+      // oxlint-disable-next-line no-await-in-loop -- the wait before the next attempt
+      await scheduler.wait(retryAfterMs * 2 ** (attempt - 1));
     }
   }
 };

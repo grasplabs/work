@@ -1,6 +1,6 @@
 import "@tanstack/react-start/server-only";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
-import { toHex } from "@grasp-os/shared/encoding";
+import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 /**
  * One of a release's Workers as the Workers API takes it: its metadata
@@ -15,7 +15,10 @@ import { z } from "zod";
 
 import type {
   AssetFile,
+  ScriptTarget,
   Secret,
+  TargetSettings,
+  TargetState,
   WorkerMetadata,
   WorkerModule,
   WorkerUpload,
@@ -288,3 +291,111 @@ export const secretsFingerprint = async (
   await keyedHash(await hkdfHmacKey(key, secretsFingerprintPurpose, ["sign"]), {
     secrets: sortedSecrets(secrets),
   });
+
+/** What an upload's fingerprint is keyed with, derived from `CLIENT_KEY` for it alone. */
+const uploadFingerprintPurpose = "grasp-os console placed upload fingerprint";
+
+/**
+ * A fingerprint of everything `upload`, Worker `worker`'s as
+ * `renderedWorkerUpload` made it, sends to `target`: its metadata (the
+ * compatibility date and flags, its bindings as rendered for the client
+ * and its vars, its settings), its modules and static files by their
+ * digests, its Durable Object migrations, and its secrets' names and
+ * values (`secrets`, through their own keyed fingerprint, never as they
+ * are). HMAC-SHA256 under a key HKDF derives from `clientKey` for this
+ * purpose alone, so the recorded fingerprint tells nothing of the values.
+ *
+ * Not the release: a release whose Worker sends exactly what the last
+ * upload did leaves it be (src/hosting/operation.ts, `upload`), so its
+ * Durable Objects aren't reset for nothing. It's taken from what goes out
+ * rather than from what goes into it, so anything the admin renders
+ * differently changes it too.
+ */
+export const uploadFingerprint = async (
+  clientKey: string,
+  {
+    target,
+    worker,
+    upload,
+    secrets,
+  }: {
+    target: ScriptTarget;
+    worker: WorkerEntry;
+    upload: WorkerUpload;
+    secrets: readonly Secret[];
+  }
+): Promise<string> => {
+  const bindings: unknown[] = Array.isArray(upload.metadata.bindings)
+    ? upload.metadata.bindings
+    : [];
+  return await keyedHash(
+    await hkdfHmacKey(clientKey, uploadFingerprintPurpose, ["sign"]),
+    {
+      target,
+      metadata: {
+        ...upload.metadata,
+        bindings: bindings.filter(
+          (binding) =>
+            typeof binding !== "object" ||
+            binding === null ||
+            !("type" in binding) ||
+            binding.type !== "secret_text"
+        ),
+      },
+      modules: worker.modules.map(({ name, type, sha256 }) => [
+        name,
+        type,
+        sha256,
+      ]),
+      assets: worker.assets?.manifest ?? null,
+      durableObjectMigrations: worker.durableObjectMigrations,
+      secrets: await secretsFingerprint(clientKey, secrets),
+    }
+  );
+};
+
+/**
+ * A digest of a script as Cloudflare reads it back: `state`, its code's
+ * digest and when it was last modified, and `settings`, its bindings (a
+ * secret by name), compatibility, limits and observability, every field
+ * kept, and the lists whose order means nothing (bindings by name, the
+ * flags and tags) in order, so Cloudflare listing them otherwise doesn't read as a
+ * change. Recorded after an upload and compared before the next
+ * (src/hosting/operation.ts, `runsAlready`), so a change made beside the
+ * admin's that reads back (a binding or setting changed by hand, the
+ * script put again, or deleted and made anew) makes the next release's
+ * run upload it whole, whatever the admin recorded. A secret's value set
+ * by hand reads back only if Cloudflare moves `modified_on` for it, which
+ * isn't verified: Apply settings now uploads every Worker whole for that.
+ * Nothing secret goes into it.
+ */
+export const liveDigest = async (
+  state: TargetState,
+  settings: TargetSettings
+): Promise<string> => {
+  // Every list of names at the top (its flags, its tags) in order, and
+  // its bindings by their names, each unique to the script.
+  const ordered = Object.fromEntries(
+    Object.entries(settings).map(([field, value]) => [
+      field,
+      Array.isArray(value) && value.every((item) => typeof item === "string")
+        ? value.toSorted()
+        : value,
+    ])
+  );
+  return await sha256Hex(
+    canonicalJson(
+      z.json().parse({
+        etag: state.etag ?? null,
+        modifiedOn: state.modifiedOn ?? null,
+        migrationTag: state.migrationTag ?? null,
+        settings: {
+          ...ordered,
+          bindings: settings.bindings.toSorted((a, b) =>
+            a.name < b.name ? -1 : 1
+          ),
+        },
+      })
+    )
+  );
+};

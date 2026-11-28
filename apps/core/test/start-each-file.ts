@@ -14,7 +14,7 @@
 import { shippedModel } from "@grasp-os/embed/model-files";
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { afterAll, afterEach, vi } from "vite-plus/test";
+import { afterAll, afterEach, aroundEach, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import {
@@ -32,6 +32,7 @@ import { traceD1Calls } from "./d1-calls.ts";
 import { stopModelProviders } from "./model-provider.ts";
 import { endTest, waitingOnNow } from "./open-sockets.ts";
 import { resetStorage } from "./reset-storage.ts";
+import { inAttempt } from "./test-attempts.ts";
 import { connectDb, testBinding } from "./test-env.ts";
 
 // Every module core loads on first use rather than at startup (each
@@ -71,6 +72,8 @@ await Promise.all([
   import("../src/channels/workflow-offers.ts"),
   // workflows/kept-email.ts
   import("postal-mime"),
+  // chat-session.ts
+  import("../src/chat-harness.ts"),
   // workspace.ts
   import("../src/agent.ts"),
   import("../src/agent-thinking.ts"),
@@ -140,6 +143,13 @@ await startEmpty();
 if (await installBuiltinsFirst()) {
   await startEmpty();
 }
+
+// Each attempt of a test in a context of its own, which ends with it: the
+// work a test cut off at its timeout stops at its next ask of shared state
+// (test-attempts.ts), never touching the next test's.
+aroundEach(async (runTest) => {
+  await inAttempt(runTest);
+});
 
 /** Vitest's own words for a test it timed out (@vitest/runner). */
 const timedOutMessage = /\bTest timed out in \d+ms/u;

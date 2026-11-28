@@ -33,7 +33,17 @@ export const installBuiltinsFirst = async (): Promise<boolean> => {
   if (installed) {
     return false;
   }
+  // What the request hands `waitUntil`, the install among it, waited for
+  // to the end: the pool's own wait (`waitOnExecutionContext`) gives up on
+  // a promise after 30 s, and on a slow runner the install, which loads
+  // every built-in, once took longer (merge queue run 46112291643).
   const ctx = createExecutionContext();
+  const started: Promise<unknown>[] = [];
+  const waitUntil = ctx.waitUntil.bind(ctx);
+  ctx.waitUntil = (promise: Promise<unknown>) => {
+    started.push(promise);
+    waitUntil(promise);
+  };
   const response = await worker.fetch(
     new Request("https://core/health", {
       headers: { [routerSecretHeader]: env.ROUTER_SECRET },
@@ -41,6 +51,7 @@ export const installBuiltinsFirst = async (): Promise<boolean> => {
     env,
     ctx
   );
+  await Promise.allSettled(started);
   await waitOnExecutionContext(ctx);
   const stored = await runInDurableObject(
     builtins(env),

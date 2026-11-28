@@ -464,6 +464,68 @@ describe("uploads that fail part way", () => {
   });
 });
 
+/** An upload of the script `core` names. */
+const isScriptPut = ({ method, path }: { method: string; path: string }) =>
+  method === "PUT" && path.endsWith("/scripts/grasp-os-core");
+
+describe("an upload replayed after its answer was lost", () => {
+  it("is done when a retry is refused as a replay and the script runs the attempt before it; otherwise the refusal stands", async () => {
+    const account = namespaced();
+    const target = core(account.id);
+    const upload = async (landed: boolean) => {
+      const assetsJwt = await uploadTargetAssets(api, target, [
+        await file("/index.html", "<h1>Hi</h1>", "text/html"),
+      ]);
+      // Applied, and its answer lost: the retry spends its token again.
+      cloudflare.failNext(isScriptPut, "lost");
+      const asked: string[] = [];
+      const outcome = await uploadTargetScript(
+        api,
+        target,
+        release("26.01.1", assetsJwt),
+        {
+          landed: async () => {
+            asked.push("landed");
+            return await Promise.resolve(landed);
+          },
+        }
+      ).then(
+        () => "done",
+        (error: unknown) =>
+          z.object({ codes: z.array(z.number()) }).parse(error)
+      );
+      return { outcome, asked };
+    };
+    const spentJwt = await uploadTargetAssets(api, target, [
+      await file("/index.html", "<h1>Hi</h1>", "text/html"),
+    ]);
+    await uploadTargetScript(api, target, release("26.01.0", spentJwt));
+
+    expect({
+      landed: await upload(true),
+      notLanded: await upload(false),
+      // Refused on its first attempt: nothing of it went out before, so it
+      // isn't asked whether it landed.
+      first: await uploadTargetScript(
+        api,
+        target,
+        release("26.01.2", spentJwt),
+        {
+          landed: async () => await Promise.resolve(true),
+        }
+      ).then(
+        () => "done",
+        (error: unknown) =>
+          z.object({ codes: z.array(z.number()) }).parse(error)
+      ),
+    }).toStrictEqual({
+      landed: { outcome: "done", asked: ["landed"] },
+      notLanded: { outcome: { codes: [100_312] }, asked: ["landed"] },
+      first: { codes: [100_312] },
+    });
+  });
+});
+
 describe("D1 migrations", () => {
   const table = `t_${crypto.randomUUID().replaceAll("-", "")}`;
   const migrations = [

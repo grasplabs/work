@@ -135,6 +135,10 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`Ended a held write to an App nobody confirmed within a day`,
   },
   {
+    action: "chat.app_call.withdrawn",
+    text: msg`Withdrew a held write to an App, as something its chat read was erased`,
+  },
+  {
     action: "chat.app_call.declined",
     text: msg`Declined a write to an App`,
   },

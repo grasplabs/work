@@ -9,7 +9,9 @@
  *
  * `check` reads no network: the pin (`packages/app-kit/registry.json`)
  * holds the SHA-256 of every file the CLI wrote, and the kit's own files
- * where the CLI writes (`own`: what the form shares). It fails for
+ * where the CLI writes (`own`: the parts bound to the SDK, what the form
+ * shares, and the Markdown, whose changes to upstream's file are listed
+ * too). It fails for
  * a file that differs and isn't listed, a listed one that no longer
  * differs, a pinned file that is gone and a file that is neither pinned
  * nor the kit's own.
@@ -147,7 +149,11 @@ const update = (): boolean => {
         .map((file) => [file, sha256(readFileSync(path.join(kit, file)))])
     );
     writeFileSync(pinPath, `${JSON.stringify({ ...pin, files }, null, 2)}\n`);
-    for (const { path: file } of changes) {
+    // An own file's changes (the Markdown's) have no registry copy to
+    // carry over to.
+    for (const { path: file } of changes.filter(
+      (change) => !pin.own.includes(change.path)
+    )) {
       const full = path.join(kit, file);
       copyFileSync(full, `${full}.registry`);
       console.info(
