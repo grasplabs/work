@@ -477,18 +477,31 @@ const FrameNotice = ({ state }: { state: PageState }) => {
 };
 
 /**
- * Whether a preview in `state` starts afresh: it failed, and the draft's
- * revision `now` is past `startedAt`, the one its start began at.
+ * Where a preview's frame in `state` stands at the draft's revision `now`:
+ * whether it starts afresh, and the revision it holds from here
+ * (`startedAt`, the one its start began at; none while it runs, or when
+ * it began before the draft was read). A start that failed starts afresh
+ * once the draft is past the revision it began at, which a write landing
+ * while it started already is. A frame that ran, or whose start's
+ * revision isn't known, holds the revision it failed at, and starts
+ * afresh only past that.
  */
-const startsAfresh = (
+const afterStart = (
   state: PageState,
   now: number | undefined,
   startedAt: number | undefined
-): boolean =>
-  state.status === "failed" &&
-  now !== undefined &&
-  startedAt !== undefined &&
-  now > startedAt;
+): { startedAt: number | undefined; afresh: boolean } => {
+  if (state.status === "running" || state.status === "fixing") {
+    return { startedAt: undefined, afresh: false };
+  }
+  if (state.status !== "failed" || now === undefined) {
+    return { startedAt, afresh: false };
+  }
+  if (startedAt === undefined || now <= startedAt) {
+    return { startedAt: startedAt ?? now, afresh: false };
+  }
+  return { startedAt: now, afresh: true };
+};
 
 /** What covers a frame while it starts: a preview, or an App's page. */
 const FrameStarting = ({ preview }: { preview: boolean }) => {
@@ -623,10 +636,8 @@ const FramedPage = ({
   useEffect(() => {
     reloadTo.current = onReload;
   }, [onReload]);
-  // The App's preview's: the draft's revision as the frame's start began.
-  // A start that failed is what the draft was then, or after: a newer
-  // revision come since, while it started or after it failed, may be the
-  // one that fixes it.
+  // The App's preview's: the draft's revision as the frame's start began
+  // (`afterStart`).
   const startedAt = useRef(revision);
   // The newest revision, as `reload` reads it when it comes: never a
   // reason to start the frame again by itself.
@@ -649,17 +660,16 @@ const FramedPage = ({
     setAttempt((last) => last + 1);
     reloadTo.current?.();
   };
-  // The App's preview that failed to start (its first build didn't build,
-  // its page wasn't there, it didn't start in time) takes no updates:
-  // only a running frame follows the draft's revisions. So a revision
-  // newer than the one its start began at starts it afresh at once, as a
-  // draft that fixes it should show, never one newer than the revision
-  // it failed at, which a write landing while it started already is; one
-  // that runs takes it in place.
+  // The App's preview that failed (its first build didn't build, its
+  // page wasn't there, it didn't start in time) takes no updates: only a
+  // running frame follows the draft's revisions. So a newer revision
+  // starts it afresh (`afterStart`), as a draft that fixes it should
+  // show; one that runs takes it in place.
   useEffect(() => {
-    if (startsAfresh(state, revision, startedAt.current)) {
+    const next = afterStart(state, revision, startedAt.current);
+    startedAt.current = next.startedAt;
+    if (next.afresh) {
       // As `reload`, from here: nothing was offered to a failed start.
-      startedAt.current = revision;
       setState({ status: "loading" });
       setAttempt((last) => last + 1);
       reloadTo.current?.();

@@ -445,7 +445,7 @@ describe(
       });
     });
 
-    it("stages a draft's build once for every builder who opens it: two opening at once write each object once, and an open after writes nothing", async () => {
+    it("stages a draft's build once for every builder who opens it: each object written once, and an open after writes nothing", async () => {
       const builder = await signedInApi(idp, "builder");
       const { app } = await deskDraft(builder);
       const other = await anotherBuilder(builder, app);
@@ -491,6 +491,42 @@ describe(
       }
     });
 
+    it("stages a build once for two stagings of it at once in an isolate, and not again while it is kept", async () => {
+      const artifact = `${"a".repeat(63)}b`;
+      const code = {
+        entry: "app~desk",
+        runtime: "kit~runtime",
+        modules: { "app~desk": "export default 1;\n" },
+        addresses: { "app~desk": "b".repeat(64) },
+        kit: { "kit~runtime": "export const run = 1;\n" },
+        css: "",
+      };
+      const puts = vi.spyOn(env.FILES, "put");
+      try {
+        const staged = await Promise.all([
+          stageFrame(env, artifact, code),
+          stageFrame(env, artifact, code),
+        ]);
+        const first = puts.mock.calls.length;
+        puts.mockClear();
+        const again = await stageFrame(env, artifact, code);
+        expect({
+          staged,
+          // The kit's module, the App's and the manifest, once each.
+          first,
+          again,
+          writtenAgain: puts.mock.calls.length,
+        }).toStrictEqual({
+          staged: [true, true],
+          first: 3,
+          again: false,
+          writtenAgain: 0,
+        });
+      } finally {
+        puts.mockRestore();
+      }
+    });
+
     it("deletes the code staged for an App's preview once the App is removed", async () => {
       const builder = await signedInApi(idp, "builder");
       const { app } = await deskDraft(builder);
@@ -527,10 +563,18 @@ describe(
           ({ groups }) => [groups?.href ?? "", groups?.integrity ?? ""]
         )
       );
-      // Its import map's integrity names every module the build loads, by
-      // the address it resolves to: the kit's and the App's.
-      expect(preloads).toStrictEqual(frame.integrity);
-      expect(Object.keys(preloads)).toContain(frame.page.entry);
+      // Every module the frame loads, the kit's its import map names and
+      // the App's as the page's module imports them, by that address and
+      // the integrity it is imported with; nothing else.
+      expect({
+        addresses: Object.keys(preloads).toSorted(),
+        integrity: Object.entries(preloads).every(
+          ([address, integrity]) => frame.integrity[address] === integrity
+        ),
+      }).toStrictEqual({
+        addresses: Object.values(frame.addresses).toSorted(),
+        integrity: true,
+      });
     });
 
     it("refuses a frame opened over an hour ago its next update's modules, which a frame opened again reads", async () => {

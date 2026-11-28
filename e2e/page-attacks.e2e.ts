@@ -640,6 +640,7 @@ test("a page makes no document of its own and reaches no network, WebRTC or a na
     linkAttribute: "refused: NotSupportedError",
     linkAttributeNode: "refused: NotSupportedError",
     linkArrayPrototype: "no address",
+    documentLink: "none",
     // A message from any source but the page or the frame itself is
     // dropped before the page's own listeners; its own still arrive.
     foreignMessage: "dropped",

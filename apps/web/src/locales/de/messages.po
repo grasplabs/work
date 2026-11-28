@@ -13699,7 +13699,7 @@ msgstr "Vorliebe"
 msgid "Prepare meetings"
 msgstr "Meetings vorbereiten"
 
-#: src/apps/app-workspace.tsx
+#: src/apps/draft-preview.tsx
 #: src/pages/page-frame.tsx
 msgid "Preparing the preview"
 msgstr "Die Vorschau wird vorbereitet"

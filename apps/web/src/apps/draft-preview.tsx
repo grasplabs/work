@@ -3,6 +3,7 @@ import { colors } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 
+import { FrameLoading } from "../pages/frame-cover.tsx";
 import { PreviewFrame } from "../pages/page-frame.tsx";
 import type { FrameFix, PageEnded } from "../pages/page-frame.tsx";
 import type { ReadOnlyShown } from "./app-workspace.tsx";
@@ -26,6 +27,27 @@ const styles = stylex.create({
 // The App being built, in its workspace (app-workspace.tsx): the compiled
 // pages of the App's draft, as a preview, on the test data its builders
 // share.
+
+/**
+ * The preview's place while its draft is read, before its frame starts:
+ * the frame's own cover, where the frame will be, so nothing moves as it
+ * starts under it.
+ */
+export const DraftPreviewLoading = ({
+  width,
+}: {
+  width?: PreviewWidth | undefined;
+}) => {
+  const { t } = useLingui();
+  return (
+    <section
+      aria-busy
+      {...stylex.props(styles.preview, previewWidths[width ?? "desktop"])}
+    >
+      <FrameLoading label={t`Preparing the preview`} />
+    </section>
+  );
+};
 
 /**
  * The preview of App `app` as its `draft` has it: its pages, as one single

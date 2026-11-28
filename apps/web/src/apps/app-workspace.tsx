@@ -68,7 +68,7 @@ import { SettingUp, SettingUpBar, Updating } from "../frame/setting-up.tsx";
 import type { SetUp } from "../frame/setting-up.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { FrameCover, FrameLoading } from "../pages/frame-cover.tsx";
+import { FrameCover } from "../pages/frame-cover.tsx";
 import { PageFrame } from "../pages/page-frame.tsx";
 import type { FrameFix } from "../pages/page-frame.tsx";
 import { useVersionPushes } from "../pages/use-version-pushes.ts";
@@ -80,7 +80,7 @@ import { sharesApp } from "./app-role.ts";
 import { AppSettings, Read } from "./app-settings.tsx";
 import { AppStart } from "./app-start.tsx";
 import { useStatusMove } from "./app-status.tsx";
-import { DraftPreview } from "./draft-preview.tsx";
+import { DraftPreview, DraftPreviewLoading } from "./draft-preview.tsx";
 import { fixQuestion } from "./fix-with-grasp.ts";
 import { dismissMadeTip, showsMadeTip } from "./made-tip.ts";
 import {
@@ -742,7 +742,7 @@ const PreviewArea = ({
   // frame's own cover, already, so what the person sees doesn't change
   // as the frame starts under it.
   if (draft === undefined) {
-    return <FrameLoading label={t`Preparing the preview`} />;
+    return <DraftPreviewLoading width={width} />;
   }
   const { revision } = draft;
   const ready = setUp === "ready";

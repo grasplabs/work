@@ -425,6 +425,9 @@ const frameManifestSchema = z
 
 type FrameManifest = z.infer<typeof frameManifestSchema>;
 
+/** What a manifest's "staged in full" mark is for (`stageFrame`), as `manifestPurpose`. */
+const stagedPurpose = "grasp-os page frame staged";
+
 /** What the manifests' MAC key is for: no other MAC of core's passes for one. */
 const manifestPurpose = "grasp-os page frame manifest";
 
@@ -839,7 +842,7 @@ export const stageFrame = async (
 ): Promise<boolean> =>
   await sharedRun(stagingsRunning, artifact, stagingMs, async () => {
     const now = options.now ?? new Date();
-    const vouch = await stagedMac(env, manifestPurpose, ["staged", artifact]);
+    const vouch = await stagedMac(env, stagedPurpose, artifact);
     const kept = await env.FILES.head(frameKey(artifact));
     if (
       kept !== null &&
@@ -942,6 +945,23 @@ const refused = (
   });
 
 /**
+ * Deletes the module at `key`, in `scope`, not as core staged it, and the
+ * manifest of the build whose scope is its artifact (a published one's),
+ * so the next open of that build stages it in full again rather than
+ * take its manifest for its modules (`stageFrame`). A build staged in a
+ * scope of another's (a preview's, the kit's) is staged again once its
+ * frame's document finds the module missing (`servedIntegrity`,
+ * `allStaged`).
+ */
+const dropCorrupt = async (
+  env: Env,
+  scope: string,
+  key: string
+): Promise<void> => {
+  await env.FILES.delete([key, frameKey(scope)]);
+};
+
+/**
  * A module, as a frame imports it, or null when the path isn't one: only
  * with a token core made for its scope that hasn't expired, and only
  * bytes core's MAC says it kept there.
@@ -972,7 +992,7 @@ export const pageModuleResponse = async (
     // Larger than core stages: not read.
     await module.body.cancel();
     log.error("page_frame.module_corrupt", { hash, bytes: module.size });
-    await env.FILES.delete(key);
+    await dropCorrupt(env, scope, key);
     return refused(404, [], "no-store");
   }
   const bytes = new Uint8Array(await module.arrayBuffer());
@@ -984,11 +1004,11 @@ export const pageModuleResponse = async (
       module.customMetadata?.mac
     ))
   ) {
-    // Not what core staged here: never served. Gone, so the frame's
-    // document finds it missing and the next open stages the build
-    // again; meanwhile a miss nothing caches.
+    // Not what core staged here: never served. Gone, and the build's
+    // manifest with it, so the next open stages the build again;
+    // meanwhile a miss nothing caches.
     log.error("page_frame.module_corrupt", { hash });
-    await env.FILES.delete(key);
+    await dropCorrupt(env, scope, key);
     return refused(404, [], "no-store");
   }
   const served = scope.startsWith(kitScopePrefix)
@@ -1119,6 +1139,12 @@ export const pageModuleResponse = async (
 // spell some other way, and nothing relies on them.
 const bootstrap = `"use strict";
 (() => {
+// Core's own links, which asked for the build's modules as the document
+// was read, go before any code of the page's runs: none is left with an
+// address for the page to point elsewhere. Their modules still load.
+for (const link of document.querySelectorAll('link[rel="modulepreload"]')) {
+  link.remove();
+}
 const apply = Reflect.apply;
 const enforced = (() => {
   try {
@@ -1394,7 +1420,8 @@ const htmlAttribute = (value: string): string =>
  * importing it has loaded: a page's tree of imports is many levels deep,
  * each level a round trip. Each is asked for as its import asks for it,
  * by the same address, so the import finds it loaded, under the same
- * policy (`script-src`), checked against the same integrity.
+ * policy (`script-src`), checked against the same integrity. The
+ * bootstrap removes them before any of the page's code runs.
  */
 const preloadLinks = (
   modules: readonly { address: string; integrity: string }[]
