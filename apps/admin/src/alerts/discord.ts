@@ -264,6 +264,25 @@ const contentOf = (
       ],
     };
   }
+  if (event.kind === "restore_refused" || event.kind === "restore_failed") {
+    return {
+      what:
+        event.kind === "restore_refused"
+          ? "Urgent: deploy failed, restore refused"
+          : "Urgent: deploy and restore failed",
+      about,
+      next:
+        event.kind === "restore_refused"
+          ? "It stays on the release that failed: the release before can't open what it stored. Release a fix to it."
+          : "The release before failed its probe too: it may serve nothing. Look at its Setup now.",
+      fields: [
+        ...where,
+        field("Failure code", code(event.code, limits.fieldValue), false),
+        field("Since", relative(facts.at)),
+        stage,
+      ],
+    };
+  }
   return event.kind === "deploy_failed"
     ? {
         what: "Deploy failed",
@@ -297,11 +316,7 @@ export const embedOf = (facts: AlertFacts): DiscordEmbed => {
   const { what, about, next, fields } = contentOf(facts);
   const title = `${facts.test ? "Test: " : ""}${what}: `;
   const failed =
-    facts.event.kind === "import_failed" ||
-    facts.event.kind === "deploy_failed" ||
-    facts.event.kind === "rollout_halted" ||
-    facts.event.kind === "deploy_set_aside" ||
-    facts.event.kind === "rollout_blocked";
+    facts.event.kind !== "imported" && facts.event.kind !== "deployed";
   const lines = [
     ...(facts.test ? [testLine, ""] : []),
     next,

@@ -1,0 +1,1 @@
+CREATE INDEX `client_deploys_deploying_idx` ON `client_deploys` (`client_id`) WHERE "client_deploys"."status" = 'deploying';

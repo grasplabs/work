@@ -13,6 +13,8 @@ import { CloudflareApiError, isRefused } from "./cloudflare/api.ts";
 import { MissingStoreSecretError } from "./deploy/context.ts";
 import { errorCode, DeployError } from "./deploy/errors.ts";
 import type { DeployErrorCode } from "./deploy/errors.ts";
+import { InventoryError } from "./hosting/inventory.ts";
+import { ProvisionOperationError } from "./hosting/operation.ts";
 
 /** Quick steps: a few API calls or a row. */
 export const quickStep = {
@@ -78,6 +80,18 @@ export const asStepError = (error: unknown): Error => {
     `unexpected: ${error instanceof Error ? error.name : typeof error}`
   );
 };
+
+/**
+ * A failure of the client's operation as a step fails with it: the
+ * operation's and the inventory's own codes stop the run at once, for
+ * staff to act on; anything else as any step's (`asStepError`), so a smoke
+ * check still starting or an API that didn't answer is retried, resuming
+ * the operation.
+ */
+export const asOperationStepError = (error: unknown): Error =>
+  error instanceof ProvisionOperationError || error instanceof InventoryError
+    ? stop(error.code, error.message)
+    : asStepError(error);
 
 /** `task` as a step runs it, its failures as `asStepError` makes them. */
 export const guarded =

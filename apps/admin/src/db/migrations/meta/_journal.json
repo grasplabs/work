@@ -421,6 +421,13 @@
       "when": 1795872317757,
       "tag": "0059_platform_faults",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "6",
+      "when": 1795877070817,
+      "tag": "0060_deploys_out",
+      "breakpoints": true
     }
   ]
 }

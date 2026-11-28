@@ -152,7 +152,10 @@ export const deployerToken = async (env: Env): Promise<string> =>
  */
 export const deployerApi = async (
   env: Env,
-  options: Pick<CloudflareApiOptions, "waitBudgetMs" | "signal"> = {}
+  options: Pick<
+    CloudflareApiOptions,
+    "waitBudgetMs" | "signal" | "failRateLimited"
+  > = {}
 ): Promise<CloudflareApi> =>
   cloudflareApi({
     ...options,
@@ -402,7 +405,10 @@ export const oauthRelayOf = (env: {
     : undefined;
 };
 
-export const deployContext = async (env: Env): Promise<DeployContext> => {
+export const deployContext = async (
+  env: Env,
+  api: Pick<CloudflareApiOptions, "failRateLimited"> = {}
+): Promise<DeployContext> => {
   const domain = clientDomain(env);
   if (domain === null) {
     throw new ClientDomainUnsetError();
@@ -413,7 +419,7 @@ export const deployContext = async (env: Env): Promise<DeployContext> => {
   const relay = oauthRelayOf(env);
   const usualHosts = usualHostsOf(env);
   return {
-    api: await deployerApi(env),
+    api: await deployerApi(env, api),
     db: adminDatabase(env.DB),
     store: env.RELEASES,
     secrets: await deploySecrets(env),

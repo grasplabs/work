@@ -1,7 +1,14 @@
 /**
  * A small client for the Cloudflare REST API, as the admin uses it to
  * provision and deploy client accounts. It speaks the API's envelope
- * (`{ success, errors, result }`) and retries what is safe to retry.
+ * (`{ success, errors, result }`) and retries what is safe to retry. A
+ * 429 is waited out in place, as its `Retry-After` asks, unless the
+ * caller waits the block out itself (`failRateLimited`): Cloudflare blocks
+ * a token that passed its limit for five minutes, and every call sent
+ * meanwhile only keeps the block going, so an organization's rollout
+ * fails the call at once and parks its step (src/rollout/org-rollout.ts).
+ * It keeps what it saw of the limit (`usage`): the last `Ratelimit`
+ * header, and until when a 429 said to wait.
  *
  * The token (the deployer's, from Secrets Store) goes only into the
  * `Authorization` header: never into a log, an error or a returned value
@@ -19,32 +26,81 @@ const maxAttempts = 4;
 /** Waits before retry n (0-based): `retryDelayMs * 2^n`. */
 const defaultRetryDelayMs = 500;
 
-/** The longest a 429's `Retry-After` makes a call wait. */
+/**
+ * How long a token is blocked after a 429 that names no `Retry-After`:
+ * Cloudflare's documented block, five minutes (API limits).
+ */
+export const rateLimitBlockMs = 5 * 60_000;
+
+/** The longest a 429's `Retry-After` makes a call wait in place. */
 const maxRetryAfterMs = 60_000;
 
 /**
- * How long a 429 asks to wait, in ms, capped: its `Retry-After` in seconds,
- * as Cloudflare sends it. Undefined when it names none, or no number.
+ * How long a 429 says to wait, in ms: its `Retry-After` in seconds, as
+ * Cloudflare sends it; undefined when it names none, or no number.
  */
 const retryAfterMs = (response: Response | null): number | undefined => {
   const header =
     response?.status === 429 ? response.headers.get("retry-after") : null;
   const seconds = Number(header ?? "");
-  if (
-    header === null ||
+  return header === null ||
     header.trim() === "" ||
     !Number.isFinite(seconds) ||
     seconds < 0
-  ) {
-    return undefined;
-  }
-  return Math.min(seconds * 1000, maxRetryAfterMs);
+    ? undefined
+    : seconds * 1000;
+};
+
+/**
+ * Cloudflare's `Ratelimit` header, as every answer of the REST API
+ * carries it (API limits): `"default";r=<requests left>;t=<seconds until
+ * the window resets>`.
+ */
+const ratelimitParts = /(?:^|;)\s*(?<key>[rt])=(?<value>\d+)/gu;
+
+/** What the client last saw of the token's limit. */
+export interface RateLimitSeen {
+  /** Requests left in the window. */
+  remaining: number;
+  /** When the window resets. */
+  resetAt: Date;
+  /** When it was seen. */
+  at: Date;
+}
+
+/** What a client saw of Cloudflare's rate limit, since it was made. */
+export interface ApiUsage {
+  /** Requests sent, each retry one more. */
+  calls: number;
+  /** Of their answers, those that carried a `Ratelimit` header. */
+  rated: number;
+  /** The last `Ratelimit` header read; null while none was. */
+  limit: RateLimitSeen | null;
+  /** The header as it was last read, as Cloudflare wrote it; null while none was. */
+  header: string | null;
+  /** Until when the latest 429 said to wait; null while none came. */
+  blockedUntil: Date | null;
+}
+
+/** `header` read as a `Ratelimit` value at `at`; null when it lacks `r` or `t`. */
+const rateLimitOf = (header: string, at: Date): RateLimitSeen | null => {
+  const parts = new Map(
+    Array.from(header.matchAll(ratelimitParts), ({ groups }) => [
+      groups?.key,
+      Number(groups?.value),
+    ])
+  );
+  const remaining = parts.get("r");
+  const reset = parts.get("t");
+  return remaining === undefined || reset === undefined
+    ? null
+    : { remaining, resetAt: new Date(at.getTime() + reset * 1000), at };
 };
 
 /**
  * Methods Cloudflare applies at most once however often they're sent. Only
  * these are retried after a server error, whose request may have been
- * applied; a 429 was refused before it was, so every method retries it.
+ * applied.
  */
 const idempotentMethods: ReadonlySet<string> = new Set([
   "GET",
@@ -160,6 +216,8 @@ export interface CloudflareApi {
     variables: Record<string, unknown>,
     schema: z.ZodType<T>
   ) => Promise<T>;
+  /** What the client saw of the rate limit, every call made through it so far. */
+  usage: () => ApiUsage;
 }
 
 export interface CloudflareApiOptions {
@@ -172,6 +230,11 @@ export interface CloudflareApiOptions {
    * last attempt did. Unset, a call makes all its attempts.
    */
   waitBudgetMs?: number;
+  /**
+   * Fails a call Cloudflare answers with a 429 at once, never waiting it
+   * out in place: for a caller that waits the token's block out itself.
+   */
+  failRateLimited?: boolean;
   /**
    * Stops every call made through the client: requests under way are
    * aborted, and none is retried or waited for after. Unset, calls run to
@@ -228,6 +291,7 @@ export const cloudflareApi = ({
   token,
   retryDelayMs = defaultRetryDelayMs,
   waitBudgetMs = Number.POSITIVE_INFINITY,
+  failRateLimited = false,
   signal,
 }: CloudflareApiOptions): CloudflareApi => {
   /** What stops `call`: the client's signal, its own, or both. */
@@ -248,6 +312,34 @@ export const cloudflareApi = ({
       : Promise.race([scheduler.wait(ms), whenAborted(stop)]));
   };
 
+  const seen: ApiUsage = {
+    calls: 0,
+    rated: 0,
+    limit: null,
+    header: null,
+    blockedUntil: null,
+  };
+
+  /** Notes what `response` says of the rate limit. */
+  const note = (response: Response | null): void => {
+    seen.calls += 1;
+    if (response === null) {
+      return;
+    }
+    const at = new Date();
+    const header = response.headers.get("ratelimit");
+    if (header !== null) {
+      seen.rated += 1;
+      seen.header = header;
+      seen.limit = rateLimitOf(header, at) ?? seen.limit;
+    }
+    if (response.status === 429) {
+      seen.blockedUntil = new Date(
+        at.getTime() + (retryAfterMs(response) ?? rateLimitBlockMs)
+      );
+    }
+  };
+
   const send = async (call: ApiCall): Promise<Response | null> => {
     const stop = stopOf(call);
     const url = new URL(`${cloudflareApiBase}${call.path}`);
@@ -261,8 +353,9 @@ export const cloudflareApi = ({
       headers.set("content-type", "application/json");
       body = JSON.stringify(call.json);
     }
+    let response: Response | null;
     try {
-      return await fetch(url, {
+      response = await fetch(url, {
         method: call.method,
         headers,
         body,
@@ -273,33 +366,40 @@ export const cloudflareApi = ({
       stop?.throwIfAborted();
       // A network error: no answer, and nothing of it is kept, since its
       // message could echo the request.
-      return null;
+      response = null;
     }
+    note(response);
+    return response;
   };
 
   /**
    * Whether a call that got `status` (0 for no answer) may be tried again
    * after attempt `attempt` (from 0): a 429, whose call was refused before
-   * it was applied, and a server error or no answer for a call sending
-   * which twice does no more than once.
+   * it was applied, unless the caller waits it out itself; and a server
+   * error or no answer for a call sending which twice does no more than
+   * once.
    */
   const retryable = (call: ApiCall, status: number, attempt: number) =>
     attempt + 1 < maxAttempts &&
-    (status === 429 ||
+    ((status === 429 && !failRateLimited) ||
       ((status === 0 || status >= 500) &&
         (call.idempotent ?? idempotentMethods.has(call.method))));
 
   /**
    * How long to wait before the attempt after `attempt`, as `response`
-   * asks or doubling; undefined when that would take a call that waited
-   * `waited` already past its budget.
+   * asks (at most a minute) or doubling; undefined when that would take a
+   * call that waited `waited` already past its budget.
    */
   const waitBefore = (
     response: Response | null,
     attempt: number,
     waited: number
   ): number | undefined => {
-    const wait = retryAfterMs(response) ?? retryDelayMs * 2 ** attempt;
+    const asked = retryAfterMs(response);
+    const wait =
+      asked === undefined
+        ? retryDelayMs * 2 ** attempt
+        : Math.min(asked, maxRetryAfterMs);
     return waited + wait > waitBudgetMs ? undefined : wait;
   };
 
@@ -386,10 +486,14 @@ export const cloudflareApi = ({
       const { result } = await page(call, schema);
       return result;
     },
+    usage: () => ({ ...seen }),
   };
 };
 
-/** Refusals a later attempt may get past: a timeout, a rate limit. */
+/**
+ * Refusals a later attempt may get past: a timeout, and a rate limit once
+ * its block is over.
+ */
 const transientStatuses: ReadonlySet<number> = new Set([408, 429]);
 
 /**

@@ -292,6 +292,24 @@ export const holdSecretReadsOf = async (
   };
 };
 
+/**
+ * Has the run in `stub` reach its binding `name` as `wrap` makes it of
+ * its own: a binding that answers otherwise, as a test sets it. Set up
+ * before the run starts.
+ */
+export const wrapBindingOf = async <Name extends keyof Env>(
+  stub: RunStub,
+  name: Name,
+  wrap: (own: Env[Name]) => Env[Name]
+): Promise<void> => {
+  await runInDurableObject(stub, (object) => {
+    if (!hasEnv(object)) {
+      throw new TypeError("The run's object keeps no env");
+    }
+    object.env = { ...object.env, [name]: wrap(object.env[name]) };
+  });
+};
+
 /** `holdBatchOf` for the run's first batch, whatever it wrote. */
 export const holdFirstBatchOf = async (stub: RunStub): Promise<LostWrite> =>
   await holdBatchOf(stub, async () => await Promise.resolve(true));
@@ -422,9 +440,18 @@ const hurryEveryMs = 50;
  * Records each run of any of the admin's workflows the engine creates
  * from now on, and keeps their retries and sleeps due at once (`hurry`),
  * until disposed: what a test of runs that start runs of their own (a
- * rollout's fleet clients) follows them by.
+ * rollout's fleet clients) follows them by. `beforeStart` gets each
+ * run's object, and the workflow it's a run of, before its start reaches
+ * it, as for `startsOf`.
  */
-export const followAdminRuns = (): FollowedRuns => {
+export const followAdminRuns = (
+  beforeStart: (
+    stub: RunStub,
+    workflow: string
+  ) => Promise<unknown> = async () => {
+    await Promise.resolve();
+  }
+): FollowedRuns => {
   const started: StartedRun[] = [];
   const done = new Set<string>();
   const namespace = env.ADMIN_RUNS;
@@ -435,6 +462,7 @@ export const followAdminRuns = (): FollowedRuns => {
       get: (target, property): unknown => {
         if (property === "start") {
           return async (command: StartCommand) => {
+            await beforeStart(stub, command.definition);
             const outcome = await target.start(command);
             if (outcome === "created") {
               started.push({

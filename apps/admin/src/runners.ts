@@ -3,7 +3,8 @@
  * as `client_runs` names it: one of the admin's runs (src/workflow-runs.ts).
  * A provisioning attempt (a run per attempt, `<clientId>-p<random>`,
  * src/hosting/workflow.ts), a deploy by the reconciler (its run,
- * src/rollout/deploy.ts), or applying its settings (its
+ * src/rollout/deploy.ts), an organization's rollout (its run,
+ * src/rollout/org-rollout.ts), or applying its settings (its
  * run, src/clients/apply.ts). Runs are never reused.
  *
  * A runner claims the client with one conditional write that names the
@@ -92,6 +93,7 @@ const isMissingInstance = (error: unknown): boolean =>
 /** The workflow a runner of `kind` is a run of. */
 const workflows: Readonly<Record<RunKind, (env: Env) => Workflow>> = {
   deploy: (env) => adminWorkflow(env, adminWorkflows.deploy),
+  rollout: (env) => adminWorkflow(env, adminWorkflows.orgRollout),
   apply: (env) => adminWorkflow(env, adminWorkflows.applyClient),
   provision_placed: (env) =>
     adminWorkflow(env, adminWorkflows.provisionPlacedClient),
@@ -237,34 +239,48 @@ export interface HeldClient {
    * apart (`takeAttempt`).
    */
   attemptKey?: string;
+  /**
+   * Which step of its run that attempt is of, from 1, for a run whose
+   * steps each take the client in turn (src/rollout/org-rollout.ts): a
+   * later step takes it from an earlier one's attempt (`takeAttempt`). 0,
+   * or left out, for a run that takes it in one step.
+   */
+  step?: number;
 }
 
 /**
  * Takes client `held.clientId` for attempt `held.attempt` of step
- * `held.attemptKey` of runner `held.runId`, which holds it: from then on
- * an older attempt of that step, or any attempt of another run under the
- * same runner id, holds it no longer, and every check and write of it is refused
- * (`holdsClient`, `stillHolds`). On Workerflow a step that timed out goes
- * on running beside its retry, under the same run: this keeps the older
- * one from acting. Whether it was taken: not when the runner lost the
- * client, or a newer attempt took it first.
+ * `held.attemptKey` (its run's `held.step`th) of runner `held.runId`,
+ * which holds it: from then on an older attempt of that step, any attempt
+ * of an earlier step of the run, or any attempt of another run under the
+ * same runner id, holds it no longer, and every check and write of it is
+ * refused (`holdsClient`, `stillHolds`). On Workerflow a step that timed
+ * out goes on running beside its retry, and beside the steps after it,
+ * under the same run: this keeps it from acting. Whether it was taken:
+ * not when the runner lost the client, or a newer attempt, or a later
+ * step, took it first.
  */
 export const takeAttempt = async (
   db: AdminDatabase,
   held: HeldClient & { attempt: number; attemptKey: string }
 ): Promise<boolean> => {
+  const step = held.step ?? 0;
   const taken = await db
     .update(clientRuns)
-    .set({ attempt: held.attempt, attemptKey: held.attemptKey })
+    .set({ attempt: held.attempt, attemptKey: held.attemptKey, step })
     .where(
       and(
         eq(clientRuns.clientId, held.clientId),
         eq(clientRuns.runId, held.runId),
-        // The claim's first taker, or a later attempt at the same step: a
-        // step of another run under the runner's id never takes it over.
+        // The claim's first taker (whatever step a run before it left), a
+        // later step of the run, or a later attempt at the same step: a
+        // step of another run under the runner's id never takes it over,
+        // as such runs take the client in one step (0).
         or(
           isNull(clientRuns.attemptKey),
+          lt(clientRuns.step, step),
           and(
+            eq(clientRuns.step, step),
             eq(clientRuns.attemptKey, held.attemptKey),
             lt(clientRuns.attempt, held.attempt)
           )

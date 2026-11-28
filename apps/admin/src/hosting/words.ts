@@ -101,6 +101,10 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
     "The release since changed how chats are stored, and the release before can't read them, so the client stays where it is: release a fix instead.",
   release_behind_chat_storage:
     "That release can't read the chats the client's release stores, which changed how they're stored since: pick a later release.",
+  restore_refused:
+    "The release failed once it started installing, and going back to the release before was refused, as that one can't open what this one stored: it stays on the release that failed. Release a fix to it.",
+  restore_failed:
+    "The release failed once it started installing, and putting the release before back failed too: it may serve nothing. Look at both releases' failures in its history now.",
   attempt_lost:
     "A try stopped without recording why: Cloudflare ended the admin's run, most often past its memory or CPU limit. Look at the admin's Workers Logs from then for the outcome.",
 };
@@ -199,6 +203,8 @@ const failureCauses = {
   rollback_past_chat_storage: "staff",
   release_behind_chat_storage: "release",
   release_rolled_back: "release",
+  restore_refused: "staff",
+  restore_failed: "staff",
   attempt_lost: "retry",
   // The inventory's.
   destination_unknown: "staff",

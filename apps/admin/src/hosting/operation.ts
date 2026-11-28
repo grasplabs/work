@@ -98,6 +98,7 @@ import {
   stageOfNamespace,
 } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
+import type { ProvisionProbe } from "@grasp-os/shared/provision-probe";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { canMove } from "@grasp-os/shared/release-apply";
 import { deriveRouterSecret } from "@grasp-os/shared/router";
@@ -136,7 +137,7 @@ import { errorCode } from "../deploy/errors.ts";
 import { databaseMigrations, migrateDatabases } from "../deploy/migrations.ts";
 import { modelsBucketOf, syncModelFiles } from "../deploy/model-files.ts";
 import type { ModelFilesSynced } from "../deploy/model-files.ts";
-import { importedManifest } from "../deploy/release.ts";
+import { importedAfter, importedManifest } from "../deploy/release.ts";
 import {
   assetsReady,
   registerHostname,
@@ -269,6 +270,19 @@ export const provisionOperationErrorCodes = [
    * release before on its own: its deploy counts as failed.
    */
   "release_rolled_back",
+  /**
+   * A release that failed once it started installing, and whose restore
+   * to the release before was refused (`canMove`): past a Durable Object
+   * migration, or chats the release before can't read. The client stays
+   * on the release that failed (src/rollout/org-rollout.ts).
+   */
+  "restore_refused",
+  /**
+   * A release that failed once it started installing, and whose restore
+   * to the release before failed too, its probe or before: the client may
+   * serve nothing (src/rollout/org-rollout.ts).
+   */
+  "restore_failed",
   /**
    * An attempt ended at a step without recording how: its isolate was
    * killed (past its memory or CPU limit) or it timed out. Recorded with
@@ -2599,6 +2613,28 @@ const freshConnectVersion = async (
   return read.settled ? read.version : null;
 };
 
+/**
+ * The releases imported after `manifest`, when core's probe `answer`
+ * names, for one of core's databases, a migration other than the last
+ * `manifest` lists for that binding: what may show that database ahead
+ * of it (`installMismatch`, which checks each binding alone). None,
+ * unread, while every database is at its last.
+ */
+const laterOf = async (
+  db: AdminDatabase,
+  manifest: ReleaseManifest,
+  answer: ProvisionProbe
+): Promise<ReleaseManifest[]> => {
+  const schema = answer.schema ?? {};
+  const elsewhere = workerOf(manifest, "core").d1Databases.some(
+    ({ binding, migrations }) => {
+      const at = schema[binding] ?? null;
+      return at !== null && at !== migrations.at(-1)?.name;
+    }
+  );
+  return elsewhere ? await importedAfter(db, manifest.releaseId) : [];
+};
+
 /** How long core's signed probe may take, its body included. */
 const probeTimeoutMs = 10_000;
 
@@ -2698,6 +2734,7 @@ const probe = async (
     clientId: held.clientId,
     version,
     release: loaded.manifest,
+    later: await laterOf(db, loaded.manifest, answer),
     bindings: privateBindings(
       workerOf(loaded.manifest, "core"),
       workerOf(loaded.manifest, "connect")

@@ -3,9 +3,10 @@
  * that didn't import, an organization whose deploy failed, and each one's
  * recovery. Whatever writes the audit event of such a failure, or of its
  * end, calls `alert` beside it: the import (src/releases/import.ts), a
- * deploy's end (src/rollout/deploy.ts), and the rollout pass for a halt
- * or a 429 that blocks every rollout (src/rollout/scheduler.ts). `alert`
- * only records the change, for
+ * deploy's end (src/rollout/deploy.ts), the rollout pass for a halt
+ * (src/rollout/scheduler.ts), and an organization's rollout for a 429
+ * that blocks every rollout (src/rollout/api-budget.ts). `alert` only
+ * records the change, for
  * the channels switched on then; `deliverAlerts`, at the end of each cron
  * run (src/server.ts), tells those still on (src/alerts/channels.ts):
  * mail and Discord (src/alerts/senders.ts).
@@ -21,7 +22,7 @@
  */
 import "@tanstack/react-start/server-only";
 import { log } from "@grasp-os/shared/log";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, ne, notInArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { adminDatabase } from "../db/act.ts";
@@ -44,7 +45,9 @@ const failedAtSchema = z.number().int().optional();
 
 /**
  * What changed: a release that failed to import, or imported after that;
- * an organization whose deploy of a release failed, or that deployed one
+ * an organization whose deploy of a release failed and wasn't restored to
+ * the release before, whose restore was refused (it stays on the release
+ * that failed) or failed too (it may serve nothing), or that deployed one
  * after that; a channel's rollout that halted (`since` it started or was
  * last resumed: each halt its own); a 429 that blocks the deployer token
  * `until` then; an organization set aside after platform faults in a
@@ -65,6 +68,18 @@ export const alertEventSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("deploy_failed"),
+    clientId: z.string(),
+    releaseId: z.string(),
+    code: z.string(),
+  }),
+  z.object({
+    kind: z.literal("restore_refused"),
+    clientId: z.string(),
+    releaseId: z.string(),
+    code: z.string(),
+  }),
+  z.object({
+    kind: z.literal("restore_failed"),
     clientId: z.string(),
     releaseId: z.string(),
     code: z.string(),
@@ -116,6 +131,15 @@ const bounded = (event: AlertEvent): AlertEvent =>
 export const MAX_ATTEMPTS = 5;
 
 /**
+ * Failures a person must look at now: a restore refused or failed. One
+ * replaces an organization's failure told already, so it's told too.
+ */
+const urgentKinds: ReadonlySet<AlertEvent["kind"]> = new Set([
+  "restore_refused",
+  "restore_failed",
+]);
+
+/**
  * What `event` is about, one row a thing, and whether it says that thing
  * fails. A halt and a block are each a thing of their own, told once and
  * never recovered: a rollout halted again after a resume is a new halt.
@@ -133,7 +157,7 @@ const subjectOf = (event: AlertEvent): { key: string; failing: boolean } => {
   return "clientId" in event
     ? {
         key: `deploy:${event.clientId}`,
-        failing: event.kind === "deploy_failed",
+        failing: event.kind !== "deployed",
       }
     : {
         key: `import:${event.releaseId}`,
@@ -143,8 +167,9 @@ const subjectOf = (event: AlertEvent): { key: string; failing: boolean } => {
 
 /**
  * Records `event` at `now` when it changes the state of what it's about,
- * to be told by the next cron run: a first failure, to the channels
- * switched on now; a recovery after one, to exactly the channels that took
+ * to be told by the next cron run: a first failure, or an urgent one
+ * after one that isn't, to the channels switched on now; a recovery
+ * after one, to exactly the channels that took
  * the failure (one still waiting to take it gets neither), and dropped
  * with the failure, at once, when none took it: nobody was told it
  * failed. The same state again changes nothing; a recovery of something
@@ -173,7 +198,14 @@ export const alert = async (
         .onConflictDoUpdate({
           target: alerts.key,
           set: change,
-          setWhere: eq(alerts.failing, false),
+          setWhere: urgentKinds.has(event.kind)
+            ? or(
+                eq(alerts.failing, false),
+                notInArray(sql`json_extract(${alerts.event}, '$.kind')`, [
+                  ...urgentKinds,
+                ])
+              )
+            : eq(alerts.failing, false),
         });
       return;
     }

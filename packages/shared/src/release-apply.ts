@@ -22,6 +22,16 @@ export const releaseSteps = [
 export type ReleaseStep = (typeof releaseSteps)[number];
 
 /**
+ * The step from which a failure puts the release before back, and probes
+ * it: once `install` started, the deployment may run part or all of the
+ * new release (one Worker live, another not), so any failure in it or
+ * after it restores. A failure before it changed nothing the deployment
+ * runs: its migrations are expand only, and the release before runs on
+ * them, so nothing is restored, and they are never undone.
+ */
+export const restoresFrom: ReleaseStep = "install";
+
+/**
  * The package that stores core's chats: pi-durable keeps a chat's records
  * in its Durable Object, each record at a version of its own, and a later
  * minor may write versions an earlier one refuses to read (Pi 1.6 did:
@@ -126,20 +136,23 @@ export interface InstalledAnswer {
 /**
  * Why `answered` isn't release `to` installed, as Worker `worker` of it
  * says: `release`, it names another release or none; `schema`, the
- * database `binding` is behind `to`'s last migration for it. Null when
+ * database `binding` isn't at `to`'s last migration for it. Null when
  * it is, or when it says nothing (a core from before it).
  *
- * A database is at `to` when its last migration is `to`'s last, or one
- * `to` doesn't list: a later release's, its schema ahead, as a release
+ * A database is at `to` when its last migration is `to`'s last, or is
+ * ahead of it: a migration `to` doesn't list that a release of `later`
+ * lists after `to`'s last, for the same Worker and binding, as a release
  * that goes back runs on the schema of the one after it (migrations are
- * expand only). A migration `to` lists before its last, or none where it
- * lists some, is behind. A database the answer names none for, where it
- * names some, counts as having none.
+ * expand only). Any other migration `to` doesn't list is another
+ * database's, not this one's; one it lists before its last, or none where
+ * it lists some, is behind. A database the answer names none for, where
+ * it names some, counts as having none.
  */
 export const installMismatch = (
   to: ReleaseManifest,
   worker: string,
-  answered: InstalledAnswer
+  answered: InstalledAnswer,
+  later: readonly ReleaseManifest[]
 ): { reason: "release" } | { reason: "schema"; binding: string } | null => {
   if (answered.release !== undefined && answered.release !== to.releaseId) {
     return { reason: "release" };
@@ -148,17 +161,23 @@ export const installMismatch = (
   if (schema === undefined) {
     return null;
   }
-  const behind = to.workers[worker]?.d1Databases.find(
-    ({ binding, migrations }) => {
-      const names = migrations.map(({ name }) => name);
-      const last = names.at(-1);
-      const at = schema[binding] ?? null;
-      return (
-        last !== undefined && at !== last && (at === null || names.includes(at))
-      );
+  const namesOf = (release: ReleaseManifest, binding: string): string[] =>
+    release.workers[worker]?.d1Databases
+      .find((database) => database.binding === binding)
+      ?.migrations.map(({ name }) => name) ?? [];
+  const isAhead = (binding: string, last: string, at: string): boolean =>
+    later.some((release) => {
+      const names = namesOf(release, binding);
+      const from = names.indexOf(last);
+      return from !== -1 && names.indexOf(at) > from;
+    });
+  const off = to.workers[worker]?.d1Databases.find(({ binding }) => {
+    const last = namesOf(to, binding).at(-1);
+    const at = schema[binding] ?? null;
+    if (last === undefined || at === last) {
+      return false;
     }
-  );
-  return behind === undefined
-    ? null
-    : { reason: "schema", binding: behind.binding };
+    return at === null || !isAhead(binding, last, at);
+  });
+  return off === undefined ? null : { reason: "schema", binding: off.binding };
 };
