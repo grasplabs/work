@@ -5,6 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { personalWorkspaceId } from "../src/personal-workspace.ts";
+import { chatFilePartBytes } from "../src/workspace.ts";
 import { chatOf, says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInWithRole } from "./sign-in.ts";
@@ -73,7 +74,11 @@ describe("a chat's export from its Workspace", () => {
           z.object({ role: z.string() }).parse(JSON.parse(message)).role ===
           "user"
       ).length,
-      files: files?.map(({ name, text, parts }) => ({ name, text, parts })),
+      files: files?.map((file) => ({
+        name: file.name,
+        text: file.text,
+        parts: file.parts,
+      })),
       held: held?.map(({ request, status }) => ({ request, status })),
       // Each turn's recall is a run of its own.
       runs: ran?.codeRuns.length,
@@ -96,6 +101,39 @@ describe("a chat's export from its Workspace", () => {
       runs: 2,
       again: all,
     });
+  });
+
+  it("hands over a picture past one part whole, in its parts", async () => {
+    const chat = await chatFor();
+    // A picture past one part, kept in two.
+    const picture = new Uint8Array(chatFilePartBytes + 1000).map(
+      (_, at) => at % 251
+    );
+    await chat.stub.attachFile(
+      chat.chat.id,
+      chat.userId,
+      { name: "plan.png", type: "png", bytes: picture.byteLength, picture },
+      { type: "person", userId: chat.userId }
+    );
+    const [shown] = (await chat.stub.exportFiles(chat.ref)) ?? [];
+    const parts = await Promise.all(
+      Array.from(
+        { length: shown?.parts ?? 0 },
+        async (_, part) =>
+          await chat.stub.exportFilePart(chat.ref, shown?.id ?? "", part)
+      )
+    );
+    const joined = parts.flatMap((part) =>
+      part === undefined ? [] : [...part]
+    );
+
+    expect({
+      text: shown?.text,
+      parts: parts.length,
+      whole:
+        joined.length === picture.byteLength &&
+        joined.every((byte, at) => byte === picture[at]),
+    }).toStrictEqual({ text: null, parts: 2, whole: true });
   });
 
   it("hands over nothing for a reference naming another Workspace, a chat it doesn't hold, or one being deleted", async () => {
