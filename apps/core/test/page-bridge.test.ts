@@ -773,12 +773,13 @@ export const Route = createFileRoute("/")({ component: Notes });
     const healed = await loadFrame(afterRace);
     const healedModule = Object.values(healed?.addresses ?? {})[0] ?? "";
 
-    // A module gone under a fresh manifest is put back at the next open,
-    // before any frame asks for it.
-    const hash = new URL(module).pathname.split("/").at(-1) ?? "";
-    await env.FILES.delete(`page-modules/${hash}`);
-    await builder.api.pages.open(app);
-    const putBack = await status(pathOf(module));
+    // A module gone under a fresh manifest: the open finds the build
+    // staged, by its manifest alone, but the frame's document finds the
+    // module missing and drops the manifest, so the next open stages it
+    // all again.
+    await env.FILES.delete(without(healedModule).slice(1));
+    const missing = await frameStatus(await builder.api.pages.open(app));
+    const putBack = await loadFrame(await builder.api.pages.open(app));
 
     expect({
       young,
@@ -790,7 +791,8 @@ export const Route = createFileRoute("/")({ component: Notes });
       },
       healed: healed !== null,
       healedModule: await status(pathOf(healedModule)),
-      putBack,
+      missing,
+      putBack: putBack !== null,
     }).toStrictEqual({
       young: { frame: 200, module: 200 },
       old: { frame: 404, module: 404 },
@@ -798,7 +800,8 @@ export const Route = createFileRoute("/")({ component: Notes });
       raced: { status: 404, cache: "no-store" },
       healed: true,
       healedModule: 200,
-      putBack: 200,
+      missing: 404,
+      putBack: true,
     });
   });
 

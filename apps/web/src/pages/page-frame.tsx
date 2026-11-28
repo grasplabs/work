@@ -24,6 +24,7 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useBlocker } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { DecisionConfirmDialog } from "../inbox/decision-confirmation.tsx";
@@ -31,6 +32,7 @@ import type { PendingConfirmation } from "../inbox/decision-confirmation.tsx";
 import { LinkConfirmDialog } from "../link-confirmation.tsx";
 import type { PendingLink } from "../link-confirmation.tsx";
 import { useCore } from "../use-core.ts";
+import { FrameCover, FrameLoading } from "./frame-cover.tsx";
 import { FrameFailure } from "./frame-failure.tsx";
 import { frameQuestions } from "./frame-questions.ts";
 import type { Asked } from "./frame-questions.ts";
@@ -189,6 +191,7 @@ const start = (
       })
     : runPreview(
         frame,
+        core,
         {
           app,
           ...(point === undefined ? {} : { point }),
@@ -474,6 +477,34 @@ const FrameNotice = ({ state }: { state: PageState }) => {
 };
 
 /**
+ * Whether a preview in `state` starts afresh: it failed, and the draft's
+ * revision `now` is past `startedAt`, the one its start began at.
+ */
+const startsAfresh = (
+  state: PageState,
+  now: number | undefined,
+  startedAt: number | undefined
+): boolean =>
+  state.status === "failed" &&
+  now !== undefined &&
+  startedAt !== undefined &&
+  now > startedAt;
+
+/** What covers a frame while it starts: a preview, or an App's page. */
+const FrameStarting = ({ preview }: { preview: boolean }) => {
+  const { t } = useLingui();
+  return (
+    <FrameLoading
+      label={preview ? t`Preparing the preview` : t`Loading the app`}
+    />
+  );
+};
+
+/** What covers a frame in `state`: while it starts, `FrameStarting`. */
+const startingCover = (state: PageState, preview: boolean): ReactNode =>
+  state.status === "loading" ? <FrameStarting preview={preview} /> : null;
+
+/**
  * What `source` names, running in a sandboxed frame, under its `bar`.
  * A page can draw anything in its frame, a fake sign-in prompt too; the
  * chrome is how a person tells the App's part from Grasp's. It doesn't
@@ -592,6 +623,17 @@ const FramedPage = ({
   useEffect(() => {
     reloadTo.current = onReload;
   }, [onReload]);
+  // The App's preview's: the draft's revision as the frame's start began.
+  // A start that failed is what the draft was then, or after: a newer
+  // revision come since, while it started or after it failed, may be the
+  // one that fixes it.
+  const startedAt = useRef(revision);
+  // The newest revision, as `reload` reads it when it comes: never a
+  // reason to start the frame again by itself.
+  const revisionNow = useRef(revision);
+  useEffect(() => {
+    revisionNow.current = revision;
+  }, [revision]);
 
   const showUpdate = (next: Update) => {
     updateNow.current = next;
@@ -602,27 +644,22 @@ const FramedPage = ({
   // nothing is offered any more.
   const reload = () => {
     showUpdate("none");
+    startedAt.current = revisionNow.current;
     setState({ status: "loading" });
     setAttempt((last) => last + 1);
     reloadTo.current?.();
   };
   // The App's preview that failed to start (its first build didn't build,
   // its page wasn't there, it didn't start in time) takes no updates:
-  // only a running frame follows the draft's revisions. So a newer
-  // revision than the one it failed at starts it afresh, as a draft that
-  // fixes it should show; one that runs takes it in place.
-  const failedAt = useRef<number | null>(null);
+  // only a running frame follows the draft's revisions. So a revision
+  // newer than the one its start began at starts it afresh at once, as a
+  // draft that fixes it should show, never one newer than the revision
+  // it failed at, which a write landing while it started already is; one
+  // that runs takes it in place.
   useEffect(() => {
-    if (state.status !== "failed" || revision === undefined) {
-      failedAt.current = null;
-      return;
-    }
-    if (failedAt.current === null) {
-      failedAt.current = revision;
-      return;
-    }
-    if (revision > failedAt.current) {
+    if (startsAfresh(state, revision, startedAt.current)) {
       // As `reload`, from here: nothing was offered to a failed start.
+      startedAt.current = revision;
       setState({ status: "loading" });
       setAttempt((last) => last + 1);
       reloadTo.current?.();
@@ -660,16 +697,6 @@ const FramedPage = ({
   return (
     <div {...stylex.props(styles.page)}>
       <FrameTop appName={appName} bar={bar} embedded={embedded} state={state} />
-      {ended === undefined ? null : (
-        <div {...stylex.props(styles.failure)}>
-          <FrameFailure
-            onFix={fixOf(onFix, ended, path)}
-            onRetry={reload}
-            preview={source.preview === true}
-            state={ended}
-          />
-        </div>
-      )}
       <DecisionConfirmDialog
         onCancel={(review) => {
           if (question?.kind === "decision" && question.review === review) {
@@ -713,22 +740,36 @@ const FramedPage = ({
         }}
         open={leaving.status === "blocked"}
       />
-      <Frame
-        app={source.app}
-        hidden={ended !== undefined}
-        location={location}
-        onAsk={setAsked}
-        onGuard={changeGuard}
-        key={attempt}
-        onOpened={setAppName}
-        onState={changeState}
-        title={title}
-        {...(source.preview === undefined ? {} : { preview: source.preview })}
-        {...(source.point === undefined ? {} : { point: source.point })}
-        {...(source.version === undefined ? {} : { version: source.version })}
-        {...(revision === undefined ? {} : { revision })}
-        {...(onTestDataStale === undefined ? {} : { onTestDataStale })}
-      />
+      {/* Never the blank frame: covered from the first moment until its
+          page runs, or what failed shows in its place. */}
+      <FrameCover cover={startingCover(state, source.preview === true)}>
+        {ended === undefined ? null : (
+          <div {...stylex.props(styles.failure)}>
+            <FrameFailure
+              onFix={fixOf(onFix, ended, path)}
+              onRetry={reload}
+              preview={source.preview === true}
+              state={ended}
+            />
+          </div>
+        )}
+        <Frame
+          app={source.app}
+          hidden={ended !== undefined}
+          location={location}
+          onAsk={setAsked}
+          onGuard={changeGuard}
+          key={attempt}
+          onOpened={setAppName}
+          onState={changeState}
+          title={title}
+          {...(source.preview === undefined ? {} : { preview: source.preview })}
+          {...(source.point === undefined ? {} : { point: source.point })}
+          {...(source.version === undefined ? {} : { version: source.version })}
+          {...(revision === undefined ? {} : { revision })}
+          {...(onTestDataStale === undefined ? {} : { onTestDataStale })}
+        />
+      </FrameCover>
       {bar.kind === "bare" ? <FrameNotice state={state} /> : null}
     </div>
   );
@@ -819,6 +860,7 @@ export const PreviewFrame = ({
   bare = true,
   onEnded,
   onRunning,
+  onReload,
   onTestDataStale,
   onFix,
 }: {
@@ -831,6 +873,8 @@ export const PreviewFrame = ({
   ownPath?: (pathname: string) => boolean;
   bare?: boolean;
   onEnded?: PageEnded;
+  /** Told each time the frame starts again (`FramedPage`). */
+  onReload?: () => void;
   onRunning?: () => void;
   onTestDataStale?: () => void;
   onFix?: FrameFix;
@@ -861,6 +905,7 @@ export const PreviewFrame = ({
       {...(ownPath === undefined ? {} : { ownPath })}
       {...(onEnded === undefined ? {} : { onEnded })}
       {...(onRunning === undefined ? {} : { onRunning })}
+      {...(onReload === undefined ? {} : { onReload })}
       {...(onTestDataStale === undefined ? {} : { onTestDataStale })}
       {...(latest && onFix !== undefined ? { onFix } : {})}
     />

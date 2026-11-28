@@ -49,6 +49,7 @@ export const rpcParamNames: ParamNames = {
     "records": ["app","table","cursor"],
     "report": ["app","at","path","problem"],
     "resetData": ["app"],
+    "started": ["app","start"],
     "tables": ["app"],
     "update": ["app","revision","shown"],
   },

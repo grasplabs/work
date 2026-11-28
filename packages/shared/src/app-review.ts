@@ -7,7 +7,7 @@ import type {
   PreviewUpdate,
 } from "./chat.ts";
 import type { DefinitionPlan } from "./data-model.ts";
-import type { PageProblem } from "./pages.ts";
+import type { PageProblem, PreviewStart } from "./pages.ts";
 import type { Permission } from "./permissions.ts";
 
 // What is App-only about an App's draft (core's app-preview-rpc.ts and
@@ -144,6 +144,11 @@ export interface AppPreviewApi {
     path: string,
     problem: PageProblem
   ) => Promise<void>;
+  /**
+   * Logs how a frame of the preview started (`PreviewStart`), so a slow
+   * open can be told from core's logs.
+   */
+  started: (app: string, start: PreviewStart) => Promise<void>;
   /**
    * Clears the preview's test data, for everyone who builds the App: its
    * next call starts on an empty store. Not for an archived App.

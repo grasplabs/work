@@ -23,7 +23,6 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
-import { Spinner } from "@grasp-os/ui/components/spinner";
 import {
   AppWindowIcon,
   ArchiveIcon,
@@ -69,6 +68,7 @@ import { SettingUp, SettingUpBar, Updating } from "../frame/setting-up.tsx";
 import type { SetUp } from "../frame/setting-up.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { FrameCover, FrameLoading } from "../pages/frame-cover.tsx";
 import { PageFrame } from "../pages/page-frame.tsx";
 import type { FrameFix } from "../pages/page-frame.tsx";
 import { useVersionPushes } from "../pages/use-version-pushes.ts";
@@ -208,13 +208,6 @@ const styles = stylex.create({
     paddingInline: space[6],
     paddingBottom: space[8],
   },
-  // Over the preview: the first build, or a write that broke it mid-turn.
-  over: {
-    position: "absolute",
-    inset: 0,
-    display: "flex",
-    flexDirection: "column",
-  },
   stage: {
     position: "relative",
     display: "flex",
@@ -222,21 +215,6 @@ const styles = stylex.create({
     flexGrow: 1,
     minHeight: 0,
   },
-  // Running unseen while Grasp sets it up, so it is there to fade in.
-  frame: {
-    display: "flex",
-    flexDirection: "column",
-    flexGrow: 1,
-    minHeight: 0,
-    opacity: 1,
-    transitionProperty: {
-      default: "opacity",
-      "@media (prefers-reduced-motion: reduce)": "none",
-    },
-    transitionDuration: duration.ui,
-    transitionTimingFunction: duration.ease,
-  },
-  unseen: { opacity: 0 },
   // Where the App stands gives way to its name before the name is cut:
   // beside the views, the preview's controls, "…" and Share, the name keeps
   // its words in a bar this wide (the docked chat's beside it at 1440).
@@ -690,12 +668,30 @@ const MadeTip = ({ app }: { app: string }) => {
   );
 };
 
-/** In the preview's place while a new App is set up: its first build, or that it isn't ready. */
-const SetUpOver = ({ failed, name }: { failed: boolean; name: string }) => (
-  <div {...stylex.props(styles.over)}>
-    {failed ? <SettingUp failed name={name} /> : <FirstBuild />}
-  </div>
-);
+/**
+ * What covers the preview's frame: a new App's first build while Grasp
+ * sets it up (or that it isn't ready), or, broken mid-turn, that Grasp is
+ * still at it; none otherwise, the frame showing its own state.
+ */
+const coverOf = ({
+  setUp,
+  running,
+  failed,
+  name,
+}: {
+  setUp: SetUp;
+  running: boolean;
+  failed: boolean;
+  name: string;
+}): ReactNode => {
+  if (setUp === "failed") {
+    return <SettingUp failed name={name} />;
+  }
+  if (setUp === "setting-up") {
+    return <FirstBuild />;
+  }
+  return running && failed ? <Updating name={name} /> : null;
+};
 
 /**
  * The main area's preview of the builders' working version: the App as
@@ -737,27 +733,19 @@ const PreviewArea = ({
   const chat = useGlobalChat();
   // The revision at which a call was refused as the test data doesn't fit.
   const [staleAt, setStaleAt] = useState<number>();
-  // While Grasp builds it, a preview that failed (nothing to render yet,
-  // or a write half done) starts again at the draft's next write, so it
-  // shows the moment it works again: `tries` names each start.
-  const [failedAt, setFailedAt] = useState<number>();
-  const [tries, setTries] = useState(0);
+  // Whether its frame failed to start, until it starts again: at the
+  // draft's next write, or a newer one than its start began at, which the
+  // frame starts afresh at once (page-frame.tsx).
+  const [startFailed, setStartFailed] = useState(false);
   const { name } = app;
-  // The draft is read first: the preview follows its revisions.
+  // The draft is read first: the preview follows its revisions. The
+  // frame's own cover, already, so what the person sees doesn't change
+  // as the frame starts under it.
   if (draft === undefined) {
-    return (
-      <div {...stylex.props(styles.place)}>
-        <Spinner aria-label={t`Loading…`} size="lg" />
-      </div>
-    );
+    return <FrameLoading label={t`Preparing the preview`} />;
   }
   const { revision } = draft;
   const ready = setUp === "ready";
-  const building = !ready || running;
-  if (building && failedAt !== undefined && revision > failedAt) {
-    setFailedAt(undefined);
-    setTries(tries + 1);
-  }
   // No page to preview: the App asks what it should do instead.
   if (ready && shown === undefined && hasNoPage(app, draft)) {
     return <NoPageYet app={app.id} running={running} />;
@@ -783,26 +771,29 @@ const PreviewArea = ({
         pointer, a click meant for the page landing on the tip. */}
       {shown === undefined && ready ? <MadeTip app={app.id} /> : null}
       {/* Running unseen while Grasp sets it up, so it is there to fade
-        in once its first version runs; nothing of it reached before. */}
-      <div
-        inert={!ready}
-        {...stylex.props(styles.frame, !ready && styles.unseen)}
+        in once its first version runs; and broken mid-turn, never the
+        error while Grasp still works on it. */}
+      <FrameCover
+        cover={coverOf({ setUp, running, failed: startFailed, name })}
       >
         <DraftPreview
           app={app.id}
           at={at}
           draft={draft}
-          key={tries}
           width={width}
           name={name}
           onEnded={(end) => {
             if (end.status === "failed") {
-              setFailedAt(revision);
+              setStartFailed(true);
               onFrame("failed", revision);
             }
           }}
           onFix={fix}
+          onReload={() => {
+            setStartFailed(false);
+          }}
           onRunning={() => {
+            setStartFailed(false);
             onFrame("running", revision);
           }}
           onTestDataStale={() => {
@@ -810,16 +801,9 @@ const PreviewArea = ({
           }}
           shown={shown}
         />
-      </div>
+      </FrameCover>
       {staleAt === revision && shown === undefined && ready ? (
         <StaleTestData app={app.id} />
-      ) : null}
-      {ready ? null : <SetUpOver failed={setUp === "failed"} name={name} />}
-      {/* Broken mid-turn: never the error while Grasp still works on it. */}
-      {ready && running && failedAt === revision ? (
-        <div {...stylex.props(styles.over)}>
-          <Updating name={name} />
-        </div>
       ) : null}
     </div>
   );

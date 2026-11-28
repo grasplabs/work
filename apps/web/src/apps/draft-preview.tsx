@@ -47,6 +47,7 @@ export const DraftPreview = ({
   shown,
   onEnded,
   onRunning,
+  onReload,
   onTestDataStale,
   onFix,
 }: {
@@ -63,6 +64,8 @@ export const DraftPreview = ({
   onEnded?: PageEnded;
   /** Told each time its pages started and run (`PreviewFrame`). */
   onRunning?: () => void;
+  /** Told each time its frame starts again (`PreviewFrame`). */
+  onReload?: () => void;
   /** Told its test data doesn't fit the draft's data model (`PreviewFrame`). */
   onTestDataStale?: () => void;
   /** Fix with Grasp, where the draft broke the preview (`PreviewFrame`). */
@@ -87,6 +90,7 @@ export const DraftPreview = ({
         {...(draft === undefined ? {} : { revision: draft.revision })}
         {...(onEnded === undefined ? {} : { onEnded })}
         {...(onRunning === undefined ? {} : { onRunning })}
+        {...(onReload === undefined ? {} : { onReload })}
         {...(onTestDataStale === undefined ? {} : { onTestDataStale })}
         {...(onFix === undefined ? {} : { onFix })}
       />

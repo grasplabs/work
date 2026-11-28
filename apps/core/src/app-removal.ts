@@ -24,6 +24,7 @@ import {
 } from "./db/core/schema.ts";
 import { appPreview } from "./durable-objects.ts";
 import { withdrawnWith } from "./packages/approvals.ts";
+import { deletePreviewModules } from "./page-frame.ts";
 import { requireNotStaff } from "./sharing.ts";
 import {
   stopsUnsettled,
@@ -195,6 +196,15 @@ const afterRemoval = async (env: Env, appId: AppId): Promise<void> => {
     await appPreview(env, appId).discard();
   } catch (error) {
     log.warn("app.preview_discard_failed", { appId, ...errorFields(error) });
+  }
+  // Its preview's code, staged for its builders' frames (page-frame.ts).
+  try {
+    await deletePreviewModules(env, appId);
+  } catch (error) {
+    log.warn("app.preview_modules_delete_failed", {
+      appId,
+      ...errorFields(error),
+    });
   }
   // Its held actions in connect, which nobody can confirm now, go as
   // expired ones do, recorded there. Best effort: confirming one checks

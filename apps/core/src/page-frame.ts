@@ -21,6 +21,8 @@ import {
   pagePeerInterfaces,
 } from "@grasp-os/shared/pages";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { sharedRun } from "@grasp-os/shared/shared-runs";
+import type { SharedRun } from "@grasp-os/shared/shared-runs";
 import { parse } from "es-module-lexer/js";
 import { z } from "zod";
 
@@ -62,8 +64,9 @@ import { pageFramePolicy } from "./security-headers.ts";
 // closes each way:
 //
 // - Another App's build, another version's (an older one, say), or another
-//   viewer's preview: each is its own scope, a hash of exactly its code (a
-//   published build's artifact) or of its viewer and App (a preview's), and
+//   App's preview: each is its own scope, a hash of exactly its code (a
+//   published build's artifact) or of its App (a preview's, which every
+//   builder of the App shares, as they share its one draft), and
 //   a module is served only with core's MAC over its scope, address and
 //   bytes (`stagedMac`), so nothing is ever served under a directory but
 //   what was staged for it. The same code is the same artifact, so a
@@ -154,9 +157,9 @@ export interface FrameCode {
 // modules a build loads (`kitScopeOf`), shared by every build that loads
 // the same set; a build's own, for a published page (its artifact, the
 // hash of exactly its code, so of one version of one App's page) or one
-// version of a draft opened read-only; and a viewer's preview's of an App
-// (`previewFrame`), shared by every frame of it that takes its draft's
-// writes, and every write. A scope's token reads only that scope's
+// version of a draft opened read-only; and an App's preview's
+// (`previewFrame`), shared by every builder's frame of it that takes its
+// draft's writes, and every write. A scope's token reads only that scope's
 // modules: a module is kept under its scope with core's MAC over the
 // scope, its address and its bytes, checked on serve
 // (`pageModuleResponse`), so another scope's address, or bytes moved
@@ -275,23 +278,25 @@ const kitScopeOf = async (kit: Record<string, string>): Promise<string> =>
   `${kitScopePrefix}${await sha256Hex(canonicalJson(["kit", kit]))}`;
 
 /**
- * Where `personId`'s preview of App `app`'s draft is staged, for a frame of
+ * Where App `app`'s preview of its draft is staged, for a frame of
  * `artifact`, a build of the draft: the scope its modules are kept in,
- * and the artifact its frame is staged under. One that takes the draft's
- * writes (`updates`) keeps them in a scope shared by every such frame of
- * it and every write; one that doesn't, a version opened read-only, in
- * one of its own build alone, so its policy's directory holds nothing of
- * the draft's other writes. The build's own artifact is a hash of its
- * code alone, the same for everyone who previews the same code: its
- * frame here names the person, so it is this preview's only.
+ * and the artifact its frame is staged under. The App's, never a
+ * viewer's: every builder previews the one draft, so each build is staged
+ * once, whoever opens it first, and served to every builder from there
+ * (`stageFrame`); only a builder is handed a token for it, at each open
+ * (app-preview-rpc.ts). One that takes the draft's writes (`updates`)
+ * keeps them in a scope shared by every such frame of it and every
+ * write; one that doesn't, a version opened read-only, in one of its own
+ * build alone, so its policy's directory holds nothing of the draft's
+ * other writes. The build's own artifact is a hash of its code alone, the
+ * same for every App with the same code: its frame here names the App.
  */
 export const previewFrame = async (
-  personId: string,
   app: string,
   artifact: string,
   { updates }: { updates: boolean }
 ): Promise<{ scope: string; artifact: string }> => {
-  const shared = await sha256Hex(canonicalJson(["preview", personId, app]));
+  const shared = await sha256Hex(canonicalJson(["preview", app]));
   if (!updates) {
     const own = await sha256Hex(canonicalJson([artifact, shared, "version"]));
     return { scope: own, artifact: own };
@@ -516,6 +521,14 @@ export const frameKeepMs = 30 * day;
  */
 const frameRefreshMs = frameKeepMs / 2;
 
+/**
+ * How old a staged manifest may be and still stand for its modules, so
+ * staging the build again reads nothing else (`stageFrame`): each was kept
+ * no more than `frameRefreshMs` before it, so none is near the sweep's
+ * limit while a frame of it runs.
+ */
+const frameVouchMs = frameRefreshMs / 2;
+
 const framesPrefix = "page-frames/";
 const modulesPrefix = "page-modules/";
 
@@ -624,6 +637,32 @@ const keep = async (
   await env.FILES.put(key, body, { customMetadata: { mac } });
 };
 
+/**
+ * Deletes the modules staged for App `app`'s preview, as its removal does
+ * (app-removal.ts): every write's, in its preview's scope. A frame's
+ * manifest left naming them is refused as it is served (`servedIntegrity`),
+ * and goes with the sweep, as does a version opened read-only, staged in
+ * a scope of its own build.
+ */
+export const deletePreviewModules = async (
+  env: Env,
+  app: string
+): Promise<void> => {
+  const { scope } = await previewFrame(app, "", { updates: true });
+  const prefix = `${modulesPrefix}${scope}/`;
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- page after page
+    const listed = await env.FILES.list({ prefix, limit: 1000 });
+    if (listed.objects.length > 0) {
+      // oxlint-disable-next-line no-await-in-loop -- page after page
+      await env.FILES.delete(listed.objects.map(({ key }) => key));
+    }
+    if (!listed.truncated) {
+      return;
+    }
+  }
+};
+
 /** Keeps `modules` where frames load them, each with core's MAC (`keep`). */
 export const stageModules = async (
   env: Env,
@@ -711,28 +750,17 @@ const servedIntegrity = async (
     : Object.fromEntries(found.filter((entry) => entry !== null));
 };
 
-/**
- * Keeps a build where its frame loads it: its App modules under `scope`
- * (its artifact, or its preview's, `previewFrame`) at their addresses,
- * the kit's under `kitScopeOf` at theirs (`stageModules`), and the build's
- * manifest under its artifact, with core's MAC (checked on serve, as
- * above), each only when not kept so already (`keep`). The modules go
- * first, so a manifest is never there without
- * them; the sweep may still take one (it can't delete only if
- * unchanged), which the frame's document notices, and the next open puts
- * back. Two opens at once both write it, the same bytes. A chat's
- * preview's build is staged as one (`preview`), which only its policy
- * says.
- */
-export const stageFrame = async (
+/** Stages all of a build (`stageFrame`), its manifest last. */
+const stageAll = async (
   env: Env,
   artifact: string,
   code: FrameCode,
   {
     preview = false,
     scope = artifact,
-    now = new Date(),
-  }: { preview?: boolean; scope?: string; now?: Date } = {}
+    now,
+    vouch,
+  }: { preview?: boolean; scope?: string; now: Date; vouch: string }
 ): Promise<void> => {
   const addressed = await Promise.all(
     Object.entries(code.kit).map(async ([name, source]) => ({
@@ -768,14 +796,61 @@ export const stageFrame = async (
   if (encoder.encode(text).byteLength > frameObjectMaxBytes) {
     throw oversizedBuild();
   }
-  await keep(
-    env,
-    frameKey(artifact),
-    text,
-    await stagedMac(env, manifestPurpose, [artifact, text]),
-    now
-  );
+  await env.FILES.put(frameKey(artifact), text, {
+    customMetadata: {
+      mac: await stagedMac(env, manifestPurpose, [artifact, text]),
+      // That it was staged in full under core's key now, read by the next
+      // staging alone: what is served is checked by `mac`.
+      staged: vouch,
+    },
+  });
 };
+
+/** The stagings running now in this isolate, by artifact (`stageFrame`). */
+const stagingsRunning = new Map<string, SharedRun<boolean>>();
+
+/** How long one staging may take before another starts in its place. */
+const stagingMs = 60 * 1000;
+
+/**
+ * Keeps a build where its frame loads it, once (whether it staged it now):
+ * a build whose manifest is kept, recently (`frameVouchMs`), as staged in
+ * full under core's key now, is staged already, and nothing else is read
+ * or hashed. Otherwise its App modules
+ * under `scope` (its artifact, or its preview's, `previewFrame`) at their
+ * addresses, the kit's under `kitScopeOf` at theirs (`stageModules`),
+ * each only when not kept so already (`keep`), and the build's manifest
+ * under its artifact, with core's MAC (checked on serve, as above). The
+ * modules go first, so a manifest is never there without them; the sweep
+ * may still take one (it can't delete only if unchanged), and a module or
+ * manifest not as core staged it is deleted as it is served, which the
+ * frame's document notices: it deletes the manifest, so the next open
+ * stages the build again. One staged under a key since rotated is staged
+ * again in full. Opens of one build at once in this isolate share one
+ * staging (`sharedRun`); in two isolates both write the same bytes. A
+ * chat's preview's build is staged as one (`preview`), which only its
+ * policy says.
+ */
+export const stageFrame = async (
+  env: Env,
+  artifact: string,
+  code: FrameCode,
+  options: { preview?: boolean; scope?: string; now?: Date } = {}
+): Promise<boolean> =>
+  await sharedRun(stagingsRunning, artifact, stagingMs, async () => {
+    const now = options.now ?? new Date();
+    const vouch = await stagedMac(env, manifestPurpose, ["staged", artifact]);
+    const kept = await env.FILES.head(frameKey(artifact));
+    if (
+      kept !== null &&
+      kept.customMetadata?.staged === vouch &&
+      now.getTime() - kept.uploaded.getTime() < frameVouchMs
+    ) {
+      return false;
+    }
+    await stageAll(env, artifact, code, { ...options, now, vouch });
+    return true;
+  });
 
 /** Where the sweep left off: which prefix, and R2's cursor in it. */
 const sweepKey = "page-frames-sweep.json";
@@ -1306,6 +1381,44 @@ if (enforced) {
 parent.postMessage({ type: "${pageFrameReady}", load, supported: enforced }, "*");
 })();`;
 
+/** `value` as an HTML attribute's quoted text. */
+const htmlAttribute = (value: string): string =>
+  value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;");
+
+/**
+ * The document's links that ask for every module of the build at once,
+ * as the document is read, rather than each only once the module
+ * importing it has loaded: a page's tree of imports is many levels deep,
+ * each level a round trip. Each is asked for as its import asks for it,
+ * by the same address, so the import finds it loaded, under the same
+ * policy (`script-src`), checked against the same integrity.
+ */
+const preloadLinks = (
+  modules: readonly { address: string; integrity: string }[]
+): string =>
+  modules
+    .map(
+      ({ address, integrity }) =>
+        `<link rel="modulepreload" href="${htmlAttribute(address)}" integrity="${htmlAttribute(integrity)}" />`
+    )
+    .join("\n    ");
+
+/** The log line of a frame's document served, so a slow open can be told. */
+const logServed = (
+  { preview }: Pick<FrameManifest, "preview">,
+  modules: number,
+  started: number
+): void => {
+  log.info("page_frame.served", {
+    kind: preview ? "preview" : "published",
+    modules,
+    ms: Date.now() - started,
+  });
+};
+
 /**
  * `value` as JSON to put between `<script>` tags: a `<` would let the
  * text end the element, so each is written as the escape JSON reads the
@@ -1389,6 +1502,7 @@ export const pageFrameResponse = async (
   env: Env,
   url: URL
 ): Promise<Response> => {
+  const started = Date.now();
   const artifact = artifactSchema.safeParse(url.searchParams.get("artifact"));
   if (!artifact.success) {
     return refused(404);
@@ -1479,6 +1593,7 @@ export const pageFrameResponse = async (
     [...kit, ...app].map(({ address, integrity: hash }) => [address, hash])
   );
   const importMap = scriptJson({ imports, integrity });
+  const preloads = preloadLinks([...kit, ...app]);
   const page = scriptJson({
     artifact: artifact.data,
     entry: `${appDirectory}${manifest.app[manifest.entry] ?? ""}.js${appQuery}`,
@@ -1504,12 +1619,14 @@ export const pageFrameResponse = async (
     <meta name="color-scheme" content="light dark" />
     <title>Page</title>
     <script type="importmap">${importMap}</script>
+    ${preloads}
     <script type="application/json" id="page">${page}</script>
     <script>${bootstrap}</script>
   </head>
   <body></body>
 </html>
 `;
+  logServed(manifest, kit.length + app.length, started);
   return new Response(html, {
     headers: {
       "content-type": "text/html; charset=utf-8",
