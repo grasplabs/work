@@ -20,6 +20,7 @@ import { CoreConnection } from "./core-connection.ts";
 import type { SessionEnded } from "./core-connection.ts";
 import { tabLink } from "./pages/tab-link.ts";
 import { Route as Shell } from "./routes/_shell.tsx";
+import { coreStandIn } from "./test-core.ts";
 
 // A session that ends elsewhere while a page of the frame is open (signed
 // out on another device, revoked by an admin, removed): core closes the
@@ -73,7 +74,7 @@ const tab = (signedIn: boolean) => {
         whoami: async () => await Promise.resolve(ada),
         onboarding: { behind: async () => await Promise.resolve(true) },
       };
-      const stub = {
+      return coreStandIn({
         authenticate: async () => {
           await Promise.resolve();
           if (gone) {
@@ -81,18 +82,10 @@ const tab = (signedIn: boolean) => {
           }
           return session;
         },
-        ping: async () => await Promise.resolve("pong"),
-        signInOptions: async () => await Promise.resolve([]),
         onRpcBroken: (onBroken: () => void) => {
           drop = onBroken;
         },
-        [Symbol.dispose]: () => {
-          // Nothing to let go of.
-        },
-      };
-      // SAFETY: a stand-in for the parts of core's API the connection uses.
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      return stub as never;
+      }).api;
     },
     watchPage: () => {
       // The page never comes back to the tab in these tests.

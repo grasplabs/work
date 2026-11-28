@@ -1,6 +1,5 @@
 // @vitest-environment happy-dom
 
-import type { CoreApi } from "@grasp-os/shared/rpc";
 import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -14,7 +13,6 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import type { AnyRoute } from "@tanstack/react-router";
-import type { RpcStub } from "capnweb";
 import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
@@ -24,6 +22,7 @@ import { WorkKnowledgeTab } from "../brain/work-knowledge.tsx";
 import { CoreConnection } from "../core-connection.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { coreStandIn } from "../test-core.ts";
 import { wordsOf } from "../test-words.ts";
 import { InFrame } from "./in-frame.ts";
 import {
@@ -381,7 +380,7 @@ const tabOnCore = (attempts: Attempt[], refusal?: string) => {
           },
         },
       };
-      const stub = {
+      return coreStandIn({
         authenticate: async () => {
           await Promise.resolve();
           if (attempt !== "answers") {
@@ -392,15 +391,7 @@ const tabOnCore = (attempts: Attempt[], refusal?: string) => {
         onRpcBroken: (onBroken: () => void) => {
           breaks.push(onBroken);
         },
-        [Symbol.dispose]: () => {
-          // Nothing to let go of.
-        },
-      };
-      // SAFETY: the tab reaches only `authenticate`, `whoami`,
-      // `apps.list`, `brain.work`, `onRpcBroken` and disposal, which this
-      // stand-in has.
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- see SAFETY
-      return stub as unknown as RpcStub<CoreApi>;
+      }).api;
     },
   });
   /** The page comes back online: the tab tries at once, then settles. */

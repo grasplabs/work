@@ -666,7 +666,24 @@ export class CoreConnection {
    */
   #back(): void {
     this.#wake?.();
-    void this.#probe();
+    void this.#probeOrDrop();
+  }
+
+  /**
+   * Looks whether the open connection still answers (`#probe`). A look
+   * that itself fails (the socket couldn't even be asked) finds no socket
+   * that answers: it is let go of as one that broke, and the page
+   * connects again.
+   */
+  async #probeOrDrop(): Promise<void> {
+    const api = this.#live;
+    try {
+      await this.#probe();
+    } catch {
+      if (api !== undefined) {
+        this.#drop(api);
+      }
+    }
   }
 
   /**
