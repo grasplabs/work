@@ -89,7 +89,8 @@ describe("a new admin's own shared destination", () => {
   it("takes a client as it is added, its databases created in the EU, with no click", async () => {
     await sharedRelease();
     // Its first migration fails, so the attempt waits to try again after
-    // its resources, and is ended there: what comes after needs
+    // its resources and its restore point (none, as nothing ran on it
+    // yet), and is ended there: what comes after needs
     // Cloudflare's own dispatch namespace.
     cloudflare.failNext(
       (call) => call.path.endsWith("/query"),
@@ -104,7 +105,7 @@ describe("a new admin's own shared destination", () => {
         .from(clientProvisions)
         .where(eq(clientProvisions.clientId, clientId))
         .get();
-      if (operation?.step !== "resources") {
+      if (operation?.step !== "snapshot") {
         throw new Error("Its attempt hasn't made its resources yet");
       }
     });
