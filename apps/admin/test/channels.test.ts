@@ -668,6 +668,37 @@ describe("release channels", () => {
     });
   });
 
+  it("counts no failure of an organization offboarded since toward a halt", async () => {
+    const release = await placedRelease("feat(core): one failed and left");
+    const [a = "", b = "", gone = "", next = ""] = await waitingClients(
+      "edge",
+      "r-left",
+      4
+    );
+    await releaseToEdge(env, [release]);
+    const rollout = await rolloutOf("edge");
+    if (rollout === null) {
+      throw new Error("Edge has no rollout");
+    }
+    await runOn([a, b], release);
+    await failedOn([gone], rollout);
+    await db
+      .update(clients)
+      .set({ status: "offboarded" })
+      .where(eq(clients.id, gone));
+    // Two more fail: the third counted would be the offboarded one's.
+    const failing = await waitingClients("edge", "r-left-fails", 2);
+    await failedOn(failing, rollout);
+
+    await rolloutPass(env);
+    const after = await rolloutOf("edge");
+
+    expect({
+      status: after?.status,
+      started: await startedOf([next]),
+    }).toStrictEqual({ status: "running", started: 1 });
+  });
+
   it("refuses to promote a release past a channel where its rollout halted, until staff resume it there", async () => {
     const release = await placedRelease("feat(core): halted on edge");
     await releaseToEdge(env, [release]);

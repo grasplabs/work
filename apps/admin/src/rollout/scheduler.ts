@@ -268,10 +268,12 @@ const settled = async (
 /**
  * How many organizations failed on rollout `rolloutId`, platform faults
  * aside, as SQL: what the claim reads, so a failure that lands mid-pass
- * stops the claims after the one that halts it (`isHalting`).
+ * stops the claims after the one that halts it (`isHalting`). Of the
+ * organizations the pass reads, active and placed, as the plan counts
+ * them: one offboarded since never holds a rollout up.
  */
 const failedSql = (rolloutId: string) =>
-  sql`(SELECT COUNT(*) FROM ${clientDeploys} WHERE ${clientDeploys.rolloutId} = ${rolloutId} AND ${clientDeploys.status} = 'failed' AND COALESCE(${clientDeploys.error}, '') NOT IN (SELECT value FROM json_each(${JSON.stringify(platformFaultCodes)})) AND substr(COALESCE(${clientDeploys.error}, ''), 1, ${rateLimitedPrefix.length}) != ${rateLimitedPrefix})`;
+  sql`(SELECT COUNT(*) FROM ${clientDeploys} JOIN ${clients} ON ${clients.id} = ${clientDeploys.clientId} WHERE ${clients.status} = 'active' AND EXISTS (SELECT 1 FROM ${clientPlacements} WHERE ${clientPlacements.clientId} = ${clientDeploys.clientId}) AND ${clientDeploys.rolloutId} = ${rolloutId} AND ${clientDeploys.status} = 'failed' AND COALESCE(${clientDeploys.error}, '') NOT IN (SELECT value FROM json_each(${JSON.stringify(platformFaultCodes)})) AND substr(COALESCE(${clientDeploys.error}, ''), 1, ${rateLimitedPrefix.length}) != ${rateLimitedPrefix})`;
 
 /** A new organization run's id. */
 const newRunId = (): string =>
