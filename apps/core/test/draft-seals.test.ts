@@ -333,6 +333,23 @@ describe("a draft's seal", { timeout: 180_000 }, () => {
     });
   });
 
+  it("goes with its App: the preview's discard deletes every seal of it", async () => {
+    const { app, seal, key } = await notes();
+    await previewOf(app).seal(seal);
+    const before = await readCache(env, key);
+
+    await previewOf(app).discard();
+    const listed = await env.FILES.list({
+      prefix: key.slice(0, key.lastIndexOf("/") + 1),
+    });
+
+    expect({
+      before: before !== undefined,
+      after: await readCache(env, key),
+      listed: listed.objects.length,
+    }).toStrictEqual({ before: true, after: undefined, listed: 0 });
+  });
+
   it("is read back from R2 once the object that made it restarted, sealing nothing", async () => {
     const { app, draft, seal } = await notes();
     const made = await previewOf(app).seal(seal);

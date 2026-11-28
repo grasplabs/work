@@ -64,8 +64,10 @@ import { appCodeAndTestFiles } from "./pages.ts";
 // - Someone who doesn't build the App: nothing here reads who asks. Every
 //   way to a sealed draft (draft-runs.ts) checks that they build it first.
 // - What a removed App leaves: its preview's discard deletes its seals
-//   (`DraftSeals.forget`); the build cache's sweep deletes any seal 30
-//   days after it was last read, as any entry (pages.ts `sweepBuilds`).
+//   (`DraftSeals.forget`), and only that object writes them, never once it
+//   discarded them: a read never rewrites one. The build cache's sweep
+//   deletes any seal 30 days after it was made (pages.ts `sweepBuilds`),
+//   and the next ask seals it again.
 
 /** What a sealed draft's key and entry are made of; another is a miss. */
 const draftSealFormat = 1;
@@ -124,15 +126,19 @@ export const sealOfSource = (
   definition,
 });
 
-/**
- * Where `seal` is kept: the hash of everything that decides it (see the
- * header), so any change to one of them is another key.
- */
-export const draftSealKey = async (
-  env: Pick<Env, "DB" | "CF_VERSION_METADATA">,
-  seal: DraftSeal
+/** The graph of App `app`'s current package approval, if any (`latestApproval`). */
+const approvalOf = async (
+  env: Pick<Env, "DB">,
+  app: AppId
+): Promise<string | null> =>
+  (await latestApproval(env, { type: "app", id: app })) ?? null;
+
+/** `draftSealKey`, with the App's approved packages as given. */
+const keyOf = async (
+  env: Pick<Env, "CF_VERSION_METADATA">,
+  seal: DraftSeal,
+  packages: string | null
 ): Promise<string> => {
-  const packages = await latestApproval(env, { type: "app", id: seal.app });
   const parts = [
     draftSealFormat,
     compilerVersion,
@@ -141,10 +147,19 @@ export const draftSealKey = async (
     seal.version,
     inOrder(seal.files),
     definitionText(seal.definition),
-    packages ?? null,
+    packages,
   ];
   return `${sealsPrefix(seal.app)}${await sha256Hex(JSON.stringify(parts))}.json`;
 };
+
+/**
+ * Where `seal` is kept: the hash of everything that decides it (see the
+ * header), so any change to one of them is another key.
+ */
+export const draftSealKey = async (
+  env: Pick<Env, "DB" | "CF_VERSION_METADATA">,
+  seal: DraftSeal
+): Promise<string> => await keyOf(env, seal, await approvalOf(env, seal.app));
 
 /** A sealed draft as its entry holds it: the manifest, and each artifact's text by hash. */
 const entrySchema = z.strictObject({
@@ -153,6 +168,26 @@ const entrySchema = z.strictObject({
   manifestHash: z.string(),
   artifacts: z.record(z.string(), z.string()),
 });
+
+/** What a sealed entry's manifest is read for: its artifacts' paths. */
+const manifestPathsSchema = z.object({
+  artifacts: z.array(z.object({ path: z.string() })),
+});
+
+/**
+ * Whether the entry `text` bundles no approved packages but those of
+ * graph `packages`: its builds read the App's approval themselves, which
+ * may change while they run.
+ */
+const bundlesOnly = (text: string, packages: string | null): boolean => {
+  const { manifest } = entrySchema.parse(JSON.parse(text));
+  const { artifacts } = manifestPathsSchema.parse(JSON.parse(manifest));
+  return graphsOfModules(
+    artifacts.flatMap(({ path }) =>
+      path.startsWith("modules/") ? [path.slice("modules/".length)] : []
+    )
+  ).every((graph) => graph === packages);
+};
 
 const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 const encoder = new TextEncoder();
@@ -228,7 +263,8 @@ export const keptRelease = async (
   key: string,
   seal: Pick<DraftSeal, "app" | "version">
 ): Promise<{ text: string; release: Release } | undefined> => {
-  const text = await readCache(env, key);
+  // Never rewritten by a read: only the App's preview object writes it.
+  const text = await readCache(env, key, { refresh: false });
   if (text === undefined) {
     return undefined;
   }
@@ -292,7 +328,8 @@ export class DraftSeals {
 
   /** The entry of `seal`, kept or made now (see above). */
   async seal(env: Env, seal: DraftSeal): Promise<string> {
-    const key = await draftSealKey(env, seal);
+    const packages = await approvalOf(env, seal.app);
+    const key = await keyOf(env, seal, packages);
     const now = Date.now();
     for (const [failedKey, { until }] of this.#failed) {
       if (until <= now) {
@@ -303,7 +340,8 @@ export class DraftSeals {
     if (failed !== undefined) {
       throw failed.error;
     }
-    const running = this.#running.get(key) ?? this.#start(env, key, seal);
+    const running =
+      this.#running.get(key) ?? this.#start(env, key, seal, packages);
     return await running;
   }
 
@@ -389,7 +427,13 @@ export class DraftSeals {
   }
 
   /** Starts the seal of `seal` under `key`, sharing it until it settles. */
-  async #start(env: Env, key: string, seal: DraftSeal): Promise<string> {
+  async #start(
+    env: Env,
+    key: string,
+    seal: DraftSeal,
+    /** The approved packages `key` names. */
+    packages: string | null
+  ): Promise<string> {
     const work = (async (): Promise<string> => {
       const started = Date.now();
       try {
@@ -403,6 +447,17 @@ export class DraftSeals {
         let text: string;
         try {
           text = await sealedEntry(env, seal);
+          // Sealed while the App's approval changed and changed back: its
+          // builds bundled another's packages than the key names. Sealed
+          // again, once.
+          if (!bundlesOnly(text, packages)) {
+            text = await sealedEntry(env, seal);
+          }
+          if (!bundlesOnly(text, packages)) {
+            throw new Error(
+              "The App's approved packages kept changing while its draft was sealed."
+            );
+          }
         } catch (error) {
           const own =
             isExpectedError(error) && draftSealFailures.has(error.code);
@@ -418,9 +473,7 @@ export class DraftSeals {
           });
           throw error;
         }
-        // Kept only under the key of what it read: an approval that
-        // landed while it built is another key, which the next ask seals.
-        if ((await draftSealKey(env, seal)) === key && !this.#discarded) {
+        if (!this.#discarded) {
           await writeCache(env, key, text);
           this.#kept(key);
         }
