@@ -12,9 +12,9 @@
 //                registered a rollback. A rollback that ran is a step too,
 //                of type `rollback`, under its step's name and count
 //   attempts     each attempt at a `do` step, by generation: its timeout's
-//                absolute deadline, how it ended (no end: cut off before
-//                its outcome was journaled), and when a failed one's retry
-//                is due
+//                absolute deadline, how it ended (no end: still out, or
+//                cut off and not yet found so), and when a failed one's
+//                retry is due
 //   events       the inbox: each event the run accepted, in order, and the
 //                wait that took it
 //   history      what observers are shown: one row per change of the
@@ -335,11 +335,14 @@ export interface StepRow extends Record<string, SqlStorageValue> {
  * How an attempt ended. `succeeded` / `failed`: its outcome is journaled
  * (a failure with a retry left has its `retry_at`). `timed_out`: it ran
  * past its deadline and failed as it did; whatever it answers later is
- * ignored. `superseded`: its activation was over (a later generation took
- * over) or a later attempt had the step when it came back, and what it
- * came back with was ignored. One still the step's latest counts as cut
- * off: the next activation to reach the step ends it as such, over this
- * (activation.ts).
+ * ignored. `superseded`: cut off, its activation over before it journaled
+ * an outcome (the process died, the object was evicted, or a later
+ * generation took over), and anything it came back with ignored: written
+ * by its own activation as its answer or timeout came back, or, for one
+ * with no end, in the write that claims the step's next attempt
+ * (activation.ts, `#endCutOffIn`). One whose own activation saw
+ * it run past its deadline is judged timed out, over this; every other
+ * stays `superseded`, a cut-off, which spends none of the step's retries.
  */
 export type AttemptEnd = "succeeded" | "failed" | "timed_out" | "superseded";
 
@@ -762,6 +765,25 @@ export const readAttempt = (
       attempt
     )
     .toArray()[0];
+
+/**
+ * How the attempts at the step `ordinal` before attempt `before` ended:
+ * how many failed or timed out, which the step's retries count, and how
+ * many were cut off (`superseded`), which `maxCutOffs` bounds
+ * (activation.ts).
+ */
+export const readAttemptEnds = (
+  sql: SqlStorage,
+  ordinal: number,
+  before: number
+): { failed: number; cutOff: number } =>
+  sql
+    .exec<{ failed: number; cutOff: number }>(
+      "SELECT COUNT(*) FILTER (WHERE ended IN ('failed', 'timed_out')) AS failed, COUNT(*) FILTER (WHERE ended = 'superseded') AS cutOff FROM attempts WHERE ordinal = ? AND attempt < ?",
+      ordinal,
+      before
+    )
+    .one();
 
 /**
  * What holds a `do` step's attempt while it may still act: the generation

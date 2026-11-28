@@ -56,12 +56,25 @@ export interface WorkflowStepContext<
    * attempt was cut off before its outcome was journaled (the process
    * died, or the object was evicted or superseded). Every attempt has its
    * own number, and only the step's latest attempt can journal an outcome:
-   * one that timed out, or was cut off, can't answer for the step. Every
-   * attempt counts against the step's retries, a cut-off one too: one
-   * found past its deadline timed out and waits its backoff, one cut off
-   * before is retried at once.
+   * one that timed out, or was cut off, can't answer for the step. Only
+   * failed and timed-out attempts count against the step's retries and
+   * its backoff; one cut off is retried at once, up to `maxCutOffs`
+   * (config.ts) cut-offs, at the last of which the step fails with a
+   * WorkflowInternalError (`workflow.attempts_cut_off`). So a step's
+   * attempt numbers can go past its retry limit plus one. Steps are at
+   * least once unless `retries.limit` is 0: such a step, cut off, fails
+   * with that error without running again. An outside system that takes
+   * `idempotencyKey` (below) as its idempotency key applies an at least
+   * once step's effect once.
    */
   readonly attempt: number;
+  /**
+   * How many of this step's attempts before this one failed or timed out:
+   * what its retries and its backoff count. The others before it were cut
+   * off. Should this attempt fail, it is retried only while this is below
+   * `config.retries.limit`.
+   */
+  readonly failedAttempts: number;
   /**
    * The same for every attempt at this step occurrence, and different for
    * every other step and run. An attempt that timed out or was cut off may
@@ -121,6 +134,8 @@ export type WorkflowBackoff = "constant" | "linear" | "exponential";
  * A retry delay said per failure: called once with the failed attempt's
  * context (no `delay` in its config) and error, and what it says is
  * journaled; it is never asked again for that attempt. It has 5 seconds.
+ * The step's backoff is applied to what it says, counted by failures
+ * only, where `ctx.attempt` counts cut-off attempts too.
  */
 export type WorkflowDelayFunction = (input: {
   ctx: WorkflowStepContext<WorkflowDelayFunction>;
@@ -134,7 +149,12 @@ export type WorkflowDelayFunction = (input: {
  */
 export interface WorkflowStepConfig {
   readonly retries?: {
-    /** Retries after the first attempt. */
+    /**
+     * Retries after the first attempt, for attempts that fail or time
+     * out. An attempt the runtime cut off spends none, and is run again,
+     * unless this is 0: a step with no retries runs at most once, and
+     * fails if cut off (`workflow.attempts_cut_off`).
+     */
     readonly limit: number;
     readonly delay: WorkflowDuration | WorkflowDelayFunction;
     readonly backoff?: WorkflowBackoff;

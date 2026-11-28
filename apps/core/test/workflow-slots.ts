@@ -128,6 +128,7 @@ export const testGeneration = 100;
 export const attemptOf = (step: string, ms = 60_000) => ({
   key: `key-${step}`,
   number: 1,
+  failedAttempts: 0,
   generation: testGeneration,
   deadline: Date.now() + ms,
 });

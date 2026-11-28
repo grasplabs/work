@@ -18,7 +18,8 @@
  * deploys each client whose Workers run something other than its target
  * (src/rollout/reconciler.ts), then resumes provisioning that isn't
  * getting anywhere
- * (src/hosting/reconcile.ts); the watch's own cron reads how Stephen fares
+ * (src/hosting/reconcile.ts). Each minute's run ends by telling staff of
+ * what failed or recovered (src/alerts/alert.ts); the watch's own cron reads how Stephen fares
  * at every client every hour (src/clients/watch.ts).
  * `AdminRuns` holds the admin's runs on Workerflow (src/workflow-runs.ts):
  * applying a client's settings now
@@ -38,6 +39,7 @@ import { withAccess } from "./access.ts";
 import type { Staff } from "./access.ts";
 import { adminHostRedirect } from "./admin-host.ts";
 import { adminMcp, adminMcpPath } from "./admin/mcp.ts";
+import { deliverAlerts } from "./alerts/alert.ts";
 import { watchCron, watchStephen } from "./clients/watch.ts";
 import { adminDatabase } from "./db/act.ts";
 import { withLease } from "./db/lease.ts";
@@ -143,6 +145,9 @@ export default {
       // After the import: a client waiting for a newer release takes it.
       await reconcileProvisioning(env, at);
     }
+    // Last: what failed or recovered in this run, or in a deploy's run
+    // since the last, is told now (src/alerts/alert.ts).
+    await deliverAlerts(env);
   },
   // R2's event notifications of a manifest written under releases/
   // (apps/admin/wrangler.jsonc): each batch, whatever it holds, runs the

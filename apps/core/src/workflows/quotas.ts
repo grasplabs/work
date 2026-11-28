@@ -2,7 +2,7 @@ import { deploymentConfig } from "@grasp-os/shared/config";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { executionErrors, workflowErrors } from "@grasp-os/shared/workflows";
-import { and, eq, gt, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
+import { and, eq, gt, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -32,12 +32,19 @@ import { busyRetryAfterSeconds, slotFree } from "./admission.ts";
 // what closes it:
 //
 // - A retry starting afresh: an attempt is admitted against the lineage's
-//   counters, which only grow, and its number, which the engine journals,
-//   against the attempts a step may have, whatever its code declares; a
-//   step declaring more retries than the platform's is refused (host.ts,
-//   `doOptionsSchema`). The ceiling is per round of a step: one whose side
-//   effect was held runs again, once decided, in a step of core's own
-//   with attempts afresh, every round held to the lineage's active time.
+//   counters, which only grow, and its step's failed attempts, which the
+//   engine journals, against the failures a step may have, whatever its
+//   code declares; a step declaring more retries than the platform's is
+//   refused (host.ts, `doOptionsSchema`). An attempt cut off (its
+//   activation died) fails nothing, so it counts against neither the
+//   step's retries nor that ceiling: the engine fails a step at its 10th
+//   cut-off (`maxCutOffs`), at its first when its retry limit is 0. So a
+//   step runs at most 14 times, 4 failures and 9 cut-offs before the
+//   attempt that ends it, and every attempt that runs is held to the
+//   lineage's active time and host calls. The ceiling is per round of a
+//   step: one whose side effect was held runs again, once decided, in a
+//   step of core's own with attempts afresh, every round held to the
+//   lineage's active time.
 // - A restart or a new activation starting afresh: nothing is counted in
 //   memory. An activation that runs an attempt again is admitted again:
 //   the attempt runs, and uses time, again.
@@ -457,6 +464,13 @@ export interface QuotaAttempt {
   /** Its number, from 1, as the engine counts the step's attempts. */
   number: number;
   /**
+   * Its step's attempts before it that failed, as the engine journals
+   * them (`ctx.failedAttempts`): what the attempts a step may have count.
+   * One cut off (its activation died) isn't counted: the engine bounds
+   * those itself (workerflow's `maxCutOffs`).
+   */
+  failedAttempts: number;
+  /**
    * Its step's place among the run's steps (host.ts, `countedStep`): one
    * past the policy's steps is refused, whatever limit the run's
    * activation counted by.
@@ -485,15 +499,11 @@ export interface QuotaAttempt {
  * settles it, once its code has returned.
  */
 export interface AttemptAdmission {
-  /** The attempts the quota limits admit at the step: none after this many. */
-  attemptsAllowed: number;
   /**
-   * The attempts of the step the lineage admitted, this one included: the
-   * attempts that ran, by their engine number, however many the engine
-   * numbered in between that core cut off unadmitted (host.ts).
-   * Absent where nothing admits attempts: count the engine's number then.
+   * The failed attempts the quota limits allow at the step: none is
+   * admitted after this many.
    */
-  ran?: number;
+  attemptsAllowed: number;
   /**
    * Admits one host call of the attempt against its lineage's
    * (`hostCallsOf`), throwing the refusal.
@@ -880,30 +890,6 @@ const outOfHostCalls = (
   limits: QuotaLimits
 ): boolean => attempt.collecting !== true && made >= limits.lineageHostCalls;
 
-/**
- * The attempts of `attempt`'s step run `run`'s lineage admitted before it:
- * the step's attempts that ran, each once, whichever activations admitted
- * it, `attempt` itself not counted (one admitted again is the same one).
- */
-const ranBefore = async (
-  env: QuotaEnv,
-  run: string,
-  attempt: QuotaAttempt
-): Promise<number> => {
-  const held = runLineageAttempts;
-  const [row] = await drizzle(env.DB)
-    .select({ ran: sql<number>`count(DISTINCT ${held.attempt})` })
-    .from(held)
-    .where(
-      and(
-        eq(held.runId, run),
-        eq(held.stepKey, attempt.key),
-        ne(held.attempt, attempt.number)
-      )
-    );
-  return row?.ran ?? 0;
-};
-
 /** `admitAttempt` under `limits`, its place in the queue kept on a refusal. */
 const admitAttemptUnder = async (
   env: QuotaEnv,
@@ -917,10 +903,13 @@ const admitAttemptUnder = async (
   if (attempt.ordinal !== undefined && attempt.ordinal > limits.workflowSteps) {
     throw limitReached("steps", limits);
   }
-  // Counted by the attempts that ran (`ran`), never by the engine's
-  // numbers: one core cut off unadmitted ran nothing (GRA-1097).
-  const ran = await ranBefore(env, owner.run, attempt);
-  if (ran + 1 > limits.workflowAttemptsPerStep) {
+  // Counted by the step's failed attempts, as the engine counts its
+  // retries, never by the attempt's number: an attempt cut off (its
+  // activation died) failed nothing of its own. Each that ran still took
+  // its receipt below, and its time and host calls count against the
+  // lineage as any other's; the engine bounds cut-offs at `maxCutOffs`
+  // (10) a step.
+  if (attempt.failedAttempts >= limits.workflowAttemptsPerStep) {
     throw workflowErrors.create("workflow.too_many_attempts", {
       max: limits.workflowAttemptsPerStep,
     });
@@ -1043,7 +1032,6 @@ const admitAttemptUnder = async (
     const hostCalls = hostCallsOf(env, root, identity);
     return {
       attemptsAllowed: limits.workflowAttemptsPerStep,
-      ran: ran + 1,
       hostCall: hostCalls.take,
       settle: async (itRan = true) => {
         await settleAttempt(

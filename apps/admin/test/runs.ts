@@ -123,8 +123,10 @@ export const deliverAlarm = async (
 
 /**
  * Times out the attempt run `id` has out, as if its timeout had passed:
- * its deadline moved to now and its alarm delivered, so the engine ends
- * it as timed out; then its retry made due at once, and delivered
+ * journaled as its own activation journals a timeout that came once it
+ * was no longer current (its deadline passed, the attempt `superseded`),
+ * and its alarm delivered, so the engine ends it as timed out rather
+ * than cut off; then its retry made due at once, and delivered
  * (`retried`). The attempt itself goes on wherever it is, as one that
  * timed out does.
  */
@@ -135,8 +137,8 @@ export const timeOutAttempt = async (
   const stub = runObject(workflow, id);
   await runInDurableObject(stub, (_object, state) => {
     state.storage.sql.exec(
-      "UPDATE attempts SET deadline = ? WHERE ended_at IS NULL",
-      Date.now() - 1
+      "UPDATE attempts SET deadline = ?1, ended_at = ?1, ended = 'superseded' WHERE ended_at IS NULL",
+      Date.now()
     );
   });
   await deliverAlarm(workflow, id);

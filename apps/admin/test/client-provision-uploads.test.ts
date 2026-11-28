@@ -1244,7 +1244,7 @@ describe("provisioning a placed client", () => {
     expect(secretsOn(connect).has("STRAY_KEY")).toBeFalsy();
   });
 
-  it("lets a deploy's busy Durable Objects finish on their code, in every upload of core and connect, a rotation's again too", async () => {
+  it("lets a deploy's busy Durable Objects finish on their code, and a long-lived connection make its subrequests, in every upload of core and connect, a rotation's again too", async () => {
     const manifest = await importRelease();
     const { account, clientId, held } = await setUp(manifest);
     await expect(failing(held, unbound)).resolves.toMatchObject({
@@ -1261,10 +1261,16 @@ describe("provisioning a placed client", () => {
     const { core, connect } = await scriptsOf(clientId);
     const strategiesOf = (script: string) =>
       (account.namespaces.get(namespace)?.get(script)?.versions ?? []).map(
-        ({ metadata }) => metadata.code_update_strategy
+        ({ metadata }) => ({
+          codeUpdate: metadata.code_update_strategy,
+          limits: metadata.limits,
+        })
       );
 
-    const deferred = { mode: "deferred", max_delay: 900 };
+    const deferred = {
+      codeUpdate: { mode: "deferred", max_delay: 900 },
+      limits: { subrequests: 1_000_000 },
+    };
     expect({
       core: strategiesOf(core),
       connect: strategiesOf(connect),

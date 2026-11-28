@@ -78,10 +78,11 @@ export const discrepancies = {
   "idempotency-key": {
     family: "step-context",
     verdict: "decided",
-    workerflow: "a step's context carries an idempotencyKey",
-    reference: "no idempotencyKey",
+    workerflow:
+      "a step's context carries an idempotencyKey, and its failedAttempts",
+    reference: "neither",
     resolution:
-      "additive: effects are at least once, and the key lets a receiver apply one once (contracts.ts)",
+      "additive: effects are at least once, and the key lets a receiver apply one once; an attempt cut off spends no retry, so failedAttempts, not attempt, says which retry it is (contracts.ts)",
   },
   "attempt-timeout-name": {
     family: "retry-policy",

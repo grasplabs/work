@@ -10,6 +10,8 @@ export interface Effect {
   label: string;
   key: string;
   attempt: number;
+  /** For a step's effect: its attempt's `failedAttempts`. */
+  failedAttempts?: number;
   /** What the outside system answered with. */
   receipt: string;
   /** When it arrived. */
@@ -19,6 +21,8 @@ export interface Effect {
   /** For an undoing: what the rollback was given of its step. */
   undoing?: {
     stepKey: string;
+    /** Its step's `ctx.failedAttempts`. */
+    failedAttempts: number;
     step: { name: string; count: number };
     output: unknown;
     error: { name: string; message: string };
@@ -114,6 +118,7 @@ export const effect = async (
     label,
     key: context.idempotencyKey,
     attempt: context.attempt,
+    failedAttempts: context.failedAttempts,
     receipt,
     at: Date.now(),
     order: tick(),
@@ -207,6 +212,7 @@ export const undone = async (
     at: Date.now(),
     undoing: {
       stepKey: context.ctx.idempotencyKey,
+      failedAttempts: context.ctx.failedAttempts,
       step: { ...context.ctx.step },
       output: context.output,
       error: { name: context.error.name, message: context.error.message },

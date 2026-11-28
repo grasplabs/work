@@ -545,7 +545,11 @@ export const retryingEngine = (
         tries.set(key, attempt);
         try {
           // oxlint-disable-next-line no-await-in-loop -- one attempt at a time
-          const value = await fn({ attempt, idempotencyKey: key });
+          const value = await fn({
+            attempt,
+            failedAttempts: attempt - 1,
+            idempotencyKey: key,
+          });
           if (timesOut(attempt)) {
             const timedOut = new Error("Execution timed out");
             timedOut.name = "WorkflowTimeoutError";

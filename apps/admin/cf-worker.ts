@@ -18,10 +18,15 @@
  *   `DeployInputs`), leaving out bindings to optional secrets the store
  *   doesn't have yet, and stopping on a required one, and leaving out the
  *   consumer of a queue the account doesn't have yet;
+ * - passes the Durable Objects' `code_update_strategy` as upload metadata,
+ *   cf's `unsafe.metadata`, as cf's config has no field of its own for it
+ *   and its deploy takes the strategy from there;
  * - stops a deploy whose stage sets no Access application in its vars
  *   (`CF_ACCESS_AUD`, `CF_ACCESS_ISS`): every request would be refused.
  *
  * Pure: the deploy (deploy-platform) passes what it looked up in `inputs`.
+ * The alert mail (`ALERTS_MAIL`) is bound only once the deploy passes who
+ * it's from and the one staff mailbox it goes to, and to those alone.
  */
 import { bindings, exports, triggers } from "cf/config";
 import type { WorkerConfig } from "cf/config";
@@ -39,6 +44,13 @@ export interface DeployInputs {
   STORED_SECRETS?: string;
   /** The names of the account's queues, comma-separated. */
   QUEUES?: string;
+  /**
+   * Who the admin's alert mail is from (an address on a domain onboarded
+   * to Cloudflare's Email Sending) and the one staff mailbox it goes to,
+   * from the stage's 1Password Environment: kept out of this public repo.
+   */
+  ALERTS_MAIL_FROM?: string;
+  ALERTS_MAIL_TO?: string;
 }
 
 /** The vars without which the admin refuses every request (src/access.ts). */
@@ -243,6 +255,28 @@ const secretBindings = (config: Json, inputs: DeployInputs): Env => {
   return env;
 };
 
+/**
+ * The alert mail's binding (src/alerts/senders.ts), once the deploy passes
+ * who it's from and the one staff mailbox it goes to: it may send from
+ * that address and to that mailbox alone, which the Worker reads as
+ * `ALERTS_MAIL_FROM` and `ALERTS_MAIL_TO`. Without both, no binding: the
+ * mail channel says it isn't set up.
+ */
+const mailBindings = (inputs: DeployInputs): Env => {
+  const from = inputs.ALERTS_MAIL_FROM ?? "";
+  const to = inputs.ALERTS_MAIL_TO ?? "";
+  return from === "" || to === ""
+    ? {}
+    : {
+        ALERTS_MAIL: bindings.sendEmail({
+          destinationAddress: to,
+          allowedSenderAddresses: [from],
+        }),
+        ALERTS_MAIL_FROM: bindings.text(from),
+        ALERTS_MAIL_TO: bindings.text(to),
+      };
+};
+
 /** Where it answers: its Custom Domains, and its other routes. */
 const addresses = (
   config: Json
@@ -330,6 +364,7 @@ export const cfWorker = (
     );
   }
   const observability = objectOf(config.observability);
+  const codeUpdate = objectOf(config.durable_objects).code_update_strategy;
   const classes = classBindings(config, name);
   const { domains, routes } = addresses(config);
   return {
@@ -358,10 +393,14 @@ export const cfWorker = (
     ...(objectOf(config.limits).cpu_ms === undefined
       ? {}
       : { limits: { cpuMs: Number(objectOf(config.limits).cpu_ms) } }),
+    ...(codeUpdate === undefined
+      ? {}
+      : { unsafe: { metadata: { code_update_strategy: codeUpdate } } }),
     env: {
       ...textBindings(config),
       ...storageBindings(config, inputs),
       ...secretBindings(config, inputs),
+      ...mailBindings(inputs),
       ...classes.env,
     },
     exports: classes.exports,

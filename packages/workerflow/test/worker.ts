@@ -199,17 +199,32 @@ const redeployed = (): WorkflowDefinition => {
 export const definitions: Record<string, WorkflowDefinition> = {
   // Steps that register rollbacks, and one that doesn't. With `wait`, the
   // run then waits for a "confirm" event; with `fail`, a last step fails,
-  // uncaught, after its effect. Each rollback undoes its step outside.
+  // uncaught, after its effect; with `flakyReserve`, the first step's
+  // first attempt fails, and it has one retry. Each rollback undoes its
+  // step outside.
   compensated: {
     run: async (event, step) => {
       const { instanceId, payload } = event;
       const undo = (label: string): WorkflowStepRollbackOptions =>
         undoing(instanceId, payload, label, step);
-      const reserve = await step.do(
-        "reserve",
-        async (context) => await effect(instanceId, "reserve", context),
-        undo("reserve")
-      );
+      const flakyReserve = paramOf(payload, "flakyReserve") === true;
+      const reserving = async (
+        context: WorkflowStepContext
+      ): Promise<string> => {
+        const receipt = await effect(instanceId, "reserve", context);
+        if (flakyReserve && context.attempt === 1) {
+          throw namedError("FlakyError", "reserving failed once");
+        }
+        return receipt;
+      };
+      const reserve = flakyReserve
+        ? await step.do(
+            "reserve",
+            { retries: { limit: 1, delay: 0 } },
+            reserving,
+            undo("reserve")
+          )
+        : await step.do("reserve", reserving, undo("reserve"));
       const charge = await step.do(
         "charge",
         once,
@@ -540,7 +555,8 @@ export const definitions: Record<string, WorkflowDefinition> = {
     },
   },
   // A step whose retry delay a function says: what the params' `delay`
-  // holds, or a throw for "throw".
+  // holds, or a throw for "throw"; backed off as the params' `backoff`
+  // says ("exponential"), else constant.
   "dynamic-delay": {
     run: async (event, step) => {
       const { instanceId, payload } = event;
@@ -551,7 +567,10 @@ export const definitions: Record<string, WorkflowDefinition> = {
           {
             retries: {
               limit: 3,
-              backoff: "constant",
+              backoff:
+                paramOf(payload, "backoff") === "exponential"
+                  ? "exponential"
+                  : "constant",
               delay: async ({ ctx, error }) => {
                 witness(instanceId, `asked-${ctx.attempt}-${error.name}`);
                 if (said === "throw") {

@@ -17,6 +17,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
+import { alertChannelIds } from "../alerts/alert-channels.ts";
 import { channelIds } from "../rollout/channel-ids.ts";
 
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
@@ -120,7 +121,7 @@ export const channels = sqliteTable("channels", {
  * the reconciler's.
  */
 export const leases = sqliteTable("reconciler_lease", {
-  /** The lease: `reconciler` (src/rollout/reconciler.ts) or `releases` (src/releases/import.ts). */
+  /** The lease: `reconciler` (src/rollout/reconciler.ts), `releases` (src/releases/import.ts) or `alerts` (src/alerts/alert.ts). */
   id: text().primaryKey(),
   /** The run holding it: a random id of its own. */
   holder: text().notNull(),
@@ -713,4 +714,37 @@ export const clientWatch = sqliteTable("client_watch", {
   readAt: timestamp("read_at").notNull(),
   /** `WatchedSignals` (src/clients/watch.ts), as JSON. */
   signals: text().notNull(),
+});
+
+/**
+ * Whether each alert channel is on (src/alerts/alert.ts), as staff set it
+ * on Platform's Maintenance page: one without a row is off. How it got
+ * there is in the audit log (`alerts.on`, `alerts.off`).
+ */
+export const alertChannels = sqliteTable("alert_channels", {
+  channel: text({ enum: alertChannelIds }).primaryKey(),
+  on: integer({ mode: "boolean" }).notNull(),
+});
+
+/**
+ * What alerts staff while it fails, one row a thing (src/alerts/alert.ts):
+ * whether it fails now, the event that last changed that, the channels
+ * still to tell of the change, and those its failure reached. A change is
+ * told once; the same state again changes nothing, so the every-minute
+ * cron never repeats it. Gone once it recovered and every channel its
+ * failure reached was told, or at once when its failure reached none.
+ */
+export const alerts = sqliteTable("alerts", {
+  /** What it is about, such as `import:<release>` or `deploy:<client>`. */
+  key: text().primaryKey(),
+  failing: integer({ mode: "boolean" }).notNull(),
+  /** `AlertEvent` (src/alerts/alert.ts), as JSON: identifiers and a code only. */
+  event: text().notNull(),
+  changedAt: timestamp("changed_at").notNull(),
+  /** The channels still to tell, as a JSON array, until each took it or the attempts ran out. */
+  pending: text().notNull(),
+  /** Delivery passes that tried since the change. */
+  attempts: integer().notNull(),
+  /** The channels that took its failure, as a JSON array: those its recovery goes to. */
+  told: text().notNull(),
 });

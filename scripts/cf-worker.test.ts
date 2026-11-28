@@ -231,6 +231,43 @@ describe("the admin's Worker for cf", () => {
     });
   });
 
+  it("binds the alert mail only once the deploy passes who it's from and its one mailbox, to those alone", () => {
+    const mail = {
+      ALERTS_MAIL_FROM: "alerts@mail.grasp.test",
+      ALERTS_MAIL_TO: "ops@grasp.test",
+    };
+    const configured = cfWorker(wranglerText, "staging", {
+      ...deployed,
+      ...mail,
+    });
+    expect({
+      binding: bindingOf(configured, "ALERTS_MAIL"),
+      from: bindingOf(configured, "ALERTS_MAIL_FROM")?.value,
+      to: bindingOf(configured, "ALERTS_MAIL_TO")?.value,
+      onlyFrom: bindingOf(
+        cfWorker(wranglerText, "staging", {
+          ...deployed,
+          ALERTS_MAIL_FROM: mail.ALERTS_MAIL_FROM,
+        }),
+        "ALERTS_MAIL"
+      ),
+      unset: bindingOf(
+        cfWorker(wranglerText, "production", deployed),
+        "ALERTS_MAIL"
+      ),
+    }).toStrictEqual({
+      binding: {
+        type: "send-email",
+        destinationAddress: "ops@grasp.test",
+        allowedSenderAddresses: ["alerts@mail.grasp.test"],
+      },
+      from: "alerts@mail.grasp.test",
+      to: "ops@grasp.test",
+      onlyFrom: undefined,
+      unset: undefined,
+    });
+  });
+
   it("consumes each stage's release manifests' queue once the account has it, and keeps the CPU limit", () => {
     const queues = "grasp-release-manifests,grasp-release-manifests-staging";
     expect({
@@ -254,6 +291,16 @@ describe("the admin's Worker for cf", () => {
       build: consumer("grasp-release-manifests-staging"),
       limits: { cpuMs: 120_000 },
     });
+  });
+
+  it("defers its runs' code updates in both stages, as upload metadata cf deploys with", () => {
+    const deferred = {
+      metadata: { code_update_strategy: { mode: "deferred", max_delay: 900 } },
+    };
+    expect({
+      production: cfWorker(wranglerText, "production", deployed).unsafe,
+      staging: cfWorker(wranglerText, "staging", deployed).unsafe,
+    }).toStrictEqual({ production: deferred, staging: deferred });
   });
 
   it("takes every setting from the stage's vars in wrangler.jsonc", () => {

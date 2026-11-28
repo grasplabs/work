@@ -60,6 +60,7 @@ const attemptOf = (key: string, ms = 60_000) => ({
   key,
   step: key,
   number: 1,
+  failedAttempts: 0,
   generation: 100,
   deadline: Date.now() + ms,
 });
@@ -198,12 +199,21 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
     });
   });
 
-  it("try a step no more often than its attempts may be tried as the limit is then, counting the attempts that ran", async () => {
+  it("try a step no more often than its failed attempts allow as the limit is then, an attempt cut off not counted", async () => {
     const { owner, end } = await liveLineage(await signedIn("builder"));
-    const attempt = (number: number) => ({ ...attemptOf("step"), number });
-    /** Attempt `number`, admitted and settled as having run. */
-    const ran = async (number: number) => {
-      const admission = await admitAttempt(env, owner, attempt(number));
+    /** Attempt `number` of a step, `failedAttempts` of those before it failed, as the engine tells it. */
+    const attempt = (key: string, number: number, failedAttempts: number) => ({
+      ...attemptOf(key),
+      number,
+      failedAttempts,
+    });
+    /** That attempt, admitted and settled as having run. */
+    const ran = async (key: string, number: number, failedAttempts: number) => {
+      const admission = await admitAttempt(
+        env,
+        owner,
+        attempt(key, number, failedAttempts)
+      );
       await admission.settle();
       return "ok";
     };
@@ -211,23 +221,34 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
     const result = await withQuotas(
       { workflowAttemptsPerStep: 2 },
       async () => ({
-        first: await ran(1),
-        second: await ran(2),
-        third: await outcome(admitAttempt(env, owner, attempt(3))),
+        first: await ran("step", 1, 0),
+        // The first was cut off (its activation died): it failed nothing.
+        afterCutOff: await ran("step", 2, 0),
+        afterFailure: await ran("step", 3, 1),
+        third: await outcome(admitAttempt(env, owner, attempt("step", 4, 2))),
       })
     );
-    // Raised: the step's third may run.
+    // Raised: after a third failure it may run again.
     const raised = await withQuotas(
       { workflowAttemptsPerStep: 3 },
-      async () => await outcome(ran(3))
+      async () => await outcome(ran("step", 4, 2))
     );
+    // At the platform's five, five failures stop a step, however many
+    // attempts were cut off before them.
+    const platforms = {
+      fifth: await outcome(ran("other", 9, 4)),
+      sixth: await outcome(admitAttempt(env, owner, attempt("other", 10, 5))),
+    };
     await end();
 
-    expect({ ...result, raised }).toStrictEqual({
+    expect({ ...result, raised, ...platforms }).toStrictEqual({
       first: "ok",
-      second: "ok",
+      afterCutOff: "ok",
+      afterFailure: "ok",
       third: "workflow.too_many_attempts",
       raised: "ok",
+      fifth: "ok",
+      sixth: "workflow.too_many_attempts",
     });
   });
 

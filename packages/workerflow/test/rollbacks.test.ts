@@ -8,7 +8,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { Workflow } from "../src/binding.ts";
-import { rollbackReplayCapMs } from "../src/config.ts";
+import { maxCutOffs, rollbackReplayCapMs } from "../src/config.ts";
 import type { InstanceStatus } from "../src/contracts.ts";
 import type { WorkflowInstance } from "../src/instance.ts";
 import { defaultLeaseMs, WorkflowRun } from "../src/run.ts";
@@ -97,6 +97,32 @@ describe("a definition that throws", () => {
       new Set(effectsOf(id).map((effect) => effect.key)).size
     ).toStrictEqual(effectsOf(id).length);
     expect(only(id, "undo-ship").undoing).toMatchObject({ output: undefined });
+  });
+
+  it("gives a rollback its step's context as the attempt that succeeded had it, the failure before it counted", async () => {
+    const id = newId();
+    await workflow("compensated").create({
+      id,
+      params: { fail: true, flakyReserve: true },
+    });
+    const status = await over(id);
+
+    expect(status).toMatchObject({ rollback: { status: "complete" } });
+    expect({
+      reserve: effectsOf(id, "reserve").map(({ attempt, failedAttempts }) => [
+        attempt,
+        failedAttempts,
+      ]),
+      undone: only(id, "undo-reserve").undoing?.failedAttempts,
+      chargeUndone: only(id, "undo-charge").undoing?.failedAttempts,
+    }).toStrictEqual({
+      reserve: [
+        [1, 0],
+        [2, 1],
+      ],
+      undone: 1,
+      chargeUndone: 0,
+    });
   });
 
   it("ends its rolling back at the first rollback that fails, which its status shows apart from its error", async () => {
@@ -565,6 +591,48 @@ describe("rolling back", () => {
     ]);
     const [first, second] = effectsOf(id, "undo-charge");
     expect([second?.attempt, second?.key]).toStrictEqual([2, first?.key]);
+  });
+
+  it("ends the rolling back as errored when a rollback is cut off as often as a step may be, running no rollback after it", async () => {
+    const id = newId();
+    const holds = Array.from({ length: maxCutOffs }, (_, index) =>
+      hold(id, "undo-charge", index + 1)
+    );
+    await workflow("compensated").create({ id, params: { fail: true } });
+    // Each attempt at undoing the charge is cut off: another activation
+    // takes the run over, as the watchdog would after a restart.
+    const takeovers: Promise<void>[] = [];
+    for (const held of holds) {
+      // oxlint-disable-next-line no-await-in-loop -- one attempt at a time
+      await held.held;
+      takeovers.push(deliverAlarm("compensated", id));
+    }
+    const status = await over(id);
+    for (const held of holds) {
+      held.release();
+    }
+    await Promise.all(takeovers);
+
+    expect(status).toMatchObject({
+      status: "errored",
+      error: { name: "ShippingError" },
+      rollback: {
+        status: "errored",
+        error: {
+          name: "WorkflowInternalError",
+          message: `The step's attempts were cut off ${maxCutOffs} times before their outcome was journaled (the object running them was restarted or evicted), so it is not tried again`,
+        },
+      },
+    });
+    // Its one retry was never spent: each attempt was cut off.
+    expect(labels(id)).toStrictEqual([
+      "reserve",
+      "charge",
+      "notify",
+      "ship",
+      "undo-ship",
+      ...Array.from({ length: maxCutOffs }, () => "undo-charge"),
+    ]);
   });
 });
 

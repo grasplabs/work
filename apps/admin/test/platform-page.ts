@@ -1,5 +1,6 @@
 import { fetchPlatform } from "../src/admin/platform-data.ts";
 import { fetchReadiness } from "../src/admin/readiness.ts";
+import { fetchAlertChannelsFn } from "../src/alerts/functions.ts";
 import { fetchClientGrid } from "../src/clients/functions.ts";
 import { fetchPlatformSpend } from "../src/platform-ai-functions.ts";
 import { Route as PlatformRoute } from "../src/routes/platform/index.tsx";
@@ -37,10 +38,15 @@ export const maintenancePage = async (
   const caller = { email };
   const rows = await callServerFn(fetchClientGrid, undefined, caller);
   const platform = await callServerFn(fetchPlatform, undefined, caller);
+  const alertChannels = await callServerFn(
+    fetchAlertChannelsFn,
+    undefined,
+    caller
+  );
   return await renderedPage(
     MaintenanceRoute,
     "/platform/maintenance",
     "/platform/maintenance",
-    { rows, platform }
+    { rows, platform, alertChannels }
   );
 };

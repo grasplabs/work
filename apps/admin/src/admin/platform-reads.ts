@@ -17,7 +17,8 @@ import type { ChannelProgress } from "../rollout/progress.ts";
 /**
  * What someone at Grasp does to the platform by hand, as the admin's
  * audit log names it: promoting a release, retrying a channel or a
- * client's deploy, and adding, moving, pinning or rotating a client. The
+ * client's deploy, adding, moving, pinning or rotating a client, and
+ * switching or testing an alert channel. The
  * admin's own jobs (actor `system`) and each deploy's steps aren't "done
  * here".
  */
@@ -36,6 +37,9 @@ export const staffActions = [
   "client.sealed_secret",
   "client.teams_bot",
   "client.staff_window",
+  "alerts.on",
+  "alerts.off",
+  "alerts.test",
 ] as const;
 export type StaffAction = (typeof staffActions)[number];
 

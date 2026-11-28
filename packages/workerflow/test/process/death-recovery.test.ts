@@ -96,7 +96,7 @@ describe("a run on disk-backed workerd", () => {
         { name: "digest", state: "succeeded", attempt: 1 },
       ],
       attempts: [
-        { ordinal: 1, attempt: 1, ended: null },
+        { ordinal: 1, attempt: 1, ended: "superseded" },
         { ordinal: 1, attempt: 2, ended: "succeeded" },
         { ordinal: 2, attempt: 1, ended: "succeeded" },
       ],

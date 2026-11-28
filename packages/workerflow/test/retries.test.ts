@@ -155,6 +155,63 @@ describe("a step that fails", () => {
   );
 
   it.each([
+    [1, [null, 300, null]],
+    [2, [null, 300, 600, null]],
+  ])(
+    "spends none of its limit of %i retries or its backoff on an attempt cut off before it fails",
+    async (limit, delays) => {
+      const id = newId();
+      const first = hold(id, "flaky", 1);
+      await workflow("retrying").create({
+        id,
+        params: {
+          fails: 99,
+          config: { retries: { limit, delay: 300, backoff: "exponential" } },
+        },
+      });
+      await first.held;
+      // Cut off: another activation takes the run over, as after a restart.
+      await deliverAlarm("retrying", id);
+      // The first answers late, ignored, and its alarm handler returns: the
+      // object gets no alarm (the retries') while one still runs.
+      first.release();
+      const status = await ended("retrying", id);
+      await until("the first activation to end", async () => {
+        const journal = await journalOf("retrying", id);
+        return journal.activations[0]?.ended === null ? undefined : journal;
+      });
+
+      const journal = await journalOf("retrying", id);
+      const last = limit + 2;
+      // Its retries and their backoff, as with no cut-off before them.
+      expect(status).toStrictEqual({
+        status: "complete",
+        output: {
+          caught: { name: "FlakyError", message: `attempt ${last} failed` },
+        },
+      });
+      // Each attempt is told the failures before it, the cut-off not one.
+      expect(
+        effectsOf(id, "flaky").map(({ attempt, failedAttempts }) => [
+          attempt,
+          failedAttempts,
+        ])
+      ).toStrictEqual([
+        [1, 0],
+        ...Array.from({ length: limit + 1 }, (_, index) => [index + 2, index]),
+      ]);
+      expect(journal.attempts.map((attempt) => attempt.ended)).toStrictEqual([
+        "superseded",
+        ...Array.from({ length: limit + 1 }, () => "failed"),
+      ]);
+      expect(delaysIn(journal)).toStrictEqual(delays);
+      expect(journal.steps).toMatchObject([
+        { state: "failed", attempt: last, error: flakyError(last) },
+      ]);
+    }
+  );
+
+  it.each([
     ["a NonRetryableError", "non-retryable", "NonRetryableError"],
     [
       "an error whose message starts with NonRetryableError",
@@ -353,6 +410,38 @@ describe("a step's delay function", () => {
       });
     }
   );
+
+  it("backs off what it says by the step's failures, an attempt cut off before them not counted", async () => {
+    const id = newId();
+    const first = hold(id, "flaky", 1);
+    await workflow("dynamic-delay").create({
+      id,
+      params: { delay: 300, backoff: "exponential" },
+    });
+    await first.held;
+    // Cut off: another activation takes the run over, as after a restart.
+    await deliverAlarm("dynamic-delay", id);
+    first.release();
+    const status = await ended("dynamic-delay", id);
+    await until("the first activation to end", async () => {
+      const journal = await journalOf("dynamic-delay", id);
+      return journal.activations[0]?.ended === null ? undefined : journal;
+    });
+
+    const journal = await journalOf("dynamic-delay", id);
+    expect(status).toStrictEqual({
+      status: "complete",
+      output: { caught: { name: "FlakyError", message: "attempt 5 failed" } },
+    });
+    // Asked once per failure, never for the cut-off; 300 ms backed off as
+    // the first, second and third failure, as with no cut-off before them.
+    expect(witnessed(id)).toStrictEqual([
+      "asked-2-FlakyError",
+      "asked-3-FlakyError",
+      "asked-4-FlakyError",
+    ]);
+    expect(delaysIn(journal)).toStrictEqual([null, 300, 600, 1200, null]);
+  });
 });
 
 describe("a callback that runs past its timeout without awaiting", () => {
@@ -514,11 +603,13 @@ describe("an attempt that runs past its timeout", () => {
       status: "complete",
       output: hung[1]?.receipt,
     });
-    // A new attempt number, under the step's one key.
+    // A new attempt number, under the step's one key, told the timeout
+    // before it as a failure.
     expect({
       attempts: hung.map((effect) => effect.attempt),
+      failedAttempts: hung.map((effect) => effect.failedAttempts),
       keys: new Set(hung.map((effect) => effect.key)).size,
-    }).toStrictEqual({ attempts: [1, 2], keys: 1 });
+    }).toStrictEqual({ attempts: [1, 2], failedAttempts: [0, 1], keys: 1 });
     await expect(journalOf("hung", id)).resolves.toMatchObject({
       steps: [{ name: "hung", state: "succeeded", attempt: 2 }],
       attempts: [

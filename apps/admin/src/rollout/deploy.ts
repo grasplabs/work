@@ -23,6 +23,7 @@ import type { WorkflowDefinition } from "@grasp-os/workerflow/contracts";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
+import { alert } from "../alerts/alert.ts";
 import { actIfChanged, adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { clientDeploys } from "../db/schema.ts";
@@ -88,8 +89,8 @@ const failureCodeOf = async (
 
 /**
  * Records run `runId`'s deploy of client `clientId` ended, `error` null
- * when it worked, and gives the client back, audited once: only while the
- * client's deploy is still this run's.
+ * when it worked, and gives the client back, audited once, and alerted:
+ * only while the client's deploy is still this run's.
  */
 export const recordEnd = async (
   db: AdminDatabase,
@@ -100,7 +101,7 @@ export const recordEnd = async (
   }: { clientId: string; runId: string; releaseId: string },
   error: string | null
 ): Promise<void> => {
-  await actIfChanged(
+  const recorded = await actIfChanged(
     db,
     "system",
     db
@@ -132,6 +133,16 @@ export const recordEnd = async (
         },
     [releaseRun(db, clientId, runId)]
   );
+  // A failed deploy alerts staff once, and the next one that works says
+  // it recovered (src/alerts/alert.ts).
+  if (recorded) {
+    await alert(
+      db,
+      error === null
+        ? { kind: "deployed", clientId, releaseId }
+        : { kind: "deploy_failed", clientId, releaseId, code: codeOf(error) }
+    );
+  }
 };
 
 /**

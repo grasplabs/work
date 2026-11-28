@@ -110,6 +110,9 @@ export const eventWords = (
     "client.sealed_secret": `set one of ${company}'s secrets`,
     "client.teams_bot": `changed ${company}'s Teams bot`,
     "client.staff_window": `opened or closed Grasp's staff window at ${company}`,
+    "alerts.on": `switched the alerts to ${target} on`,
+    "alerts.off": `switched the alerts to ${target} off`,
+    "alerts.test": `sent a test alert to ${target}`,
   };
   return `${event.actor} ${what[event.action]}`;
 };

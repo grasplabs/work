@@ -21,6 +21,8 @@ export default defineConfig((ctx) => ({
       ROUTER_HOSTS_ID: process.env.ROUTER_HOSTS_ID,
       STORED_SECRETS: process.env.STORED_SECRETS,
       QUEUES: process.env.QUEUES,
+      ALERTS_MAIL_FROM: process.env.ALERTS_MAIL_FROM,
+      ALERTS_MAIL_TO: process.env.ALERTS_MAIL_TO,
     }
   ),
 }));
