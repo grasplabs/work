@@ -181,10 +181,17 @@ export const sharedRun = async <T>(
   }
 };
 
-/** A turn of `inTurn`: when it is due to end, and, once it did, that it did. */
+/** A turn of `inTurn`. */
 interface Turn {
+  /** When it is due to end, by `Date.now()`: past it, it is taken for abandoned. */
   readonly endsBy: number;
-  outcome?: { readonly value: true };
+  /**
+   * The turn before it, kept while it waits, so that once it gives up the
+   * turns after it wait for that one instead.
+   */
+  before?: Turn;
+  /** How it ended: it ran, or it gave up waiting before its turn came. */
+  ended?: "ran" | "gave up";
 }
 
 /** Work of an isolate's requests that runs one at a time (`inTurn`): its last turn. */
@@ -193,31 +200,90 @@ export interface Turns {
 }
 
 /**
+ * The turn one after `turn` waits for: `turn`, or, past the turns that
+ * gave up, the last one before them that didn't.
+ */
+const waitedFor = (turn: Turn | undefined): Turn | undefined => {
+  let at = turn;
+  while (at?.ended === "gave up") {
+    at = at.before;
+  }
+  return at;
+};
+
+/** Whether `turn` is over: it ran, or its time is up (a cancelled request's never ends). */
+const over = (turn: Turn, now: number): boolean =>
+  turn.ended === "ran" || turn.endsBy <= now;
+
+/**
+ * How many turns of `turns` are waiting or running now: none that ran,
+ * gave up or whose time is up.
+ */
+export const turnsUnderWay = (turns: Turns): number => {
+  const now = Date.now();
+  let count = 0;
+  for (
+    let at = waitedFor(turns.last);
+    at !== undefined && !over(at, now);
+    at = waitedFor(at.before)
+  ) {
+    count += 1;
+  }
+  return count;
+};
+
+/**
  * What `start` answers, started once every earlier turn of `turns` ended,
  * or was taken for abandoned: each turn may take `turnMs` from when the
  * one before it was due to end, as a cancelled request's turn never ends
  * (see above). For work that must never overlap within an isolate, such
- * as reads that each hold a large part of its memory.
+ * as reads that each hold a large part of its memory. With `until`, a turn
+ * that hasn't come by `until.at` gives up with `until.error()`, and the
+ * turns after it wait for the one before it: giving up never lets one
+ * run beside a turn still running.
  */
 export const inTurn = async <T>(
   turns: Turns,
   turnMs: number,
-  start: () => Promise<T>
+  start: () => Promise<T>,
+  until?: { readonly at: number; readonly error: () => Error }
 ): Promise<T> => {
-  const previous = turns.last;
+  const before = waitedFor(turns.last);
   const turn: Turn = {
-    endsBy: Math.max(Date.now(), previous?.endsBy ?? 0) + turnMs,
+    before,
+    endsBy: Math.max(Date.now(), before?.endsBy ?? 0) + turnMs,
   };
   turns.last = turn;
-  try {
-    const left = (previous?.endsBy ?? 0) - Date.now();
-    if (previous !== undefined && left > 0) {
-      // Its outcome is the other request's: only its end matters here.
-      await settledWithin(previous, left);
+  // Its turn comes once the one it waits for is over, on this request's
+  // own timer: never by awaiting another request's promise.
+  let lookMs = lookFirstMs;
+  for (
+    let waited = waitedFor(turn.before);
+    waited !== undefined && !over(waited, Date.now());
+    waited = waitedFor(turn.before)
+  ) {
+    const now = Date.now();
+    if (until !== undefined && until.at <= now) {
+      turn.ended = "gave up";
+      if (turns.last === turn) {
+        turns.last = turn.before;
+      }
+      throw until.error();
     }
+    const left = Math.min(
+      waited.endsBy - now,
+      (until?.at ?? Number.POSITIVE_INFINITY) - now
+    );
+    // One look after the other, each on this request's own timer.
+    // oxlint-disable-next-line no-await-in-loop
+    await pause(Math.min(lookMs, left));
+    lookMs = Math.min(lookMs * 2, lookMostMs);
+  }
+  turn.before = undefined;
+  try {
     return await start();
   } finally {
-    turn.outcome = { value: true };
+    turn.ended = "ran";
     if (turns.last === turn) {
       turns.last = undefined;
     }
