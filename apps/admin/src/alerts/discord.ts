@@ -25,6 +25,7 @@
  * - Nothing else reaches the card: the identifiers, code and name a
  *   message had before, a channel, times, and the admin's own link.
  */
+import "@tanstack/react-start/server-only";
 import { log } from "@grasp-os/shared/log";
 
 import { channelWords } from "../rollout/channel-words.ts";
