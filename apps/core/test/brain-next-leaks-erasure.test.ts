@@ -1,5 +1,4 @@
 import { recallBudgetMax } from "@grasp-os/brain-next/contract";
-import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -32,6 +31,7 @@ import {
   allEmbedded,
   answersOf,
   embeddedThrough,
+  erasureUnfinished,
   markerWord,
   markersIn,
   nearestReadable,
@@ -39,6 +39,7 @@ import {
   surfaces,
   reading,
   findingsOf,
+  whileErasureHeld,
   leave,
   newTeam,
   everyVersionOf,
@@ -71,37 +72,6 @@ import {
 // never added, while it is under way and once it is done.
 
 const idp = mockIdp();
-
-/** The trigger that holds the shared store's erasures (`whileErasureHeld`). */
-const heldErasures = "leaks_test_holds_erasures";
-
-/**
- * Runs `run` while the shared store's erasures are held part-way: an
- * erasure hides what it covers and returns, and every deletion of a
- * version fails, in the erasure's own batch and in each tick's, so what
- * it hid stays stored and hidden (erasure.ts) until a tick after `run`.
- */
-const whileErasureHeld = async (run: () => Promise<void>): Promise<void> => {
-  await runInDurableObject(sharedStore(), (_store, state) => {
-    state.storage.sql.exec(
-      `CREATE TRIGGER IF NOT EXISTS ${heldErasures} BEFORE DELETE ON source_versions
-      BEGIN SELECT RAISE(ABORT, 'held by the test'); END`
-    );
-  });
-  try {
-    await run();
-  } finally {
-    await runInDurableObject(sharedStore(), (_store, state) => {
-      state.storage.sql.exec(`DROP TRIGGER IF EXISTS ${heldErasures}`);
-    });
-  }
-};
-
-/** Whether the shared store has an erasure recorded and not yet done. */
-const erasureUnfinished = async (): Promise<boolean> => {
-  const { erasing } = await sharedStore().workOverview();
-  return erasing > 0;
-};
 
 /**
  * `read` of what an erasure covers (`true`) against `read` of what no one

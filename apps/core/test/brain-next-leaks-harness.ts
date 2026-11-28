@@ -381,9 +381,11 @@ export const settledOwnStores = async (
   for (const person of people) {
     let awake = true;
     for (let run = 0; awake && run < settleAlarmsMost; run += 1) {
+      stopIfEnded();
       // oxlint-disable-next-line no-await-in-loop -- one alarm after another
       awake = await runDurableObjectAlarm(ownStoreOf(person));
     }
+    stopIfEnded();
     // oxlint-disable-next-line no-await-in-loop -- one store at a time
     const { embedding } = await ownStoreOf(person).workOverview();
     const done =
@@ -618,6 +620,39 @@ export const everyVersionOf = (...sources: SourceRef[]) =>
 /** The shared store, as core reaches it. */
 export const sharedStore = () =>
   inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
+
+/** The trigger that holds the shared store's erasures (`whileErasureHeld`). */
+const heldErasures = "leaks_test_holds_erasures";
+
+/**
+ * Runs `run` while the shared store's erasures are held part-way: an
+ * erasure hides what it covers and returns, and every deletion of a
+ * version fails, in the erasure's own batch and in each tick's, so what
+ * it hid stays stored and hidden (erasure.ts) until a tick after `run`.
+ */
+export const whileErasureHeld = async (
+  run: () => Promise<void>
+): Promise<void> => {
+  await runInDurableObject(sharedStore(), (_store, state) => {
+    state.storage.sql.exec(
+      `CREATE TRIGGER IF NOT EXISTS ${heldErasures} BEFORE DELETE ON source_versions
+      BEGIN SELECT RAISE(ABORT, 'held by the test'); END`
+    );
+  });
+  try {
+    await run();
+  } finally {
+    await runInDurableObject(sharedStore(), (_store, state) => {
+      state.storage.sql.exec(`DROP TRIGGER IF EXISTS ${heldErasures}`);
+    });
+  }
+};
+
+/** Whether the shared store has an erasure recorded and not yet done. */
+export const erasureUnfinished = async (): Promise<boolean> => {
+  const { erasing } = await sharedStore().workOverview();
+  return erasing > 0;
+};
 
 /** A source of its own, as an upload names it. */
 export const newSource = (): SourceRef => ({

@@ -36,6 +36,7 @@ import {
   allEmbedded,
   embeddedOf,
   embeddedThrough,
+  erasureUnfinished,
   markerWord,
   surfaces,
   meaningSurfaces,
@@ -46,6 +47,7 @@ import {
   ownedRecall,
   ownedRecallOf,
   recalledByMeaning,
+  whileErasureHeld,
   join,
   leave,
   newTeam,
@@ -772,21 +774,27 @@ describe(
 
       await add(question, { kind: "team", teamId: holdersTeam }, narrowed);
       await leave(leftTeam, reader);
-      await eraseSource(env, {
-        source: erased,
-        readers: theirs,
-        reason: "deleted",
-      });
       const asReader: Probing = {
         ...probing,
         hiddenVersions: everyVersionOf(erased, narrowed),
       };
-      const whileErasing = await findingsOf(
-        "the reader, an erasure under way",
-        asReader,
-        forbidden,
-        { among: ownedRecall, before }
-      );
+      // Erased while its deletion is held part-way: hidden, still stored.
+      let held = false;
+      let whileErasing: Finding[] = [];
+      await whileErasureHeld(async () => {
+        await eraseSource(env, {
+          source: erased,
+          readers: theirs,
+          reason: "deleted",
+        });
+        held = await erasureUnfinished();
+        whileErasing = await findingsOf(
+          "the reader, an erasure under way",
+          asReader,
+          forbidden,
+          { among: ownedRecall, before }
+        );
+      });
       await allEmbedded([reader, holder]);
       const erasedGone = await findingsOf(
         "the reader, the erasure done",
@@ -806,10 +814,12 @@ describe(
           own: whileReadable.hands(nearest.own),
           team: nearest.team.filter(whileReadable.hands).length,
         },
+        held,
         findings: [...whileErasing, ...erasedGone],
       }).toStrictEqual({
         atFirst: { fromOwn: true, own: true, team: recallLimit - 1 },
         whileReadable: { fromOwn: false, own: false, team: 0 },
+        held: true,
         findings: [],
       });
     });
