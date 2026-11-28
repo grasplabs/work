@@ -32,10 +32,11 @@ const publishRunSchema = z.object({
   workflow_ref: z.literal(
     "grasplabs/work/.github/workflows/ci.yml@refs/heads/main"
   ),
-  // The job's own workflow: not a reusable one ci.yml calls.
-  job_workflow_ref: z.literal(
-    "grasplabs/work/.github/workflows/ci.yml@refs/heads/main"
-  ),
+  // The job's own workflow, where GitHub names one: never a reusable
+  // workflow ci.yml calls.
+  job_workflow_ref: z
+    .literal("grasplabs/work/.github/workflows/ci.yml@refs/heads/main")
+    .optional(),
   ref: z.literal("refs/heads/main"),
   event_name: z.literal("push"),
   runner_environment: z.literal("github-hosted"),

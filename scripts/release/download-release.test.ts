@@ -25,6 +25,7 @@ import { buffer, text } from "node:stream/consumers";
 
 import { manifestKey, modelBlobKey } from "@grasp-os/shared/release";
 import {
+  MAX_SIGNATURE_BYTES,
   RELEASE_SIGNATURE_FILE,
   SIGNED_FROM,
   signatureKey,
@@ -347,8 +348,13 @@ describe("promoting a release from staging's bucket to production's", () => {
     });
   });
 
-  it("promotes nothing that isn't signed, even from before signing began, was changed after it was signed, or was signed with a key nobody trusts", async () => {
-    const [unsigned, changed, stranger] = ["26.11.1", "26.12.2", "26.12.3"];
+  it("promotes nothing that isn't signed, even from before signing began, was changed after it was signed, was signed with a key nobody trusts, or whose signature file is too large to be one", async () => {
+    const [unsigned, changed, stranger, oversized] = [
+      "26.11.1",
+      "26.12.2",
+      "26.12.3",
+      "26.12.4",
+    ];
     await putInStaging(unsigned, { signedWith: null });
     const original = Buffer.from(
       JSON.stringify(generateManifest({ ...info, releaseId: changed }, fixture))
@@ -358,9 +364,17 @@ describe("promoting a release from staging's bucket to production's", () => {
       signed: original,
     });
     await putInStaging(stranger, { signedWith: strangerKey });
+    await putInStaging(oversized, { signedWith: null });
+    const oversizedManifest = buckets.get(STAGING)?.get(manifestKey(oversized));
+    buckets
+      .get(STAGING)
+      ?.set(
+        signatureKey(sha256(oversizedManifest) ?? ""),
+        Buffer.alloc(MAX_SIGNATURE_BYTES + 1, "x")
+      );
 
     const outcomes = await Promise.all(
-      [unsigned, changed, stranger].map(async (id) => {
+      [unsigned, changed, stranger, oversized].map(async (id) => {
         try {
           await download(path.join(dir, id), id);
           return "promoted";
@@ -372,13 +386,16 @@ describe("promoting a release from staging's bucket to production's", () => {
 
     expect(
       outcomes.map((outcome) =>
-        ["isn't signed", "doesn't match it", "doesn't trust"].findIndex(
-          (reason) => outcome.includes(reason)
-        )
+        [
+          "isn't signed",
+          "doesn't match it",
+          "doesn't trust",
+          "signature file that isn't one",
+        ].findIndex((reason) => outcome.includes(reason))
       )
-    ).toStrictEqual([0, 1, 2]);
+    ).toStrictEqual([0, 1, 2, 3]);
     expect(
-      [unsigned, changed, stranger].some((id) =>
+      [unsigned, changed, stranger, oversized].some((id) =>
         existsSync(path.join(dir, id, "manifest.json"))
       )
     ).toBeFalsy();

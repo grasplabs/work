@@ -391,9 +391,15 @@ const answeredSigning = async (
     response.writeHead(HTTP_FORBIDDEN).end("Not CI's publish");
     return true;
   }
-  bucket.signed.push(
-    storedManifest.parse(JSON.parse(body.toString())).releaseId
-  );
+  const { releaseId } = storedManifest.parse(JSON.parse(body.toString()));
+  // As the admin does: never an id published already.
+  if (bucket.objects.has(`releases/${releaseId}/manifest.json`)) {
+    response
+      .writeHead(HTTP_CONFLICT)
+      .end(`Release ${releaseId} is published already`);
+    return true;
+  }
+  bucket.signed.push(releaseId);
   response
     .writeHead(HTTP_OK)
     .end(
@@ -884,7 +890,8 @@ describe("publishing a release", () => {
       }).toStrictEqual({
         first: others,
         marker: `${month}2\n`,
-        signed: [`${month}1`, `${month}2`],
+        // The first is published by then: the signer says so.
+        signed: [`${month}2`],
         problem: undefined,
       });
     }

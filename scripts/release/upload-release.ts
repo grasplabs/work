@@ -496,14 +496,18 @@ const writeMarker = async (
  * Publishes the release under the next id of the month (CI's publish):
  * each attempt names its id in the commit's marker (over `etag`, the
  * marker as read before the upload), has the manifest as stamped with it
- * signed (`sign`) and stores the signature, then claims the id by writing
+ * signed (`sign`; one the signer says is published already counts as
+ * claimed by then) and stores the signature, then claims the id by writing
  * the manifest only if absent, and moves on to the next id when another
  * publish has it, its signature left for no manifest.
  */
 const publishWithNextId = async (
   bucket: ReleasesBucket,
   etag: string | undefined,
-  sign: (releaseId: string, manifestBytes: Buffer) => Promise<Buffer>
+  sign: (
+    releaseId: string,
+    manifestBytes: Buffer
+  ) => Promise<Buffer | undefined>
 ): Promise<void> => {
   const now = new Date();
   const taken = new Set(await bucket.listIds(releaseMonthPrefix(now)));
@@ -526,6 +530,17 @@ const publishWithNextId = async (
     markerTag = named.etag;
     // oxlint-disable-next-line no-await-in-loop -- one id at a time, until one is ours
     const signature = await sign(id, stamped.manifestBytes);
+    if (signature === undefined) {
+      // Published since the listing: by an earlier try of this commit, or
+      // another publish, whose id this one leaves.
+      // oxlint-disable-next-line no-await-in-loop -- only when the id was taken
+      if (await isThisCommits(bucket, id)) {
+        console.info(`Published ${published}: release ${id}`);
+        return;
+      }
+      console.info(`Release ${id} is another publish's; trying the next id`);
+      continue;
+    }
     // oxlint-disable-next-line no-await-in-loop -- one id at a time, until one is ours
     await putSignature(bucket, stamped.manifestBytes, signature);
     // The manifest is the claim, only if absent. Found there already, it's

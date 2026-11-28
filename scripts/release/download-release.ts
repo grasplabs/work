@@ -34,6 +34,7 @@ import {
 import type { Bytes } from "@grasp-os/shared/release";
 import { releaseIdSchema } from "@grasp-os/shared/release-id";
 import {
+  MAX_SIGNATURE_BYTES,
   RELEASE_SIGNATURE_FILE,
   releaseSignatureProblem,
   signatureKey,
@@ -92,7 +93,27 @@ if (manifest.releaseId !== releaseId) {
     `${manifestKey(releaseId)} is release ${manifest.releaseId}'s manifest`
   );
 }
-const signature = await read(signatureKey(await sha256OfBytes(manifestBytes)));
+/**
+ * The manifest's signature file, or undefined when there's none; one
+ * larger than a signature file is refused before it's read.
+ */
+const readSignature = async (): Promise<Bytes | undefined> => {
+  const key = signatureKey(await sha256OfBytes(manifestBytes));
+  const head = await bucket.fetch(bucket.url(key), { method: "HEAD" });
+  if (head.status === HTTP_NOT_FOUND) {
+    return undefined;
+  }
+  if (!head.ok) {
+    throw new Error(`HEAD ${key}: ${head.status}`);
+  }
+  if (Number(head.headers.get("content-length") ?? "0") > MAX_SIGNATURE_BYTES) {
+    throw new Error(
+      `Release ${releaseId} has a signature file that isn't one; nothing promoted`
+    );
+  }
+  return await read(key);
+};
+const signature = await readSignature();
 const problem = await releaseSignatureProblem(
   releaseId,
   manifestBytes,

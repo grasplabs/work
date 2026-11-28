@@ -162,7 +162,16 @@ describe("signing a release for CI's publish", () => {
       );
 
     const audited: unknown = JSON.parse(event?.detail ?? "{}");
+    // A job that calls no reusable workflow may come without one named.
+    const { job_workflow_ref: _direct, ...directClaims } = publishClaims(
+      release.manifest.commit
+    );
+    const direct = await ask(
+      release.manifestText,
+      await githubToken(directClaims)
+    );
     expect({
+      direct: direct.status,
       status: response.status,
       problem: await releaseSignatureProblem(
         release.id,
@@ -172,6 +181,7 @@ describe("signing a release for CI's publish", () => {
       ),
       audited,
     }).toStrictEqual({
+      direct: 200,
       status: 200,
       problem: undefined,
       audited: {

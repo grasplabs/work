@@ -43,10 +43,20 @@ const githubToken = async (audience: string): Promise<string> => {
   return tokenAnswer.parse(await answer.json()).value;
 };
 
-/** Signs release manifests, each its bytes as about to be published, with the signer the environment names. */
+const HTTP_CONFLICT = 409;
+
+/**
+ * Signs release manifests, each its bytes as about to be published, with
+ * the signer the environment names: the signature, or undefined when the
+ * signer says the release's id is published already (409), as another
+ * publish claimed it since its listing, or an earlier try of this one.
+ */
 export const releaseSignerFromEnv = () => {
   const signer = requireEnv("RELEASE_SIGNER_URL");
-  return async (releaseId: string, manifestBytes: Buffer): Promise<Buffer> => {
+  return async (
+    releaseId: string,
+    manifestBytes: Buffer
+  ): Promise<Buffer | undefined> => {
     const token = await githubToken(new URL(signer).origin);
     const init = {
       method: "POST",
@@ -61,6 +71,9 @@ export const releaseSignerFromEnv = () => {
       init,
       async (signal) => await fetch(signer, { ...init, signal })
     );
+    if (answer.status === HTTP_CONFLICT) {
+      return undefined;
+    }
     if (!answer.ok) {
       throw new Error(
         `The signer refused release ${releaseId}: ${answer.status} ${await answer.text()}; nothing published`
