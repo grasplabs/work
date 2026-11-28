@@ -216,6 +216,8 @@ const newerEngine = (): Engine => {
 const journalingEngine = (): Engine & { evictAfter?: string } => {
   const journal = new Map<string, unknown>();
   const attempts = new Map<string, number>();
+  // Each step's attempts that failed; one evicted failed nothing.
+  const failures = new Map<string, number>();
   const leases = new Set<string>();
   const engine: Engine & { evictAfter?: string } = {
     step: {
@@ -229,11 +231,17 @@ const journalingEngine = (): Engine & { evictAfter?: string } => {
         const key = `key:${name}`;
         leases.add(`${attempt}:${key}`);
         try {
-          const value = await fn({
-            attempt,
-            failedAttempts: attempt - 1,
-            idempotencyKey: key,
-          });
+          let value: unknown;
+          try {
+            value = await fn({
+              attempt,
+              failedAttempts: failures.get(name) ?? 0,
+              idempotencyKey: key,
+            });
+          } catch (error) {
+            failures.set(name, (failures.get(name) ?? 0) + 1);
+            throw error;
+          }
           if (engine.evictAfter === name) {
             throw new Error("The activation was evicted");
           }
