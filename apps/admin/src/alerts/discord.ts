@@ -251,6 +251,19 @@ const contentOf = (
     release,
     ...(organization === null ? [] : [channelField(organization)]),
   ];
+  if (event.kind === "deploy_set_aside") {
+    return {
+      what: "Set aside from its rollout",
+      about,
+      next: "Its deploys kept failing for the platform; the rollout goes on without it. Retry it on its Setup once what stopped it is fixed.",
+      fields: [
+        ...where,
+        field("Failure code", code(event.code, limits.fieldValue), false),
+        field("Since", relative(facts.at)),
+        stage,
+      ],
+    };
+  }
   return event.kind === "deploy_failed"
     ? {
         what: "Deploy failed",
@@ -287,6 +300,7 @@ export const embedOf = (facts: AlertFacts): DiscordEmbed => {
     facts.event.kind === "import_failed" ||
     facts.event.kind === "deploy_failed" ||
     facts.event.kind === "rollout_halted" ||
+    facts.event.kind === "deploy_set_aside" ||
     facts.event.kind === "rollout_blocked";
   const lines = [
     ...(facts.test ? [testLine, ""] : []),

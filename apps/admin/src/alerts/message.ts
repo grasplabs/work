@@ -114,6 +114,12 @@ const wordsOf = (
   }
   const organization =
     name === null ? event.clientId : `${name} (${event.clientId})`;
+  if (event.kind === "deploy_set_aside") {
+    return {
+      subject: `${organization} set aside from the rollout of ${event.releaseId}`,
+      text: `The deploys of release ${event.releaseId} to ${organization} kept failing for the platform, not the release (${event.code}), so it was set aside and the rollout goes on without it. Retry it on its Setup, or resume the rollout, once what stopped it is fixed.`,
+    };
+  }
   return event.kind === "deploy_failed"
     ? {
         subject: `${organization}: deploy of ${event.releaseId} failed`,

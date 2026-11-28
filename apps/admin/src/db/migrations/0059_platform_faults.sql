@@ -1,0 +1,1 @@
+ALTER TABLE `client_deploys` ADD `platform_faults` integer DEFAULT 0 NOT NULL;

@@ -438,6 +438,13 @@ export const clientDeploys = sqliteTable("client_deploys", {
    * pin), which never counts toward a rollout.
    */
   rolloutId: text("rollout_id").references(() => rollouts.id),
+  /**
+   * How many of the client's deploys for this rollout, right before this
+   * one, ended in a platform fault (a 429, a run never created): after a
+   * few in a row the rollout sets the client aside, alerted, and moves on
+   * (src/rollout/plan.ts). 0 outside a rollout.
+   */
+  platformFaults: integer("platform_faults").notNull().default(0),
 });
 
 /**

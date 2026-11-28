@@ -17,9 +17,11 @@
  *   `callsPerRun` for each run out; none while a 429 blocks the token.
  * - **Halt.** A running rollout halts once `failuresToHalt` organizations
  *   failed on it since it started or was last resumed (resuming clears
- *   its failures). A platform fault (`isPlatformFault`) never counts, and
- *   its organization is tried again; so is one that failed on the
- *   release for another rollout. Below the threshold an organization that
+ *   its failures), counting only organizations that still follow its
+ *   channel. A platform fault (`isPlatformFault`) never counts, and its
+ *   organization is tried again, until `platformFaultsToSetAside` in a
+ *   row set it aside, alerted, so it holds no one up; one that failed on
+ *   the release for another rollout is tried again too. Below the threshold an organization that
  *   failed on it waits for staff (`retryClient`), and the rollout goes on.
  * - **Done.** Once every organization following its channel runs the
  *   release and none of its runs is out.
@@ -37,11 +39,19 @@ import type { ChannelReleases, ClientFacts } from "./desired.ts";
 /** The fleet's limits, in one place. */
 export const rolloutLimits = {
   /**
-   * Runs out at once across the fleet. About 30 requests over about 2
-   * minutes each, so 16 make about 8 a minute: past the budget's 6.7, so
-   * the budget binds before the slots do.
+   * Runs out at once across the fleet. About 30 to 35 requests each over
+   * about 2 minutes, against Cloudflare's 1,200 per 5 minutes: 8 stay
+   * under it with nothing else to go by. Raise it to 16 only once the
+   * organization runs write the API's `Ratelimit` count to `api_budget`,
+   * so the budget binds before the slots do; until then no row exists and
+   * the budget reads as unknown (`budgetRoom`).
    */
-  maxInFlight: 16,
+  maxInFlight: 8,
+  /**
+   * Platform faults in a row on one organization after which its rollout
+   * sets it aside, alerted, until staff resume or retry it.
+   */
+  platformFaultsToSetAside: 3,
   /** Failures since a rollout started or was resumed that halt it. */
   failuresToHalt: 3,
   /** Requests of the token's window kept back for staff pages, drift reads and provisioning. */
@@ -61,6 +71,11 @@ export interface Organization extends ClientFacts {
   group: RolloutGroup;
   /** The people on its roster; 0 while unknown. */
   size: number;
+  /**
+   * How many of its deploys of the same release, for the same rollout (or
+   * none), ended in a platform fault in a row right before its last.
+   */
+  platformFaults: number;
 }
 
 /**
@@ -128,6 +143,8 @@ export interface PassPlan {
   blocked: boolean;
   /** In the order to start them. */
   admit: Admission[];
+  /** Organizations set aside now (`isSetAside`), with the fault that did it. */
+  setAside: { clientId: string; releaseId: string; code: string }[];
 }
 
 /** The platform's failure codes (`isPlatformFault`), besides Cloudflare's rate limit. */
@@ -164,11 +181,27 @@ export const isAdmissible = (
 const follows = (organization: Organization, channel: Channel): boolean =>
   organization.channel === channel && organization.pinnedReleaseId === null;
 
-/** Whether `organization` failed on `rollout` itself: what counts toward its halt. */
+/**
+ * Whether `organization` failed on `rollout` itself, and still follows
+ * its channel: what counts toward its halt. One pinned or moved since
+ * counts no more.
+ */
 const failedOn = (organization: Organization, rollout: Rollout): boolean =>
+  follows(organization, rollout.channel) &&
   organization.deploy?.status === "failed" &&
   organization.deploy.rolloutId === rollout.id &&
   !isPlatformFault(organization.deploy.error);
+
+/**
+ * Whether `organization`'s last deploy is a platform fault that ended
+ * `platformFaultsToSetAside` in a row: it isn't tried again until staff
+ * resume its rollout or retry it, and holds no one up. Never a failure
+ * of the release's.
+ */
+export const isSetAside = (organization: Organization): boolean =>
+  organization.deploy?.status === "failed" &&
+  isPlatformFault(organization.deploy.error) &&
+  organization.platformFaults + 1 >= rolloutLimits.platformFaultsToSetAside;
 
 /** `rollout`'s organizations, counted. */
 export const countsOf = (
@@ -238,7 +271,8 @@ const isWaiting = (
     !skip.has(organization.id) &&
     (state === "waiting" ||
       (state === "failed" &&
-        isPlatformFault(organization.deploy?.error ?? null))) &&
+        isPlatformFault(organization.deploy?.error ?? null) &&
+        !isSetAside(organization))) &&
     isAdmissible(organization, now)
   );
 };
@@ -261,6 +295,7 @@ const queueOf = (
         organization.running !== rollout.releaseId &&
         organization.deploy?.status !== "deploying" &&
         !failedOn(organization, rollout) &&
+        !isSetAside(organization) &&
         !skip.has(organization.id) &&
         isAdmissible(organization, now)
     )
@@ -323,11 +358,22 @@ export const planPass = (facts: PassFacts): PassPlan => {
       running.push(rollout);
     }
   }
+  const setAside = organizations.flatMap((organization) =>
+    isSetAside(organization) && organization.deploy !== null
+      ? [
+          {
+            clientId: organization.id,
+            releaseId: organization.deploy.releaseId,
+            code: organization.deploy.error ?? "",
+          },
+        ]
+      : []
+  );
   const blocked =
     budget.blockedUntil !== null &&
     budget.blockedUntil.getTime() > now.getTime();
   if (blocked) {
-    return { counts, halt, done, blocked, admit: [] };
+    return { counts, halt, done, blocked, admit: [], setAside };
   }
   let room = Math.min(
     rolloutLimits.maxInFlight - facts.inFlight,
@@ -385,5 +431,5 @@ export const planPass = (facts: PassFacts): PassPlan => {
       }
     }
   }
-  return { counts, halt, done, blocked, admit };
+  return { counts, halt, done, blocked, admit, setAside };
 };

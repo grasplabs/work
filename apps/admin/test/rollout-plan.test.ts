@@ -51,6 +51,7 @@ const org = (
   deploy: null,
   group: "normal",
   size: 0,
+  platformFaults: 0,
   ...overrides,
 });
 
@@ -245,7 +246,7 @@ describe("how many start at once", () => {
     const { passes } = simulate(factsOf(fleet(40)));
 
     expect(passes.map((admitted) => admitted.length)).toStrictEqual([
-      1, 2, 4, 8, 16, 9,
+      1, 2, 4, 8, 8, 8, 8, 1,
     ]);
   });
 
@@ -258,14 +259,16 @@ describe("how many start at once", () => {
     );
 
     const free = planPass(factsOf([...onIt, ...waiting]));
-    const busy = planPass(factsOf([...onIt, ...waiting], { inFlight: 10 }));
-    const full = planPass(factsOf([...onIt, ...waiting], { inFlight: 16 }));
+    const busy = planPass(factsOf([...onIt, ...waiting], { inFlight: 5 }));
+    const full = planPass(
+      factsOf([...onIt, ...waiting], { inFlight: rolloutLimits.maxInFlight })
+    );
 
     expect({
       free: free.admit.length,
       busy: busy.admit.length,
       full: full.admit.length,
-    }).toStrictEqual({ free: rolloutLimits.maxInFlight, busy: 6, full: 0 });
+    }).toStrictEqual({ free: rolloutLimits.maxInFlight, busy: 3, full: 0 });
   });
 
   it("takes rollouts in turn, Edge, Beta, then Stable, so none starves another", () => {
@@ -286,12 +289,13 @@ describe("how many start at once", () => {
     );
 
     expect(plan.admit.map(({ rolloutId }) => rolloutId)).toStrictEqual([
-      ...Array.from({ length: 5 }, () => [
+      ...Array.from({ length: 2 }, () => [
         "r-edge",
         "r-beta",
         "r-stable",
       ]).flat(),
       "r-edge",
+      "r-beta",
     ]);
   });
 
@@ -330,9 +334,9 @@ describe("how many start at once", () => {
       planPass(factsOf([...onIt, ...waiting], { budget, inFlight, now }));
 
     expect({
-      // 500 left: 200 kept back, 30 a run, from 0 to 10 out.
-      some: plan({ remaining: 500, blockedUntil: null }).admit.length,
-      busy: plan({ remaining: 500, blockedUntil: null }, 8).admit.length,
+      // 290 left: 200 kept back, 30 a run, from 0 to 3 out.
+      some: plan({ remaining: 290, blockedUntil: null }).admit.length,
+      busy: plan({ remaining: 290, blockedUntil: null }, 2).admit.length,
       none: plan({ remaining: 199, blockedUntil: null }).admit.length,
       barely: plan({ remaining: 229, blockedUntil: null }).admit.length,
       blocked: (({ blocked, admit }) => [blocked, admit])(
@@ -340,8 +344,8 @@ describe("how many start at once", () => {
       ),
       blockPassed: plan({ remaining: null, blockedUntil: now }).admit.length,
     }).toStrictEqual({
-      some: 11,
-      busy: 3,
+      some: 4,
+      busy: 2,
       none: 0,
       barely: 1,
       blocked: [true, []],
@@ -419,6 +423,81 @@ describe("when a rollout halts", () => {
       failed: 1,
       // The rollout's own failure waits for staff; the rest go again.
       retried: ["engine", "other-a", "other-b", "other-c", "rate", "taken"],
+    });
+  });
+
+  it("counts no failure of an organization pinned or moved since", () => {
+    const plan = planPass(
+      factsOf([
+        ...ofRollout(["a", "b"], "failed"),
+        ...ofRollout(["pinned"], "failed", { pinnedReleaseId: before }),
+        ...ofRollout(["moved"], "failed", { channel: "beta" }),
+        org("waiting"),
+      ])
+    );
+
+    expect([plan.halt, plan.counts.get("r-stable")?.failed]).toStrictEqual([
+      [],
+      2,
+    ]);
+  });
+
+  it("sets aside an organization after 3 platform faults in a row, and goes on to the next, never halting", () => {
+    // Over 30 passes, "a-stuck", the smallest, ends every run in a 429.
+    let organizations: Organization[] = [
+      org("a-stuck"),
+      ...Array.from({ length: 5 }, (_, index) =>
+        org(`b-${String(index)}`, { size: 1 })
+      ),
+    ];
+    const admitted: string[] = [];
+    const setAside: string[] = [];
+    let halted = false;
+    for (let pass = 0; pass < 30; pass += 1) {
+      const plan = planPass(factsOf(organizations));
+      halted ||= plan.halt.length > 0;
+      setAside.push(...plan.setAside.map(({ clientId }) => clientId));
+      const now = new Set(plan.admit.map(({ clientId }) => clientId));
+      admitted.push(...now);
+      organizations = organizations.map((organization) => {
+        if (!now.has(organization.id)) {
+          return organization;
+        }
+        const stuck = organization.id === "a-stuck";
+        const last = organization.deploy;
+        return {
+          ...organization,
+          running: stuck ? organization.running : release,
+          // As the claim counts them: a platform fault on the same
+          // release and rollout before this one.
+          platformFaults:
+            last?.status === "failed" && last.error === "cloudflare_429_10000"
+              ? organization.platformFaults + 1
+              : 0,
+          deploy: {
+            releaseId: release,
+            status: stuck ? ("failed" as const) : ("done" as const),
+            error: stuck ? "cloudflare_429_10000" : null,
+            rolloutId: "r-stable",
+          },
+        };
+      });
+    }
+
+    expect({
+      stuckStarts: admitted.filter((id) => id === "a-stuck").length,
+      othersDone: organizations
+        .filter(({ id }) => id !== "a-stuck")
+        .every(({ running }) => running === release),
+      halted,
+      // Reported by every pass from the third fault on: alerted once, by
+      // its key.
+      setAside: [...new Set(setAside)],
+    }).toStrictEqual({
+      stuckStarts: 3,
+      othersDone: true,
+      halted: false,
+      setAside: ["a-stuck"],
     });
   });
 

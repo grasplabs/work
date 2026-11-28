@@ -414,6 +414,13 @@
       "when": 1795817264031,
       "tag": "0058_alerts",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "6",
+      "when": 1795872317757,
+      "tag": "0059_platform_faults",
+      "breakpoints": true
     }
   ]
 }

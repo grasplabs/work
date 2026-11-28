@@ -699,6 +699,40 @@ describe("release channels", () => {
     }).toStrictEqual({ status: "running", started: 1 });
   });
 
+  it("sets aside an organization whose deploys ended in 3 platform faults in a row, tells it once, and starts the next", async () => {
+    const release = await placedRelease("feat(core): kept rate limited");
+    const [stuck = "", next = ""] = await waitingClients("edge", "s-aside", 2);
+    await releaseToEdge(env, [release]);
+    const rollout = await rolloutOf("edge");
+    if (rollout === null) {
+      throw new Error("Edge has no rollout");
+    }
+    // Its third 429 in a row, as the claims before counted them.
+    const now = new Date();
+    await db.insert(clientDeploys).values({
+      clientId: stuck,
+      releaseId: release,
+      runId: `deploy-${crypto.randomUUID().slice(0, 8)}`,
+      status: "failed",
+      error: "cloudflare_429_10000",
+      startedAt: now,
+      endedAt: now,
+      rolloutId: rollout.id,
+      platformFaults: 2,
+    });
+
+    await rolloutPass(env);
+    await rolloutPass(env);
+    const after = await rolloutOf("edge");
+
+    expect({
+      stuck: await startedOf([stuck]),
+      next: await startedOf([next]),
+      status: after?.status,
+      told: await db.$count(alerts, like(alerts.key, `aside:${stuck}:%`)),
+    }).toStrictEqual({ stuck: 0, next: 1, status: "running", told: 1 });
+  });
+
   it("refuses to promote a release past a channel where its rollout halted, until staff resume it there", async () => {
     const release = await placedRelease("feat(core): halted on edge");
     await releaseToEdge(env, [release]);
@@ -916,8 +950,8 @@ describe("release channels", () => {
     // Each has 10 on the release, so slow start leaves room for 11.
     await runOn(await waitingClients("edge", "e-on", 10), release);
     await runOn(await waitingClients("beta", "f-on", 10), release);
-    // 12 deploys out already, as an older admin started them: no rollout's.
-    const busy = await waitingClients("stable", "g-busy", 12);
+    // 4 deploys out already, as an older admin started them: no rollout's.
+    const busy = await waitingClients("stable", "g-busy", 4);
     const now = new Date();
     await db.insert(clientDeploys).values(
       busy.map((clientId) => ({
@@ -1074,7 +1108,8 @@ describe("release channels", () => {
       await runOn(await waitingClients("edge", `n-${what}-on`, 3), release);
       await releaseToEdge(env, [release]);
       const rollout = await rolloutOf("edge");
-      const failing = await waitingClients("stable", `n-${what}-fails`, 3);
+      // On the rollout's channel, so their failures count toward its halt.
+      const failing = await waitingClients("edge", `n-${what}-fails`, 3);
       const newer = await placedRelease(`feat(core): after ${what}`);
       // Right before each write after the pass's first (its self-heal):
       // the rollout halts, Edge moves on, or a third deploy of it fails.
@@ -1116,7 +1151,7 @@ describe("release channels", () => {
 
       await rolloutPass({ ...env, DB: racing });
 
-      await expect(startedOf(waiting)).resolves.toBe(0);
+      await expect(startedOf([...waiting, ...failing])).resolves.toBe(0);
     }
   );
 

@@ -47,8 +47,9 @@ const failedAtSchema = z.number().int().optional();
  * an organization whose deploy of a release failed, or that deployed one
  * after that; a channel's rollout that halted (`since` it started or was
  * last resumed: each halt its own); a 429 that blocks the deployer token
- * `until` then. Identifiers, codes and counts only, as the audit event
- * has them.
+ * `until` then; an organization set aside after platform faults in a
+ * row (`since` its last deploy started: each time its own). Identifiers,
+ * codes and counts only, as the audit event has them.
  */
 export const alertEventSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -84,6 +85,13 @@ export const alertEventSchema = z.discriminatedUnion("kind", [
     since: z.number().int(),
   }),
   z.object({ kind: z.literal("rollout_blocked"), until: z.number().int() }),
+  z.object({
+    kind: z.literal("deploy_set_aside"),
+    clientId: z.string(),
+    releaseId: z.string(),
+    code: z.string(),
+    since: z.number().int(),
+  }),
 ]);
 export type AlertEvent = z.infer<typeof alertEventSchema>;
 
@@ -118,6 +126,9 @@ const subjectOf = (event: AlertEvent): { key: string; failing: boolean } => {
   }
   if (event.kind === "rollout_blocked") {
     return { key: `blocked:${event.until}`, failing: true };
+  }
+  if (event.kind === "deploy_set_aside") {
+    return { key: `aside:${event.clientId}:${event.since}`, failing: true };
   }
   return "clientId" in event
     ? {

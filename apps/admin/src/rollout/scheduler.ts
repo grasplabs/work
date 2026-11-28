@@ -72,6 +72,7 @@ import type { DeployParams } from "./deploy.ts";
 import { isSecretsBehind } from "./desired.ts";
 import type { ChannelReleases, SharedByWorker } from "./desired.ts";
 import {
+  isPlatformFault,
   liveRolloutStatuses,
   planPass,
   platformFaultCodes,
@@ -126,6 +127,7 @@ const factColumns = {
   deployStatus: clientDeploys.status,
   deployError: clientDeploys.error,
   deployRolloutId: clientDeploys.rolloutId,
+  deployPlatformFaults: clientDeploys.platformFaults,
   deployRunId: clientDeploys.runId,
   deployStartedAt: clientDeploys.startedAt,
 };
@@ -165,6 +167,7 @@ const clientPage = async (
     channel: row.channel,
     pinnedReleaseId: row.pinnedReleaseId,
     group: row.group,
+    platformFaults: row.deployPlatformFaults ?? 0,
     size: row.size,
     running: row.running,
     secretsBehind: isSecretsBehind(deliveredShared(row.progress), desired),
@@ -269,11 +272,12 @@ const settled = async (
  * How many organizations failed on rollout `rolloutId`, platform faults
  * aside, as SQL: what the claim reads, so a failure that lands mid-pass
  * stops the claims after the one that halts it (`isHalting`). Of the
- * organizations the pass reads, active and placed, as the plan counts
- * them: one offboarded since never holds a rollout up.
+ * organizations the pass reads, active, placed and still following the
+ * rollout's channel, as the plan counts them: one offboarded, pinned or
+ * moved since never holds a rollout up.
  */
 const failedSql = (rolloutId: string) =>
-  sql`(SELECT COUNT(*) FROM ${clientDeploys} JOIN ${clients} ON ${clients.id} = ${clientDeploys.clientId} WHERE ${clients.status} = 'active' AND EXISTS (SELECT 1 FROM ${clientPlacements} WHERE ${clientPlacements.clientId} = ${clientDeploys.clientId}) AND ${clientDeploys.rolloutId} = ${rolloutId} AND ${clientDeploys.status} = 'failed' AND COALESCE(${clientDeploys.error}, '') NOT IN (SELECT value FROM json_each(${JSON.stringify(platformFaultCodes)})) AND substr(COALESCE(${clientDeploys.error}, ''), 1, ${rateLimitedPrefix.length}) != ${rateLimitedPrefix})`;
+  sql`(SELECT COUNT(*) FROM ${clientDeploys} JOIN ${clients} ON ${clients.id} = ${clientDeploys.clientId} WHERE ${clients.status} = 'active' AND ${clients.pinnedReleaseId} IS NULL AND ${clients.channel} = (SELECT ${rollouts.channel} FROM ${rollouts} WHERE ${rollouts.id} = ${rolloutId}) AND EXISTS (SELECT 1 FROM ${clientPlacements} WHERE ${clientPlacements.clientId} = ${clientDeploys.clientId}) AND ${clientDeploys.rolloutId} = ${rolloutId} AND ${clientDeploys.status} = 'failed' AND COALESCE(${clientDeploys.error}, '') NOT IN (SELECT value FROM json_each(${JSON.stringify(platformFaultCodes)})) AND substr(COALESCE(${clientDeploys.error}, ''), 1, ${rateLimitedPrefix.length}) != ${rateLimitedPrefix})`;
 
 /** A new organization run's id. */
 const newRunId = (): string =>
@@ -323,11 +327,21 @@ const claim = async (
   const asReadClient = sql`EXISTS (SELECT 1 FROM ${clients} WHERE ${clients.id} = ${row.id} AND ${clients.channel} = ${row.channel} AND ${clients.pinnedReleaseId} IS ${row.pinnedReleaseId})`;
   const claimable = sql`EXISTS (SELECT 1 FROM ${clientRuns} WHERE ${clientRuns.clientId} = ${row.id} AND ${clientRuns.runId} = ${runId}) AND ${rolloutRuns} AND ${asReadClient}`;
   const asRead = row.run?.runId;
+  // Platform faults in a row on this release for this rollout (or none),
+  // counting the one this replaces: what sets the client aside.
+  const last = row.deploy;
+  const platformFaults =
+    last?.status === "failed" &&
+    last.releaseId === releaseId &&
+    last.rolloutId === rolloutId &&
+    isPlatformFault(last.error)
+      ? row.platformFaults + 1
+      : 0;
   const deploy =
     asRead === undefined
       ? db.insert(clientDeploys).select(
           // Every column, in the table's order.
-          sql`SELECT ${row.id}, ${releaseId}, ${runId}, 'deploying', NULL, ${now.getTime()}, NULL, ${rolloutId} WHERE ${claimable} AND NOT EXISTS (SELECT 1 FROM ${clientDeploys} WHERE ${clientDeploys.clientId} = ${row.id})`
+          sql`SELECT ${row.id}, ${releaseId}, ${runId}, 'deploying', NULL, ${now.getTime()}, NULL, ${rolloutId}, ${platformFaults} WHERE ${claimable} AND NOT EXISTS (SELECT 1 FROM ${clientDeploys} WHERE ${clientDeploys.clientId} = ${row.id})`
         )
       : db
           .update(clientDeploys)
@@ -339,6 +353,7 @@ const claim = async (
             startedAt: now,
             endedAt: null,
             rolloutId,
+            platformFaults,
           })
           .where(
             and(
@@ -769,6 +784,30 @@ const admitAll = async (
   }
 };
 
+/**
+ * Alerts of each organization `plan` sets aside after platform faults in
+ * a row: once each time, by its last deploy's start, however many passes
+ * see it.
+ */
+const alertSetAside = async (
+  db: AdminDatabase,
+  organizations: readonly ClientRow[],
+  plan: PassPlan
+): Promise<void> => {
+  const rows = new Map(organizations.map((row) => [row.id, row]));
+  for (const { clientId, releaseId, code } of plan.setAside) {
+    const since = rows.get(clientId)?.run?.startedAt.getTime() ?? 0;
+    // oxlint-disable-next-line no-await-in-loop -- a handful at most
+    await alert(db, {
+      kind: "deploy_set_aside",
+      clientId,
+      releaseId,
+      code,
+      since,
+    });
+  }
+};
+
 /** One pass over every channel: steps 1 to 4 of the file's comment. */
 const passOnce = async (
   env: Env,
@@ -804,6 +843,7 @@ const passOnce = async (
   };
   const plan = planPass(facts);
   await recordRollouts(db, current, plan, now);
+  await alertSetAside(db, organizations, plan);
   if (plan.blocked && facts.budget.blockedUntil !== null) {
     await recordBlocked(db, facts.budget.blockedUntil);
   }
